@@ -6,7 +6,7 @@
 
 #include "vision_algo.h"
 
-#include "common/va_internal.h"
+#include "va_internal.h"
 
 #include <new>
 #include <cstring>

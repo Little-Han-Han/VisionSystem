@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "common/va_types.h"
+#include "va_types.h"
 
 namespace va {
 

@@ -1,6 +1,6 @@
 // 图像质量评价与简单测量
-#include "common/va_internal.h"
-#include "common/va_error.h"
+#include "va_internal.h"
+#include "va_error.h"
 
 #include <cstdlib>
 #include <cmath>

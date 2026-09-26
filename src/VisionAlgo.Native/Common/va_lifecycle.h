@@ -2,7 +2,7 @@
 #ifndef VA_LIFECYCLE_H
 #define VA_LIFECYCLE_H
 
-#include "common/va_export.h"
+#include "va_export.h"
 
 #ifdef __cplusplus
 extern "C" {

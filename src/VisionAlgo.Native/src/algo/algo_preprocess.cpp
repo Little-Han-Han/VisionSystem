@@ -1,6 +1,6 @@
 // 预处理：灰度化 → 高斯模糊 → 二值化 → 形态学
-#include "common/va_internal.h"
-#include "common/va_error.h"
+#include "va_internal.h"
+#include "va_error.h"
 
 namespace va {
 

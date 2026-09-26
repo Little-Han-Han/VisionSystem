@@ -59,7 +59,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_WIN64;_DEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <!-- 源文件含中文注释，按 UTF-8 解析，避免 GBK 代码页下出现 C4819 / C2447 -->
@@ -84,7 +84,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <!-- 源文件含中文注释，按 UTF-8 解析，避免 GBK 代码页下出现 C4819 / C2447 -->
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -103,28 +103,33 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
-  <!-- 对外头文件：common = 公共定义，algo = 各类算法 -->
+  <!-- 头文件夹：include 下放对外头文件，其中 algo 子目录按算法类别分文件 -->
   <ItemGroup>
     <ClInclude Include="include\vision_algo.h" />
-    <ClInclude Include="include\common\va_export.h" />
-    <ClInclude Include="include\common\va_error.h" />
-    <ClInclude Include="include\common\va_types.h" />
-    <ClInclude Include="include\common\va_lifecycle.h" />
     <ClInclude Include="include\algo\va_preprocess.h" />
     <ClInclude Include="include\algo\va_blob.h" />
     <ClInclude Include="include\algo\va_fit.h" />
     <ClInclude Include="include\algo\va_match.h" />
     <ClInclude Include="include\algo\va_measure.h" />
   </ItemGroup>
-  <!-- 实现：common = 工具与内部头，algo = 各算法，根下是导出分发层 -->
+  <!-- 源文件夹：src 下放实现，其中 algo 子目录对应各算法头文件 -->
   <ItemGroup>
     <ClCompile Include="src\vision_algo.cpp" />
-    <ClCompile Include="src\common\va_internal.cpp" />
     <ClCompile Include="src\algo\algo_preprocess.cpp" />
     <ClCompile Include="src\algo\algo_blob.cpp" />
     <ClCompile Include="src\algo\algo_fit.cpp" />
     <ClCompile Include="src\algo\algo_match.cpp" />
     <ClCompile Include="src\algo\algo_measure.cpp" />
+  </ItemGroup>
+  <!-- Common 文件夹：导出宏、错误码、公共类型、生命周期与内部工具，
+       头文件与源文件同目录，被 include 与 src 共同引用 -->
+  <ItemGroup>
+    <ClInclude Include="Common\va_export.h" />
+    <ClInclude Include="Common\va_error.h" />
+    <ClInclude Include="Common\va_types.h" />
+    <ClInclude Include="Common\va_lifecycle.h" />
+    <ClInclude Include="Common\va_internal.h" />
+    <ClCompile Include="Common\va_internal.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\..\ThirdParty\HikVision\README.md" />

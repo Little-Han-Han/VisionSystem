@@ -3,8 +3,8 @@
 #ifndef VA_MATCH_H
 #define VA_MATCH_H
 
-#include "common/va_export.h"
-#include "common/va_types.h"
+#include "va_export.h"
+#include "va_types.h"
 
 #ifdef __cplusplus
 extern "C" {

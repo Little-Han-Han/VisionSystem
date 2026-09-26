@@ -21,10 +21,10 @@
 #ifndef VISION_ALGO_H
 #define VISION_ALGO_H
 
-#include "common/va_export.h"
-#include "common/va_error.h"
-#include "common/va_types.h"
-#include "common/va_lifecycle.h"
+#include "va_export.h"
+#include "va_error.h"
+#include "va_types.h"
+#include "va_lifecycle.h"
 
 #include "algo/va_preprocess.h"
 #include "algo/va_blob.h"

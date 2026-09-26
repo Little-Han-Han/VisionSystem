@@ -1,5 +1,5 @@
 // 公共工具实现：图像结构转换、灰度化、二值化、轮廓提取、错误记录。
-#include "common/va_internal.h"
+#include "va_internal.h"
 
 #include <cstring>
 #include <cmath>

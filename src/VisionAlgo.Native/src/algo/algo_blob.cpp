@@ -1,6 +1,6 @@
 // 连通域分析
-#include "common/va_internal.h"
-#include "common/va_error.h"
+#include "va_internal.h"
+#include "va_error.h"
 
 namespace va {
 

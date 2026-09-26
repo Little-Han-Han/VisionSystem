@@ -2,8 +2,8 @@
 #ifndef VA_BLOB_H
 #define VA_BLOB_H
 
-#include "common/va_export.h"
-#include "common/va_types.h"
+#include "va_export.h"
+#include "va_types.h"
 
 #ifdef __cplusplus
 extern "C" {

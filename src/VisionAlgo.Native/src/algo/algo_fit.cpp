@@ -1,6 +1,6 @@
 // 几何拟合：对最大轮廓做圆 / 直线拟合
-#include "common/va_internal.h"
-#include "common/va_error.h"
+#include "va_internal.h"
+#include "va_error.h"
 
 #include <cfloat>
 #include <cmath>

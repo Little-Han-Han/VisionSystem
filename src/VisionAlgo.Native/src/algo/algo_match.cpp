@@ -1,6 +1,6 @@
 // 模板训练与匹配（归一化相关系数）
-#include "common/va_internal.h"
-#include "common/va_error.h"
+#include "va_internal.h"
+#include "va_error.h"
 
 #include <algorithm>
 

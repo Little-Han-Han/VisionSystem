@@ -361,3 +361,29 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ============================================================
+# 本项目自定义规则
+# ============================================================
+
+# WorkBuddy 工作区数据（会话记录、项目记忆等，属于本机私有数据）
+.workbuddy/
+
+# 测试图片：体积大且与源码无关，不入库
+*.bmp
+1_2.bmp
+TestImages/
+test_images/
+
+# 第三方依赖的二进制运行时
+# OpenCV 的 opencv_world455d.dll 约 122MB，远超 GitHub 单文件 100MB 上限，
+# 因此 bin 下的 DLL 不入库；获取方式见 ThirdParty/README.md。
+# 头文件与 .lib 体积很小（各数 MB），保留在仓库中以便 clone 后直接编译。
+ThirdParty/**/bin/
+ThirdParty/**/*.dll
+ThirdParty/**/*.pdb
+
+# 例外：标准模板里的 `x64/` 规则会把 ThirdParty/OpenCV/lib/x64 一并忽略，
+# 导致 clone 后缺少 .lib 无法编译。这里把它放行（约 6.5MB，体积可接受）。
+!ThirdParty/**/lib/x64/
+!ThirdParty/**/lib/x64/*.lib
