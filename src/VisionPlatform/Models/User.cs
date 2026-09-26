@@ -33,7 +33,7 @@ namespace VisionPlatform.Models
         private static readonly Dictionary<string, KeyValuePair<string, string>> Accounts =
             new Dictionary<string, KeyValuePair<string, string>>(StringComparer.OrdinalIgnoreCase)
             {
-                { "admin",    new KeyValuePair<string, string>("123456", "Admin") },
+                { "admin",    new KeyValuePair<string, string>("", "Admin") },
                 { "operator", new KeyValuePair<string, string>("111111", "Operator") }
             };
 
