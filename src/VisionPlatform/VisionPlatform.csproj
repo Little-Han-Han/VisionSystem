@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{3F2A1B4C-3001-4A7E-9D21-6E8B5C4A3001}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>VisionPlatform</RootNamespace>
+    <AssemblyName>VisionPlatform</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <LangVersion>latest</LangVersion>
+    <!-- 调用的算法库是 x64，主程序必须同为 x64 -->
+    <PlatformTarget>x64</PlatformTarget>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Camera\CameraInfo.cs" />
+    <Compile Include="Camera\CameraManager.cs" />
+    <Compile Include="Camera\HikCamera.cs" />
+    <Compile Include="Camera\ICamera.cs" />
+    <Compile Include="Camera\SimCamera.cs" />
+    <Compile Include="Communication\ModbusTcpClient.cs" />
+    <Compile Include="Communication\TcpClientSession.cs" />
+    <Compile Include="Communication\TcpServerSession.cs" />
+    <Compile Include="Core\AppPaths.cs" />
+    <Compile Include="Core\Json.cs" />
+    <Compile Include="Core\Logger.cs" />
+    <Compile Include="Core\OpResult.cs" />
+    <Compile Include="Models\User.cs" />
+    <Compile Include="Native\VisionAlgo.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Recipe\Recipe.cs" />
+    <Compile Include="Recipe\RecipeStore.cs" />
+    <Compile Include="UI\AlgoForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\AlgoForm.Designer.cs">
+      <DependentUpon>AlgoForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\CameraForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\CameraForm.Designer.cs">
+      <DependentUpon>CameraForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\CommForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\CommForm.Designer.cs">
+      <DependentUpon>CommForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\LoginForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\LoginForm.Designer.cs">
+      <DependentUpon>LoginForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\RecipeForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\RecipeForm.Designer.cs">
+      <DependentUpon>RecipeForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\SplashForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\SplashForm.Designer.cs">
+      <DependentUpon>SplashForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Vision\InspectionConfig.cs" />
+    <Compile Include="Vision\InspectionEngine.cs" />
+    <Compile Include="Vision\InspectionResult.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionSystem.Controls\VisionSystem.Controls.csproj">
+      <Project>{3F2A1B4C-1001-4A7E-9D21-6E8B5C4A2001}</Project>
+      <Name>VisionSystem.Controls</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <!-- 把 C++ 算法库及其 OpenCV 运行时复制到主程序输出目录 -->
+    <PostBuildEvent>xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\VisionAlgo.Native.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
+xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\opencv_world455*.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
+exit /b 0</PostBuildEvent>
+  </PropertyGroup>
+</Project>
