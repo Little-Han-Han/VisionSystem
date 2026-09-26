@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    解决方案资源管理器中的文件夹层级由本文件决定。
+    项目里新增文件后，如果没有在本文件登记，它就会平铺在项目根目录下。
+  -->
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\algo">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\algo">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Common">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty">
+      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000006}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+
+  <!-- 头文件夹 -->
+  <ItemGroup>
+    <ClInclude Include="include\vision_algo.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_preprocess.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_blob.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_fit.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_match.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_measure.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+  </ItemGroup>
+
+  <!-- 源文件夹 -->
+  <ItemGroup>
+    <ClCompile Include="src\vision_algo.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_preprocess.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_blob.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_fit.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_match.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_measure.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+  </ItemGroup>
+
+  <!-- Common 文件夹：公共头文件与实现 -->
+  <ItemGroup>
+    <ClInclude Include="Common\va_export.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\va_error.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\va_types.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\va_lifecycle.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\va_internal.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClCompile Include="Common\va_internal.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+  </ItemGroup>
+
+  <!-- 依赖说明文档 -->
+  <ItemGroup>
+    <Text Include="..\..\ThirdParty\README.md">
+      <Filter>ThirdParty</Filter>
+    </Text>
+    <Text Include="..\..\ThirdParty\HikVision\README.md">
+      <Filter>ThirdParty</Filter>
+    </Text>
+  </ItemGroup>
+</Project>

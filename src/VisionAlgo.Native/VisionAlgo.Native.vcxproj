@@ -131,7 +131,9 @@
     <ClInclude Include="Common\va_internal.h" />
     <ClCompile Include="Common\va_internal.cpp" />
   </ItemGroup>
+  <!-- 依赖说明（在解决方案资源管理器中归入 ThirdParty 文件夹，见 .filters） -->
   <ItemGroup>
+    <Text Include="..\..\ThirdParty\README.md" />
     <Text Include="..\..\ThirdParty\HikVision\README.md" />
   </ItemGroup>
 
