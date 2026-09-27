@@ -23,7 +23,12 @@ namespace VisionPlatform
             Application.SetCompatibleTextRenderingDefault(false);
 
             AppPaths.Ensure();
+            SettingsStore.Load();
             Logger.Info("===== VisionPlatform 启动 =====");
+
+            // 启动时按系统设置的保留天数清理一次历史图片
+            int cleaned = ImageStore.Cleanup();
+            if (cleaned > 0) Logger.Info("启动清理：删除过期图片 " + cleaned + " 个");
 
             // ---------- 启动画面 ----------
             SplashForm splash = new SplashForm();

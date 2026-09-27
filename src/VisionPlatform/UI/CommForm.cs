@@ -47,12 +47,19 @@ namespace VisionPlatform.UI
         // ---------- TCP 客户端 ----------
         private void OnClientConnect(object sender, EventArgs e)
         {
-            Log(_client.Connect(txtHost.Text, (int)numClientPort.Value).Message);
+            var r = _client.Connect(txtHost.Text, (int)numClientPort.Value);
+
+            // 同步到全局通讯状态，供主界面判断"通讯是否正常"
+            CommState.TcpClientConnected = r.Success;
+            if (r.Success) CommState.ClearError(); else CommState.SetError(r.Message);
+
+            Log(r.Message);
         }
 
         private void OnClientDisconnect(object sender, EventArgs e)
         {
             _client.Disconnect();
+            CommState.TcpClientConnected = false;
             Log("客户端已断开");
         }
 
@@ -65,12 +72,15 @@ namespace VisionPlatform.UI
         // ---------- TCP 服务端 ----------
         private void OnServerStart(object sender, EventArgs e)
         {
-            Log(_server.Start((int)numServerPort.Value).Message);
+            var r = _server.Start((int)numServerPort.Value);
+            CommState.TcpServerRunning = r.Success;
+            Log(r.Message);
         }
 
         private void OnServerStop(object sender, EventArgs e)
         {
             _server.Stop();
+            CommState.TcpServerRunning = false;
             Log("服务端已停止");
         }
 
@@ -82,7 +92,12 @@ namespace VisionPlatform.UI
         // ---------- Modbus ----------
         private void OnModbusConnect(object sender, EventArgs e)
         {
-            Log("Modbus " + _modbus.Connect(txtMbHost.Text, (int)numMbPort.Value).Message);
+            var r = _modbus.Connect(txtMbHost.Text, (int)numMbPort.Value);
+
+            CommState.ModbusConnected = r.Success;
+            if (r.Success) CommState.ClearError(); else CommState.SetError(r.Message);
+
+            Log("Modbus " + r.Message);
         }
 
         private void OnModbusRead(object sender, EventArgs e)
@@ -90,6 +105,7 @@ namespace VisionPlatform.UI
             if (!_modbus.IsConnected)
             {
                 var c = _modbus.Connect(txtMbHost.Text, (int)numMbPort.Value);
+                CommState.ModbusConnected = c.Success;
                 if (!c.Success) { Log("Modbus " + c.Message); return; }
             }
 
@@ -107,6 +123,7 @@ namespace VisionPlatform.UI
             if (!_modbus.IsConnected)
             {
                 var c = _modbus.Connect(txtMbHost.Text, (int)numMbPort.Value);
+                CommState.ModbusConnected = c.Success;
                 if (!c.Success) { Log("Modbus " + c.Message); return; }
             }
 

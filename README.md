@@ -27,7 +27,8 @@
 - **通讯**：TCP 客户端/服务端、`ModbusTcpClient`（自行实现 MBAP+PDU，支持 0x03/0x06/0x10）
 - **配方**：`Recipe` + `RecipeStore`，JSON 存取、当前配方切换自动同步参数
 - **算法**：参数编辑 + 离线测试，**支持打开本地图片**（无需相机即可调试）
-- **主运行界面** `MainForm`：多显示视图（1/2/4）、单帧采集与多相机同步采集、循环运行/暂停/停止、数据统计（总数/OK/NG/良率/节拍）、运行日志
+- **系统设置**：图片保存路径、保存格式（PNG/JPEG/BMP/TIFF）、保留天数（自动清理过期图片）、检测后自动保存与仅存 NG、循环运行前是否要求通讯已连接
+- **主运行界面** `MainForm`：布局可调的多显示视图（1x1 / 1x2 / 2x1 / 2x2 / 3x2 / 3x3，最多 9 个）、**每个视图可单独绑定相机**、单帧采集与多相机同步采集、循环运行/暂停/停止、数据统计（总数/OK/NG/良率/节拍）、运行日志
 
 ### C++ 算法库（VisionAlgo.Native）
 预处理、Blob 分析、清晰度（边缘/模板）、圆拟合、直线拟合、模板匹配。导出为 x64 DLL，由 C# 通过唯一 P/Invoke 边界调用。
@@ -93,15 +94,18 @@ VisionSystem/                              唯一解决方案根目录
     │   └── Program.cs
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
-        ├── Core/                          Logger / AppPaths / Json / OpResult
+        ├── Core/                          Logger / AppPaths / Json / OpResult /
+        │                                 AppSettings（系统设置 + SettingsStore）/ ImageStore（存图与清理）
         ├── Native/                        VisionAlgo（P/Invoke 封装 + 托管结果类型）
         ├── Camera/                        ICamera / SimCamera / HikCamera / CameraManager / CameraInfo
-        ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient
+        ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient /
+        │                                 CommState（通讯全局状态）
         ├── Recipe/                        Recipe / RecipeStore
         ├── Vision/                        InspectionConfig / InspectionResult / InspectionEngine
         ├── Models/                        User
         └── UI/                            MainForm / CameraForm / AlgoForm / CommForm /
-                                           RecipeForm / LoginForm / SplashForm（各自 .cs + .Designer.cs）
+                                           RecipeForm / SettingsForm / LoginForm / SplashForm
+                                           （各自 .cs + .Designer.cs）
 ```
 
 > **说明**：所有窗体均采用 **Designer 模式**，拆分为 `XxxForm.cs`（业务逻辑）与 `XxxForm.Designer.cs`（布局），可在 VS 中直接拖拽调整界面。C++ 项目通过 `.vcxproj.filters` 维护解决方案资源管理器中的文件夹层级。
@@ -151,13 +155,13 @@ build.bat Release    :: 编译 Release | x64
 |---|---|---|
 | 算法层 | `VisionAlgo.Native` | C++ / OpenCV 实现：预处理、Blob、清晰度、圆/直线拟合、模板匹配 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs` | 唯一接触 C++ 的地方，结构体一一映射、零拷贝传入、输出由 C# 分配 |
-| 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult |
+| 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult / AppSettings / ImageStore |
 |  | `VisionPlatform/Camera` | 相机接口与模拟/海康实现、相机管理 |
-|  | `VisionPlatform/Communication` | TCP 客户端/服务端、Modbus TCP |
+|  | `VisionPlatform/Communication` | TCP 客户端/服务端、Modbus TCP、`CommState`（通讯全局状态） |
 |  | `VisionPlatform/Recipe` | 配方模型与 JSON 存储 |
 |  | `VisionPlatform/Vision` | 检测配置、`InspectionEngine` 流程编排与 OK/NG 判定 |
 | 显示层 | `VisionSystem.Controls` | 图像显示、几何图形、OpenCV 互操作 |
-| 表现层 | `VisionPlatform/UI` | 登录、启动、主运行界面及各功能窗体 |
+| 表现层 | `VisionPlatform/UI` | 登录、启动、主运行界面、系统设置及各功能窗体 |
 
 > 界面不直接碰算法，算法不认识界面。中间仅靠 `Native/VisionAlgo.cs` 这一道 P/Invoke 边界隔离。
 

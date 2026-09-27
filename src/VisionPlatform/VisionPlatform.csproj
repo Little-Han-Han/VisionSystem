@@ -49,10 +49,13 @@
     <Compile Include="Camera\HikCamera.cs" />
     <Compile Include="Camera\ICamera.cs" />
     <Compile Include="Camera\SimCamera.cs" />
+    <Compile Include="Communication\CommState.cs" />
     <Compile Include="Communication\ModbusTcpClient.cs" />
     <Compile Include="Communication\TcpClientSession.cs" />
     <Compile Include="Communication\TcpServerSession.cs" />
     <Compile Include="Core\AppPaths.cs" />
+    <Compile Include="Core\AppSettings.cs" />
+    <Compile Include="Core\ImageStore.cs" />
     <Compile Include="Core\Json.cs" />
     <Compile Include="Core\Logger.cs" />
     <Compile Include="Core\OpResult.cs" />
@@ -97,6 +100,12 @@
     </Compile>
     <Compile Include="UI\RecipeForm.Designer.cs">
       <DependentUpon>RecipeForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\SettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\SettingsForm.Designer.cs">
+      <DependentUpon>SettingsForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\SplashForm.cs">
       <SubType>Form</SubType>

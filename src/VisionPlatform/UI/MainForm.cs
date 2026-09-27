@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using VisionPlatform.Camera;
+using VisionPlatform.Communication;
 using VisionPlatform.Core;
 using VisionPlatform.Native;
 using VisionPlatform.Recipe;
@@ -15,14 +16,31 @@ using VisionSystem.Controls.Geometry;
 namespace VisionPlatform.UI
 {
     /// <summary>
-    /// 主运行界面：多相机、多显示视图、循环运行 / 暂停、数据统计、运行日志。
-    /// 相机管理、算法参数、通讯、配方通过工具栏按钮打开各自的子窗体。
+    /// 主运行界面：多相机、多显示视图（可切换布局、可把相机绑定到指定视图）、
+    /// 循环运行 / 暂停、数据统计、运行日志。
+    /// 相机管理、算法参数、通讯、配方、系统设置通过工具栏按钮打开各自的子窗体。
     /// 布局全部由 MainForm.Designer.cs 生成，可在 VS 设计器中直接调整。
     /// </summary>
     public partial class MainForm : Form
     {
+        /// <summary>布局预设，每项为「行数, 列数」。</summary>
+        private static readonly int[,] LayoutPresets = new int[,]
+        {
+            { 1, 1 },   // 1 视图
+            { 1, 2 },   // 2 视图（横向）
+            { 2, 1 },   // 2 视图（纵向）
+            { 2, 2 },   // 4 视图
+            { 3, 2 },   // 6 视图
+            { 3, 3 }    // 9 视图
+        };
+
         private readonly List<ImageViewer> _views = new List<ImageViewer>();
         private readonly List<Label> _captions = new List<Label>();
+        private readonly List<ComboBox> _bindCombos = new List<ComboBox>();
+
+        private int _rows;
+        private int _cols;
+        private bool _initializing;
 
         private bool _running;
         private bool _paused;
@@ -40,28 +58,72 @@ namespace VisionPlatform.UI
 
         public MainForm()
         {
+            _initializing = true;
+
             InitializeComponent();
 
-            BuildViews(1);
-            tsBtnView1.Checked = true;
+            InitLayoutCombo();
+            BuildViews(1, 1);
 
             RefreshCameraList();
             Logger.Logged += OnLogged;
             RecipeStore.CurrentChanged += (s, e) => UpdateStatus();
+            CameraManager.Instance.CurrentChanged += (s, e) => RefreshCameraList();
+            SettingsStore.Changed += (s, e) => UpdateStatus();
+
+            _initializing = false;
 
             UpdateStatus();
             UpdateStats();
         }
 
-        #region 视图
-
-        /// <summary>重建显示视图：1 个 / 2 个 / 4 个（2x2）。</summary>
-        private void BuildViews(int count)
+        /// <summary>视图绑定下拉框的条目；CameraId 为空表示「自动分配」。</summary>
+        private sealed class BindItem
         {
-            int cols, rows;
-            if (count <= 1) { cols = 1; rows = 1; }
-            else if (count == 2) { cols = 2; rows = 1; }
-            else { cols = 2; rows = 2; }
+            public readonly string CameraId;
+            public readonly string Name;
+
+            public BindItem(string cameraId, string name)
+            {
+                CameraId = cameraId;
+                Name = name;
+            }
+
+            public override string ToString() { return Name; }
+        }
+
+        #region 视图与布局
+
+        private void InitLayoutCombo()
+        {
+            tsComboLayout.BeginUpdate();
+            tsComboLayout.Items.Clear();
+            tsComboLayout.Items.Add("1 x 1");
+            tsComboLayout.Items.Add("1 x 2");
+            tsComboLayout.Items.Add("2 x 1");
+            tsComboLayout.Items.Add("2 x 2");
+            tsComboLayout.Items.Add("3 x 2");
+            tsComboLayout.Items.Add("3 x 3");
+
+            int idx = SettingsStore.Current.LayoutIndex;
+            if (idx < 0 || idx >= tsComboLayout.Items.Count) idx = 0;
+            tsComboLayout.SelectedIndex = idx;
+            tsComboLayout.EndUpdate();
+        }
+
+        /// <summary>重建显示视图网格（rows 行 × cols 列），并尽量恢复原有的相机绑定。</summary>
+        private void BuildViews(int rows, int cols)
+        {
+            if (rows <= 0) rows = 1;
+            if (cols <= 0) cols = 1;
+
+            if (_rows == rows && _cols == cols && _views.Count == rows * cols && _views.Count > 0)
+                return;
+
+            // 记住原有绑定，重建后按相机 Id 恢复
+            var previous = new List<string>();
+            foreach (ComboBox cb in _bindCombos)
+                previous.Add(GetBindId(cb));
 
             tableViews.SuspendLayout();
             tableViews.Controls.Clear();
@@ -72,6 +134,7 @@ namespace VisionPlatform.UI
             }
             _views.Clear();
             _captions.Clear();
+            _bindCombos.Clear();
 
             tableViews.ColumnCount = cols;
             tableViews.RowCount = rows;
@@ -85,60 +148,129 @@ namespace VisionPlatform.UI
             for (int i = 0; i < rows; i++)
                 tableViews.RowStyles.Add(new RowStyle(SizeType.Percent, rowPct));
 
-            for (int i = 0; i < cols * rows; i++)
+            for (int i = 0; i < rows * cols; i++)
             {
                 var cell = new Panel();
                 cell.Dock = DockStyle.Fill;
                 cell.Margin = new Padding(2);
                 cell.BackColor = Color.FromArgb(24, 24, 30);
 
+                // 顶部条：视图名 + 相机绑定下拉框
+                var header = new Panel();
+                header.Dock = DockStyle.Top;
+                header.Height = 27;
+                header.BackColor = Color.FromArgb(24, 24, 30);
+
                 var caption = new Label();
-                caption.Dock = DockStyle.Top;
-                caption.Height = 20;
+                caption.Dock = DockStyle.Left;
+                caption.Width = 62;
                 caption.ForeColor = Color.Silver;
                 caption.TextAlign = ContentAlignment.MiddleLeft;
                 caption.Text = "  视图 " + (i + 1);
+
+                var bind = new ComboBox();
+                bind.Dock = DockStyle.Fill;
+                bind.DropDownStyle = ComboBoxStyle.DropDownList;
+                bind.BackColor = Color.FromArgb(30, 30, 38);
+                bind.ForeColor = Color.Gainsboro;
+                bind.FlatStyle = FlatStyle.Flat;
+
+                // Fill 控件先加，Left 控件后加，保证左侧标签先占位
+                header.Controls.Add(bind);
+                header.Controls.Add(caption);
 
                 var viewer = new ImageViewer();
                 viewer.Dock = DockStyle.Fill;
                 viewer.ShowHud = true;
                 viewer.Options.ShowCrosshair = true;
 
+                // 同样：Fill 控件先加，Top 控件后加
                 cell.Controls.Add(viewer);
-                cell.Controls.Add(caption);
+                cell.Controls.Add(header);
 
                 _views.Add(viewer);
                 _captions.Add(caption);
+                _bindCombos.Add(bind);
 
                 tableViews.Controls.Add(cell, i % cols, i / cols);
             }
 
+            _rows = rows;
+            _cols = cols;
+
+            RefreshBindCombos();
+
+            for (int i = 0; i < _bindCombos.Count && i < previous.Count; i++)
+                SetBindId(_bindCombos[i], previous[i]);
+
             tableViews.ResumeLayout(true);
+            UpdateStatus();
         }
 
-        private void OnLayout1(object sender, EventArgs e)
+        private void OnLayoutChanged(object sender, EventArgs e)
         {
-            SetLayoutChecked(tsBtnView1);
-            BuildViews(1);
+            int idx = tsComboLayout.SelectedIndex;
+            if (idx < 0) return;
+            if (idx >= LayoutPresets.GetLength(0)) idx = 0;
+
+            BuildViews(LayoutPresets[idx, 0], LayoutPresets[idx, 1]);
+
+            if (_initializing) return;
+
+            AppSettings s = SettingsStore.Current.Clone();
+            s.LayoutIndex = idx;
+            SettingsStore.Save(s);
         }
 
-        private void OnLayout2(object sender, EventArgs e)
+        private static string GetBindId(ComboBox cb)
         {
-            SetLayoutChecked(tsBtnView2);
-            BuildViews(2);
+            BindItem item = cb.SelectedItem as BindItem;
+            return item != null ? item.CameraId : "";
         }
 
-        private void OnLayout4(object sender, EventArgs e)
+        private static void SetBindId(ComboBox cb, string cameraId)
         {
-            SetLayoutChecked(tsBtnView4);
-            BuildViews(4);
+            if (string.IsNullOrEmpty(cameraId))
+            {
+                if (cb.Items.Count > 0) cb.SelectedIndex = 0;
+                return;
+            }
+
+            for (int i = 0; i < cb.Items.Count; i++)
+            {
+                BindItem item = cb.Items[i] as BindItem;
+                if (item != null && item.CameraId == cameraId)
+                {
+                    cb.SelectedIndex = i;
+                    return;
+                }
+            }
+
+            if (cb.Items.Count > 0) cb.SelectedIndex = 0;
         }
 
-        private void SetLayoutChecked(ToolStripButton active)
+        /// <summary>刷新每个视图的相机绑定下拉框（只列出已打开的相机）。</summary>
+        private void RefreshBindCombos()
         {
-            tsBtnView1.Checked = ReferenceEquals(tsBtnView1, active);
-            tsBtnView2.Checked = ReferenceEquals(tsBtnView2, active);
-            tsBtnView4.Checked = ReferenceEquals(tsBtnView4, active);
+            List<ICamera> opened = CameraManager.Instance.OpenedCameras;
+
+            foreach (ComboBox cb in _bindCombos)
+            {
+                string current = GetBindId(cb);
+
+                cb.BeginUpdate();
+                cb.Items.Clear();
+                cb.Items.Add(new BindItem("", "(自动)"));
+
+                foreach (ICamera cam in opened)
+                {
+                    if (cam == null || cam.Info == null) continue;
+                    cb.Items.Add(new BindItem(cam.Info.Id, cam.Info.Name));
+                }
+
+                SetBindId(cb, current);
+                cb.EndUpdate();
+            }
         }
 
         #endregion
@@ -147,6 +279,9 @@ namespace VisionPlatform.UI
 
         private void RefreshCameraList()
         {
+            CameraInfo previous = tsComboCameras.SelectedItem as CameraInfo;
+            string previousId = previous != null ? previous.Id : null;
+
             tsComboCameras.BeginUpdate();
             tsComboCameras.Items.Clear();
 
@@ -154,10 +289,22 @@ namespace VisionPlatform.UI
             foreach (CameraInfo info in infos)
                 tsComboCameras.Items.Add(info);
 
+            int select = 0;
+            if (previousId != null)
+            {
+                for (int i = 0; i < infos.Count; i++)
+                {
+                    if (infos[i].Id == previousId) { select = i; break; }
+                }
+            }
+
             if (tsComboCameras.Items.Count > 0)
-                tsComboCameras.SelectedIndex = 0;
+                tsComboCameras.SelectedIndex = select;
 
             tsComboCameras.EndUpdate();
+
+            RefreshBindCombos();
+
             Logger.Info("相机枚举完成，共 " + infos.Count + " 个");
         }
 
@@ -192,55 +339,108 @@ namespace VisionPlatform.UI
             if (!frameResult.Success) { MessageBox.Show(this, frameResult.Message); return; }
 
             ShowFrame(0, r.Value.Info.Name, frameResult.Value);
-            RunInspection(frameResult.Value, 0);
+            RunInspection(frameResult.Value, 0, info != null ? info.Name : "相机0");
+
+            RefreshBindCombos();
         }
 
-        /// <summary>同步采集：对所有已打开相机同时取一帧，分别显示与检测。</summary>
         private void OnSyncGrab(object sender, EventArgs e)
         {
-            List<ICamera> cameras = CameraManager.Instance.OpenedCameras;
-            if (cameras.Count == 0)
+            string message;
+            if (!SyncGrabCore(out message))
             {
-                MessageBox.Show(this, "没有已打开的相机，请先在「相机管理」中打开。");
-                return;
+                Logger.Warn(message);
+                MessageBox.Show(this, message, "无法采集", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// 同步采集：先确定每个视图对应的相机，再一次性把帧抓到手，最后逐视图显示与检测。
+        /// 失败时通过 message 返回原因，不弹窗——循环运行时由调用方决定如何处理。
+        /// </summary>
+        private bool SyncGrabCore(out string message)
+        {
+            message = null;
+
+            var usable = new List<ICamera>();
+            foreach (ICamera cam in CameraManager.Instance.OpenedCameras)
+            {
+                if (cam != null && cam.IsOpen) usable.Add(cam);
             }
 
-            // 第一步：先把所有相机的帧都抓到手，尽量缩短相机之间的时间差
-            var frames = new List<Bitmap>();
-            var names = new List<string>();
-            foreach (ICamera cam in cameras)
+            if (usable.Count == 0)
             {
-                if (cam == null || !cam.IsOpen) continue;
+                message = "没有已打开的相机，请先在「相机管理」中打开相机。";
+                return false;
+            }
 
+            // 1) 为每个视图确定目标相机：先满足显式绑定，再把剩余相机按顺序分给「自动」视图
+            var targets = new ICamera[_views.Count];
+            var usedCameras = new List<ICamera>();
+
+            for (int i = 0; i < _views.Count; i++)
+            {
+                string bindId = GetBindId(_bindCombos[i]);
+                if (string.IsNullOrEmpty(bindId)) continue;
+
+                ICamera bound = usable.Find(c => c.Info != null && c.Info.Id == bindId);
+                if (bound == null)
+                {
+                    Logger.Warn("视图" + (i + 1) + " 绑定的相机当前未打开，已跳过");
+                    continue;
+                }
+
+                targets[i] = bound;
+                if (!usedCameras.Contains(bound)) usedCameras.Add(bound);
+            }
+
+            int cursor = 0;
+            for (int i = 0; i < _views.Count; i++)
+            {
+                if (targets[i] != null) continue;
+                if (!string.IsNullOrEmpty(GetBindId(_bindCombos[i]))) continue;
+
+                while (cursor < usable.Count && usedCameras.Contains(usable[cursor])) cursor++;
+                if (cursor >= usable.Count) break;
+
+                targets[i] = usable[cursor];
+                usedCameras.Add(usable[cursor]);
+                cursor++;
+            }
+
+            // 2) 先把用到的相机的帧都抓到手（同一相机被多个视图绑定时只抓一次）
+            var frames = new Dictionary<ICamera, Bitmap>();
+            foreach (ICamera cam in usedCameras)
+            {
                 var fr = cam.GrabOne();
-                if (!fr.Success)
-                {
-                    Logger.Warn("相机取帧失败：" + fr.Message);
-                    frames.Add(null);
-                }
-                else
-                {
-                    frames.Add(fr.Value);
-                }
-                names.Add(cam.Info != null ? cam.Info.Name : "相机");
+                if (fr.Success && fr.Value != null) frames[cam] = fr.Value;
+                else Logger.Warn("相机取帧失败：" + fr.Message);
             }
 
-            // 第二步：逐路显示与检测
-            int count = Math.Min(frames.Count, _views.Count);
-            for (int i = 0; i < count; i++)
+            // 3) 逐视图显示；每台相机只做一次检测与统计
+            var detected = new List<ICamera>();
+            int shown = 0;
+
+            for (int i = 0; i < _views.Count; i++)
             {
-                if (frames[i] == null) continue;
-                ShowFrame(i, names[i], frames[i]);
-                RunInspection(frames[i], i);
+                ICamera cam = targets[i];
+                if (cam == null) continue;
+
+                Bitmap bmp;
+                if (!frames.TryGetValue(cam, out bmp) || bmp == null) continue;
+
+                ShowFrame(i, cam.Info != null ? cam.Info.Name : "相机", bmp);
+                shown++;
+
+                if (!detected.Contains(cam))
+                {
+                    detected.Add(cam);
+                    RunInspection(bmp, i, cam.Info != null ? cam.Info.Name : ("视图" + (i + 1)));
+                }
             }
 
-            Logger.Info("同步采集完成：" + count + " 路");
-
-            // 未被显示占用的帧直接释放
-            for (int i = count; i < frames.Count; i++)
-            {
-                if (frames[i] != null) frames[i].Dispose();
-            }
+            Logger.Info("同步采集完成：显示 " + shown + " 路 / 检测 " + detected.Count + " 路");
+            return true;
         }
 
         private void ShowFrame(int viewIndex, string cameraName, Bitmap frame)
@@ -253,7 +453,7 @@ namespace VisionPlatform.UI
             _views[viewIndex].SetImage(frame, true);
         }
 
-        private void RunInspection(Bitmap frame, int viewIndex)
+        private void RunInspection(Bitmap frame, int viewIndex, string tag)
         {
             VisionAlgo algo = AppContext.Algo;
             RecipeModel recipe = RecipeStore.Current;
@@ -279,6 +479,14 @@ namespace VisionPlatform.UI
                 _lastElapsedMs = result.Value.ElapsedMs;
 
                 UpdateStats();
+
+                // 按系统设置自动保存图像
+                AppSettings s = SettingsStore.Current;
+                if (s.AutoSaveEnabled && (!s.SaveNgOnly || !result.Value.Passed))
+                {
+                    string path = ImageStore.Save(frame, tag, result.Value.Passed);
+                    if (path != null) Logger.Info("图像已保存：" + path);
+                }
 
                 Logger.Info(string.Format("视图{0} 检测 {1}：{2}（{3} ms）",
                     viewIndex + 1,
@@ -323,8 +531,48 @@ namespace VisionPlatform.UI
 
         #region 运行控制
 
+        /// <summary>
+        /// 循环运行的前置条件：至少一个相机已打开且处于连接状态；
+        /// 若设置中开启了通讯校验，还要求至少有一条通讯链路可用。
+        /// </summary>
+        private bool CanRunLoop(out string reason)
+        {
+            reason = null;
+
+            int opened = 0;
+            foreach (ICamera cam in CameraManager.Instance.OpenedCameras)
+            {
+                if (cam != null && cam.IsOpen) opened++;
+            }
+
+            if (opened == 0)
+            {
+                reason = "没有已打开的相机，请先在「相机管理」中打开相机，然后再启动循环运行。";
+                return false;
+            }
+
+            if (SettingsStore.Current.RequireCommBeforeRun && !CommState.HasActiveChannel)
+            {
+                reason = "通讯未连接（TCP 客户端 / TCP 服务端 / Modbus 均未就绪）。\r\n\r\n"
+                       + "请先在「通讯」中建立连接，或在「系统设置」中关闭「循环运行前要求通讯已连接」。";
+                return false;
+            }
+
+            return true;
+        }
+
         private void OnStartLoop(object sender, EventArgs e)
         {
+            string reason;
+            if (!CanRunLoop(out reason))
+            {
+                Logger.Warn("无法启动循环运行：" + reason);
+                MessageBox.Show(this, reason, "无法启动循环运行",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                UpdateStatus();
+                return;
+            }
+
             if (_running)
             {
                 _paused = false;
@@ -367,7 +615,20 @@ namespace VisionPlatform.UI
 
             try
             {
-                OnSyncGrab(this, EventArgs.Empty);
+                string reason;
+
+                // 运行期间若前置条件不再满足（例如相机掉线），自动停止并只记一条日志，不弹窗
+                if (!CanRunLoop(out reason))
+                {
+                    loopTimer.Stop();
+                    _running = false;
+                    _paused = false;
+                    Logger.Warn("循环运行已自动停止：" + reason);
+                    UpdateStatus();
+                    return;
+                }
+
+                SyncGrabCore(out reason);
             }
             catch (Exception ex)
             {
@@ -392,6 +653,18 @@ namespace VisionPlatform.UI
         private void OnOpenAlgoForm(object sender, EventArgs e) { ShowChild(ref _algoForm); }
         private void OnOpenCommForm(object sender, EventArgs e) { ShowChild(ref _commForm); }
         private void OnOpenRecipeForm(object sender, EventArgs e) { ShowChild(ref _recipeForm); }
+
+        private void OnOpenSettings(object sender, EventArgs e)
+        {
+            using (var dlg = new SettingsForm())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    Logger.Info("系统设置已更新");
+                    UpdateStatus();
+                }
+            }
+        }
 
         private void ShowChild<T>(ref T form) where T : Form, new()
         {
@@ -439,8 +712,11 @@ namespace VisionPlatform.UI
                 recipe != null ? recipe.Name : "未加载",
                 AppContext.Algo != null ? "已加载" : "未加载");
 
-            statusLabel.Text = string.Format("状态：{0}    视图：{1}    统计：{2} 件（OK {3} / NG {4}）",
-                runState, _views.Count, _statTotal, _statOk, _statNg);
+            statusLabel.Text = string.Format("状态：{0}    视图：{1}    统计：{2} 件（OK {3} / NG {4}）    通讯：{5}",
+                runState,
+                _views.Count,
+                _statTotal, _statOk, _statNg,
+                CommState.HasActiveChannel ? "正常" : "未连接");
         }
 
         private void OnLogged(object sender, string line)

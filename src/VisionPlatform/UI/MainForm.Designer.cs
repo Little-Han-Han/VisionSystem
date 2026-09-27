@@ -24,9 +24,7 @@ namespace VisionPlatform.UI
             this.tsBtnRefresh = new System.Windows.Forms.ToolStripButton();
             this.tsSep1 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelLayout = new System.Windows.Forms.ToolStripLabel();
-            this.tsBtnView1 = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnView2 = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnView4 = new System.Windows.Forms.ToolStripButton();
+            this.tsComboLayout = new System.Windows.Forms.ToolStripComboBox();
             this.tsSep2 = new System.Windows.Forms.ToolStripSeparator();
             this.tsBtnGrabOnce = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSyncGrab = new System.Windows.Forms.ToolStripButton();
@@ -37,6 +35,7 @@ namespace VisionPlatform.UI
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
             this.tsLabelStatus = new System.Windows.Forms.ToolStripLabel();
 
             this.panelCenter = new System.Windows.Forms.Panel();
@@ -87,9 +86,7 @@ namespace VisionPlatform.UI
                 this.tsBtnRefresh,
                 this.tsSep1,
                 this.tsLabelLayout,
-                this.tsBtnView1,
-                this.tsBtnView2,
-                this.tsBtnView4,
+                this.tsComboLayout,
                 this.tsSep2,
                 this.tsBtnGrabOnce,
                 this.tsBtnSyncGrab,
@@ -100,6 +97,7 @@ namespace VisionPlatform.UI
                 this.tsBtnAlgo,
                 this.tsBtnComm,
                 this.tsBtnRecipe,
+                this.tsBtnSettings,
                 this.tsLabelStatus});
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
             this.toolStrip.Name = "toolStrip";
@@ -124,23 +122,11 @@ namespace VisionPlatform.UI
             this.tsLabelLayout.Name = "tsLabelLayout";
             this.tsLabelLayout.Text = "布局:";
 
-            this.tsBtnView1.CheckOnClick = true;
-            this.tsBtnView1.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnView1.Name = "tsBtnView1";
-            this.tsBtnView1.Text = "1";
-            this.tsBtnView1.Click += new System.EventHandler(this.OnLayout1);
-
-            this.tsBtnView2.CheckOnClick = true;
-            this.tsBtnView2.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnView2.Name = "tsBtnView2";
-            this.tsBtnView2.Text = "2";
-            this.tsBtnView2.Click += new System.EventHandler(this.OnLayout2);
-
-            this.tsBtnView4.CheckOnClick = true;
-            this.tsBtnView4.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnView4.Name = "tsBtnView4";
-            this.tsBtnView4.Text = "4";
-            this.tsBtnView4.Click += new System.EventHandler(this.OnLayout4);
+            this.tsComboLayout.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.tsComboLayout.Name = "tsComboLayout";
+            this.tsComboLayout.Size = new System.Drawing.Size(90, 32);
+            this.tsComboLayout.ToolTipText = "显示控件布局（行 x 列），切换后每个视图可单独绑定相机";
+            this.tsComboLayout.SelectedIndexChanged += new System.EventHandler(this.OnLayoutChanged);
 
             this.tsSep2.Name = "tsSep2";
 
@@ -187,6 +173,12 @@ namespace VisionPlatform.UI
             this.tsBtnRecipe.Name = "tsBtnRecipe";
             this.tsBtnRecipe.Text = "配方";
             this.tsBtnRecipe.Click += new System.EventHandler(this.OnOpenRecipeForm);
+
+            this.tsBtnSettings.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnSettings.Name = "tsBtnSettings";
+            this.tsBtnSettings.Text = "系统设置";
+            this.tsBtnSettings.ToolTipText = "图片保存路径 / 格式 / 保留天数，以及运行前置条件";
+            this.tsBtnSettings.Click += new System.EventHandler(this.OnOpenSettings);
 
             this.tsLabelStatus.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
             this.tsLabelStatus.Name = "tsLabelStatus";
@@ -426,9 +418,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnRefresh;
         private System.Windows.Forms.ToolStripSeparator tsSep1;
         private System.Windows.Forms.ToolStripLabel tsLabelLayout;
-        private System.Windows.Forms.ToolStripButton tsBtnView1;
-        private System.Windows.Forms.ToolStripButton tsBtnView2;
-        private System.Windows.Forms.ToolStripButton tsBtnView4;
+        private System.Windows.Forms.ToolStripComboBox tsComboLayout;
         private System.Windows.Forms.ToolStripSeparator tsSep2;
         private System.Windows.Forms.ToolStripButton tsBtnGrabOnce;
         private System.Windows.Forms.ToolStripButton tsBtnSyncGrab;
@@ -439,6 +429,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnAlgo;
         private System.Windows.Forms.ToolStripButton tsBtnComm;
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
+        private System.Windows.Forms.ToolStripButton tsBtnSettings;
         private System.Windows.Forms.ToolStripLabel tsLabelStatus;
 
         private System.Windows.Forms.Panel panelCenter;
