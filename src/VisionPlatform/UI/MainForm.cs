@@ -41,6 +41,7 @@ namespace VisionPlatform.UI
         private int _rows;
         private int _cols;
         private bool _initializing;
+        private bool _rebinding;
 
         private bool _running;
         private bool _paused;
@@ -63,13 +64,18 @@ namespace VisionPlatform.UI
             InitializeComponent();
 
             InitLayoutCombo();
-            BuildViews(1, 1);
+
+            // 按保存的布局索引重建视图（InitLayoutCombo 设置下拉框会触发 OnLayoutChanged，
+            // 这里再显式构建一次以保证使用保存的布局）
+            int startIdx = ConfigStore.Current.Ui.LayoutIndex;
+            if (startIdx < 0 || startIdx >= LayoutPresets.GetLength(0)) startIdx = 0;
+            BuildViews(LayoutPresets[startIdx, 0], LayoutPresets[startIdx, 1]);
 
             RefreshCameraList();
             Logger.Logged += OnLogged;
             RecipeStore.CurrentChanged += (s, e) => UpdateStatus();
             CameraManager.Instance.CurrentChanged += (s, e) => RefreshCameraList();
-            SettingsStore.Changed += (s, e) => UpdateStatus();
+            ConfigStore.Changed += (s, e) => UpdateStatus();
 
             _initializing = false;
 
@@ -105,7 +111,7 @@ namespace VisionPlatform.UI
             tsComboLayout.Items.Add("3 x 2");
             tsComboLayout.Items.Add("3 x 3");
 
-            int idx = SettingsStore.Current.LayoutIndex;
+            int idx = ConfigStore.Current.Ui.LayoutIndex;
             if (idx < 0 || idx >= tsComboLayout.Items.Count) idx = 0;
             tsComboLayout.SelectedIndex = idx;
             tsComboLayout.EndUpdate();
@@ -120,10 +126,13 @@ namespace VisionPlatform.UI
             if (_rows == rows && _cols == cols && _views.Count == rows * cols && _views.Count > 0)
                 return;
 
-            // 记住原有绑定，重建后按相机 Id 恢复
-            var previous = new List<string>();
-            foreach (ComboBox cb in _bindCombos)
-                previous.Add(GetBindId(cb));
+            // 重建前把当前各视图的相机绑定同步进配置，保证切换布局 / 重启后不丢失
+            if (_bindCombos.Count > 0)
+            {
+                _rebinding = true;
+                SyncViewBindingsToConfig();
+                _rebinding = false;
+            }
 
             tableViews.SuspendLayout();
             tableViews.Controls.Clear();
@@ -174,6 +183,7 @@ namespace VisionPlatform.UI
                 bind.BackColor = Color.FromArgb(30, 30, 38);
                 bind.ForeColor = Color.Gainsboro;
                 bind.FlatStyle = FlatStyle.Flat;
+                bind.SelectedIndexChanged += OnBindComboChanged;
 
                 // Fill 控件先加，Left 控件后加，保证左侧标签先占位
                 header.Controls.Add(bind);
@@ -200,8 +210,17 @@ namespace VisionPlatform.UI
 
             RefreshBindCombos();
 
-            for (int i = 0; i < _bindCombos.Count && i < previous.Count; i++)
-                SetBindId(_bindCombos[i], previous[i]);
+            // 从配置（UiSettings.ViewBindings）恢复每个视图的相机绑定
+            List<string> bindings = ConfigStore.Current.Ui.ViewBindings ?? new List<string>();
+            _rebinding = true;
+            for (int i = 0; i < _bindCombos.Count; i++)
+            {
+                string id = i < bindings.Count ? bindings[i] : "";
+                SetBindId(_bindCombos[i], id);
+            }
+            _rebinding = false;
+
+            SyncViewBindingsToConfig();
 
             tableViews.ResumeLayout(true);
             UpdateStatus();
@@ -217,9 +236,8 @@ namespace VisionPlatform.UI
 
             if (_initializing) return;
 
-            AppSettings s = SettingsStore.Current.Clone();
-            s.LayoutIndex = idx;
-            SettingsStore.Save(s);
+            ConfigStore.Current.Ui.LayoutIndex = idx;
+            ConfigStore.Save();
         }
 
         private static string GetBindId(ComboBox cb)
@@ -252,25 +270,56 @@ namespace VisionPlatform.UI
         /// <summary>刷新每个视图的相机绑定下拉框（只列出已打开的相机）。</summary>
         private void RefreshBindCombos()
         {
-            List<ICamera> opened = CameraManager.Instance.OpenedCameras;
-
-            foreach (ComboBox cb in _bindCombos)
+            _rebinding = true;
+            try
             {
-                string current = GetBindId(cb);
+                List<ICamera> opened = CameraManager.Instance.OpenedCameras;
 
-                cb.BeginUpdate();
-                cb.Items.Clear();
-                cb.Items.Add(new BindItem("", "(自动)"));
-
-                foreach (ICamera cam in opened)
+                foreach (ComboBox cb in _bindCombos)
                 {
-                    if (cam == null || cam.Info == null) continue;
-                    cb.Items.Add(new BindItem(cam.Info.Id, cam.Info.Name));
-                }
+                    string current = GetBindId(cb);
 
-                SetBindId(cb, current);
-                cb.EndUpdate();
+                    cb.BeginUpdate();
+                    cb.Items.Clear();
+                    cb.Items.Add(new BindItem("", "(自动)"));
+
+                    foreach (ICamera cam in opened)
+                    {
+                        if (cam == null || cam.Info == null) continue;
+                        cb.Items.Add(new BindItem(cam.Info.Id, cam.Info.Name));
+                    }
+
+                    SetBindId(cb, current);
+                    cb.EndUpdate();
+                }
             }
+            finally
+            {
+                _rebinding = false;
+            }
+        }
+
+        /// <summary>把当前各视图的相机绑定写回配置（UiSettings.ViewBindings），保留超出现有视图数量的旧绑定。</summary>
+        private void SyncViewBindingsToConfig()
+        {
+            if (_bindCombos.Count == 0) return;
+
+            List<string> vb = ConfigStore.Current.Ui.ViewBindings;
+            if (vb == null) { vb = new List<string>(); ConfigStore.Current.Ui.ViewBindings = vb; }
+
+            for (int i = 0; i < _bindCombos.Count; i++)
+            {
+                string id = GetBindId(_bindCombos[i]);
+                if (i < vb.Count) vb[i] = id; else vb.Add(id);
+            }
+        }
+
+        /// <summary>用户在视图绑定下拉框中切换相机时，立即持久化绑定关系。</summary>
+        private void OnBindComboChanged(object sender, EventArgs e)
+        {
+            if (_rebinding) return;
+            SyncViewBindingsToConfig();
+            ConfigStore.Save();
         }
 
         #endregion
@@ -481,7 +530,7 @@ namespace VisionPlatform.UI
                 UpdateStats();
 
                 // 按系统设置自动保存图像
-                AppSettings s = SettingsStore.Current;
+                SystemSettings s = ConfigStore.Current.System;
                 if (s.AutoSaveEnabled && (!s.SaveNgOnly || !result.Value.Passed))
                 {
                     string path = ImageStore.Save(frame, tag, result.Value.Passed);
@@ -551,7 +600,7 @@ namespace VisionPlatform.UI
                 return false;
             }
 
-            if (SettingsStore.Current.RequireCommBeforeRun && !CommState.HasActiveChannel)
+            if (ConfigStore.Current.System.RequireCommBeforeRun && !CommState.HasActiveChannel)
             {
                 reason = "通讯未连接（TCP 客户端 / TCP 服务端 / Modbus 均未就绪）。\r\n\r\n"
                        + "请先在「通讯」中建立连接，或在「系统设置」中关闭「循环运行前要求通讯已连接」。";
@@ -743,6 +792,9 @@ namespace VisionPlatform.UI
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             loopTimer.Stop();
+            // 退出前确保视图绑定与布局被持久化
+            SyncViewBindingsToConfig();
+            ConfigStore.Save();
             Logger.Logged -= OnLogged;
             CameraManager.Instance.CloseAll();
         }

@@ -27,7 +27,7 @@
 - **通讯**：TCP 客户端/服务端、`ModbusTcpClient`（自行实现 MBAP+PDU，支持 0x03/0x06/0x10）
 - **配方**：`Recipe` + `RecipeStore`，JSON 存取、当前配方切换自动同步参数
 - **算法**：参数编辑 + 离线测试，**支持打开本地图片**（无需相机即可调试）
-- **系统设置**：图片保存路径、保存格式（PNG/JPEG/BMP/TIFF）、保留天数（自动清理过期图片）、检测后自动保存与仅存 NG、循环运行前是否要求通讯已连接
+- **系统设置**：图片保存路径、保存格式（PNG/JPEG/BMP/TIFF）、保留天数（自动清理过期图片）、检测后自动保存与仅存 NG、循环运行前是否要求通讯已连接；全部参数按「系统 / 算法 / 界面」三类持久化到本地 JSON（`%AppData%/VisionPlatform/appconfig.json`），重启自动加载，无需重新配置
 - **主运行界面** `MainForm`：布局可调的多显示视图（1x1 / 1x2 / 2x1 / 2x2 / 3x2 / 3x3，最多 9 个）、**每个视图可单独绑定相机**、单帧采集与多相机同步采集、循环运行/暂停/停止、数据统计（总数/OK/NG/良率/节拍）、运行日志
 
 ### C++ 算法库（VisionAlgo.Native）
@@ -95,7 +95,7 @@ VisionSystem/                              唯一解决方案根目录
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
         ├── Core/                          Logger / AppPaths / Json / OpResult /
-        │                                 AppSettings（系统设置 + SettingsStore）/ ImageStore（存图与清理）
+        │                                 AppSettings（三段式配置 AppConfig：System 系统 / Algorithm 算法 / Ui 界面 + ConfigStore）/ ImageStore（存图与清理）
         ├── Native/                        VisionAlgo（P/Invoke 封装 + 托管结果类型）
         ├── Camera/                        ICamera / SimCamera / HikCamera / CameraManager / CameraInfo
         ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient /
@@ -155,7 +155,7 @@ build.bat Release    :: 编译 Release | x64
 |---|---|---|
 | 算法层 | `VisionAlgo.Native` | C++ / OpenCV 实现：预处理、Blob、清晰度、圆/直线拟合、模板匹配 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs` | 唯一接触 C++ 的地方，结构体一一映射、零拷贝传入、输出由 C# 分配 |
-| 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult / AppSettings / ImageStore |
+| 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult / AppSettings（AppConfig 三段式配置 + ConfigStore）/ ImageStore |
 |  | `VisionPlatform/Camera` | 相机接口与模拟/海康实现、相机管理 |
 |  | `VisionPlatform/Communication` | TCP 客户端/服务端、Modbus TCP、`CommState`（通讯全局状态） |
 |  | `VisionPlatform/Recipe` | 配方模型与 JSON 存储 |
@@ -166,6 +166,24 @@ build.bat Release    :: 编译 Release | x64
 > 界面不直接碰算法，算法不认识界面。中间仅靠 `Native/VisionAlgo.cs` 这一道 P/Invoke 边界隔离。
 
 **一次检测的数据流**：相机 `GrabOne()` → `InspectionEngine.Run()`（预处理 → 各项算法 → 汇总判定）→ 结果以灰度图 + 几何图形叠加形式回显到 `ImageViewer`，并刷新 OK/NG 统计。
+
+---
+
+## 配置持久化（本地参数）
+
+所有配置统一存放在 `%AppData%/VisionPlatform/appconfig.json`，由 `Core/AppSettings.cs` 的 `ConfigStore` 负责加载与保存：启动时 `Program.cs` 自动 `ConfigStore.Load()`，退出前 `MainForm` 自动 `ConfigStore.Save()`；任意子窗体保存后还会触发 `ConfigStore.Changed` 事件让主界面刷新状态。
+
+配置按三类清晰分区，便于维护与个人化：
+
+| 分区 | 类型 | 内容 |
+|---|---|---|
+| `System` 系统参数 | `SystemSettings` | 图片保存路径、保存格式、保留天数、检测后自动保存、仅存 NG、循环运行前要求通讯已连接 |
+| `Algorithm` 算法参数 | `AlgorithmSettings` | 上次使用的配方名 `CurrentRecipeName` + 一份检测参数快照 `Inspection`，保证二次打开即恢复上次检测配置 |
+| `Ui` 界面设置参数 | `UiSettings` | 主界面布局索引 `LayoutIndex`、各视图的相机绑定 `ViewBindings`（视图序号 → 相机 Id） |
+
+相机绑定在用户切换时即时写入 `ViewBindings`，重启后主界面按保存的 `LayoutIndex` 与 `ViewBindings` 重建视图并恢复各自的相机绑定。
+
+> 历史兼容：`ConfigStore.Load()` 在文件缺失或字段缺失时按默认值补齐，旧版仅含系统参数的配置也能正常升级到三段式结构。
 
 ---
 

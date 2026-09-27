@@ -15,7 +15,7 @@ namespace VisionPlatform.Core
         /// <summary>当前生效的保存目录（不存在则创建）。</summary>
         public static string EnsureDirectory()
         {
-            string dir = SettingsStore.Current.ImageSavePath;
+            string dir = ConfigStore.Current.System.ImageSavePath;
             if (string.IsNullOrWhiteSpace(dir))
                 dir = Path.Combine(AppPaths.Root, "Images");
 
@@ -41,7 +41,7 @@ namespace VisionPlatform.Core
         {
             get
             {
-                switch (NormalizeFormat(SettingsStore.Current.ImageFormat))
+                switch (NormalizeFormat(ConfigStore.Current.System.ImageFormat))
                 {
                     case "JPEG": return ".jpg";
                     case "BMP": return ".bmp";
@@ -53,13 +53,13 @@ namespace VisionPlatform.Core
 
         private static ImageFormat GetImageFormat()
         {
-            switch (NormalizeFormat(SettingsStore.Current.ImageFormat))
-            {
-                case "JPEG": return ImageFormat.Jpeg;
-                case "BMP": return ImageFormat.Bmp;
-                case "TIFF": return ImageFormat.Tiff;
-                default: return ImageFormat.Png;
-            }
+                switch (NormalizeFormat(ConfigStore.Current.System.ImageFormat))
+                {
+                    case "JPEG": return ImageFormat.Jpeg;
+                    case "BMP": return ImageFormat.Bmp;
+                    case "TIFF": return ImageFormat.Tiff;
+                    default: return ImageFormat.Png;
+                }
         }
 
         /// <summary>保存一张图像，返回完整路径；失败返回 null。</summary>
@@ -112,7 +112,7 @@ namespace VisionPlatform.Core
         /// <summary>清理超过保留天数的历史图片，返回删除的文件数。</summary>
         public static int Cleanup()
         {
-            AppSettings s = SettingsStore.Current;
+            SystemSettings s = ConfigStore.Current.System;
             if (s.RetentionDays <= 0) return 0;
 
             if (string.IsNullOrWhiteSpace(s.ImageSavePath) || !Directory.Exists(s.ImageSavePath))

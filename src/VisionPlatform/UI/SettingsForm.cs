@@ -8,6 +8,7 @@ namespace VisionPlatform.UI
     /// <summary>
     /// 系统设置：图片保存路径 / 保存格式 / 保留天数，以及循环运行的前置条件。
     /// 布局在 SettingsForm.Designer.cs 中，可在 VS 设计器里直接调整。
+    /// 所有改动都落到全局配置的三段式模型中的「系统参数」(ConfigStore.Current.System)。
     /// </summary>
     public partial class SettingsForm : Form
     {
@@ -15,15 +16,15 @@ namespace VisionPlatform.UI
         {
             InitializeComponent();
 
-            LoadFrom(SettingsStore.Current);
+            LoadFrom(ConfigStore.Current.System);
             lblCommState.Text = "当前：" + CommState.Describe();
         }
 
         // ---------- 界面 ↔ 设置 ----------
 
-        private void LoadFrom(AppSettings s)
+        private void LoadFrom(SystemSettings s)
         {
-            if (s == null) s = AppSettings.CreateDefault();
+            if (s == null) s = SystemSettings.CreateDefault();
 
             txtSavePath.Text = s.ImageSavePath;
             SelectFormat(s.ImageFormat);
@@ -33,9 +34,9 @@ namespace VisionPlatform.UI
             chkRequireComm.Checked = s.RequireCommBeforeRun;
         }
 
-        private AppSettings CollectFromUi()
+        private SystemSettings CollectFromUi()
         {
-            AppSettings s = SettingsStore.Current.Clone();
+            SystemSettings s = ConfigStore.Current.System.Clone();
 
             s.ImageSavePath = txtSavePath.Text.Trim();
             s.ImageFormat = (cmbFormat.SelectedItem as string) ?? "PNG";
@@ -45,6 +46,13 @@ namespace VisionPlatform.UI
             s.RequireCommBeforeRun = chkRequireComm.Checked;
 
             return s;
+        }
+
+        /// <summary>把界面上的系统设置落地到全局配置并保存。</summary>
+        private void ApplyToConfig()
+        {
+            ConfigStore.Current.System = CollectFromUi();
+            ConfigStore.Save();
         }
 
         private static decimal ClampDays(int days)
@@ -93,7 +101,7 @@ namespace VisionPlatform.UI
         private void OnCleanupNow(object sender, EventArgs e)
         {
             // 清理按界面上当前的天数执行，因此先落地一次设置
-            SettingsStore.Save(CollectFromUi());
+            ApplyToConfig();
 
             int deleted = ImageStore.Cleanup();
             MessageBox.Show(this,
@@ -125,7 +133,7 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            SettingsStore.Save(CollectFromUi());
+            ApplyToConfig();
 
             DialogResult = DialogResult.OK;
             Close();
@@ -139,7 +147,7 @@ namespace VisionPlatform.UI
 
         private void OnRestoreDefault(object sender, EventArgs e)
         {
-            LoadFrom(AppSettings.CreateDefault());
+            LoadFrom(SystemSettings.CreateDefault());
         }
     }
 }

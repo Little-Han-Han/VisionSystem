@@ -1,7 +1,10 @@
 using System;
 using System.Windows.Forms;
 using VisionPlatform.Core;
+using VisionPlatform.Recipe;
 using VisionPlatform.UI;
+// 命名空间 VisionPlatform.Recipe 与类 Recipe 同名，用别名避免歧义
+using RecipeModel = VisionPlatform.Recipe.Recipe;
 
 namespace VisionPlatform
 {
@@ -23,8 +26,24 @@ namespace VisionPlatform
             Application.SetCompatibleTextRenderingDefault(false);
 
             AppPaths.Ensure();
-            SettingsStore.Load();
+            ConfigStore.Load();
             Logger.Info("===== VisionPlatform 启动 =====");
+
+            // 恢复算法参数：优先加载上次使用的配方；无命名配方时直接用保存的检测参数快照
+            RestoreAlgorithmConfig();
+
+            // 配方切换时把算法参数（检测参数 + 配方名）同步回配置文件
+            RecipeStore.CurrentChanged += (s, e) =>
+            {
+                var algo = ConfigStore.Current.Algorithm;
+                algo.Inspection = (RecipeStore.Current != null && RecipeStore.Current.Inspection != null)
+                    ? RecipeStore.Current.Inspection.Clone() : null;
+                algo.CurrentRecipeName = (RecipeStore.Current != null
+                    && !string.IsNullOrEmpty(RecipeStore.Current.Name)
+                    && RecipeStore.Current.Name != "默认")
+                    ? RecipeStore.Current.Name : "";
+                ConfigStore.Save();
+            };
 
             // 启动时按系统设置的保留天数清理一次历史图片
             int cleaned = ImageStore.Cleanup();
@@ -70,6 +89,27 @@ namespace VisionPlatform
 
             Camera.CameraManager.Instance.CloseAll();
             Logger.Info("===== VisionPlatform 退出 =====");
+        }
+
+        /// <summary>根据配置文件中的算法参数，恢复上次使用的配方或检测参数快照。</summary>
+        private static void RestoreAlgorithmConfig()
+        {
+            AlgorithmSettings algo = ConfigStore.Current.Algorithm;
+
+            if (!string.IsNullOrEmpty(algo.CurrentRecipeName))
+            {
+                var r = RecipeStore.Load(algo.CurrentRecipeName);
+                if (r.Success) return;
+
+                Logger.Warn("上次配方不存在：" + algo.CurrentRecipeName + "，改用保存的检测参数快照");
+            }
+
+            if (algo.Inspection != null)
+            {
+                RecipeModel def = RecipeModel.CreateDefault("默认");
+                def.Inspection = algo.Inspection;
+                RecipeStore.SetCurrent(def);
+            }
         }
     }
 }
