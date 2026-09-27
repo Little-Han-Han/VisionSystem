@@ -42,6 +42,7 @@ namespace VisionPlatform.UI
         private int _cols;
         private bool _initializing;
         private bool _rebinding;
+        private bool _closing;
 
         private bool _running;
         private bool _paused;
@@ -73,9 +74,9 @@ namespace VisionPlatform.UI
 
             RefreshCameraList();
             Logger.Logged += OnLogged;
-            RecipeStore.CurrentChanged += (s, e) => UpdateStatus();
-            CameraManager.Instance.CurrentChanged += (s, e) => RefreshCameraList();
-            ConfigStore.Changed += (s, e) => UpdateStatus();
+            RecipeStore.CurrentChanged += OnRecipeChanged;
+            CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
+            ConfigStore.Changed += OnConfigChanged;
 
             _initializing = false;
 
@@ -328,33 +329,46 @@ namespace VisionPlatform.UI
 
         private void RefreshCameraList()
         {
-            CameraInfo previous = tsComboCameras.SelectedItem as CameraInfo;
-            string previousId = previous != null ? previous.Id : null;
+            if (_closing || IsDisposed || !IsHandleCreated) return;
 
-            tsComboCameras.BeginUpdate();
-            tsComboCameras.Items.Clear();
-
-            List<CameraInfo> infos = CameraManager.Instance.Enumerate();
-            foreach (CameraInfo info in infos)
-                tsComboCameras.Items.Add(info);
-
-            int select = 0;
-            if (previousId != null)
+            try
             {
-                for (int i = 0; i < infos.Count; i++)
-                {
-                    if (infos[i].Id == previousId) { select = i; break; }
-                }
+
+                    CameraInfo previous = tsComboCameras.SelectedItem as CameraInfo;
+                    string previousId = previous != null ? previous.Id : null;
+
+                    tsComboCameras.BeginUpdate();
+                    tsComboCameras.Items.Clear();
+
+                    List<CameraInfo> infos = CameraManager.Instance.Enumerate();
+                    foreach (CameraInfo info in infos)
+                        tsComboCameras.Items.Add(info);
+
+                    int select = 0;
+                    if (previousId != null)
+                    {
+                        for (int i = 0; i < infos.Count; i++)
+                        {
+                            if (infos[i].Id == previousId) { select = i; break; }
+                        }
+                    }
+
+                    if (tsComboCameras.Items.Count > 0)
+                        tsComboCameras.SelectedIndex = select;
+
+                    tsComboCameras.EndUpdate();
+
+                    RefreshBindCombos();
+
+                    Logger.Info("相机枚举完成，共 " + infos.Count + " 个");
+                
             }
+            catch (Exception)
+            {
 
-            if (tsComboCameras.Items.Count > 0)
-                tsComboCameras.SelectedIndex = select;
-
-            tsComboCameras.EndUpdate();
-
-            RefreshBindCombos();
-
-            Logger.Info("相机枚举完成，共 " + infos.Count + " 个");
+                throw;
+            }
+            
         }
 
         private void OnRefreshCameras(object sender, EventArgs e)
@@ -364,6 +378,26 @@ namespace VisionPlatform.UI
 
         private void OnCameraSelectionChanged(object sender, EventArgs e)
         {
+            UpdateStatus();
+        }
+
+        // 以下三个事件处理器在窗体关闭时通过 _closing 标志短路，
+        // 避免 CloseAll() 触发的 CurrentChanged / ConfigStore.Changed 在销毁阶段再次刷新界面
+        private void OnRecipeChanged(object sender, EventArgs e)
+        {
+            if (_closing) return;
+            UpdateStatus();
+        }
+
+        private void OnCameraManagerChanged(object sender, EventArgs e)
+        {
+            if (_closing) return;
+            RefreshCameraList();
+        }
+
+        private void OnConfigChanged(object sender, EventArgs e)
+        {
+            if (_closing) return;
             UpdateStatus();
         }
 
@@ -791,11 +825,15 @@ namespace VisionPlatform.UI
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            _closing = true;
             loopTimer.Stop();
             // 退出前确保视图绑定与布局被持久化
             SyncViewBindingsToConfig();
             ConfigStore.Save();
             Logger.Logged -= OnLogged;
+            RecipeStore.CurrentChanged -= OnRecipeChanged;
+            CameraManager.Instance.CurrentChanged -= OnCameraManagerChanged;
+            ConfigStore.Changed -= OnConfigChanged;
             CameraManager.Instance.CloseAll();
         }
     }
