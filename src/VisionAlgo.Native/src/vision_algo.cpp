@@ -116,6 +116,62 @@ int VA_CALL va_match_template(void* handle, const VA_Image* gray, VA_MatchResult
     return va::MatchTemplate(ctx, gray, out);
 }
 
+// ---------------------- 形状匹配（基于边缘轮廓）----------------------
+
+int VA_CALL va_create_shape_model(void* handle,
+                                   const VA_Image* gray,
+                                   const int* roi,
+                                   double contrast)
+{
+    VA_CTX();
+    return va::CreateShapeModel(ctx, gray, roi, contrast);
+}
+
+int VA_CALL va_create_shape_model_ex(void* handle,
+                                      const VA_Image* gray,
+                                      const int* roi,
+                                      const VA_ShapeTrainParam* param)
+{
+    VA_CTX();
+    return va::CreateShapeModelEx(ctx, gray, roi, param);
+}
+
+int VA_CALL va_get_shape_model_info(void* handle,
+                                     int* out_point_count,
+                                     double* out_width,
+                                     double* out_height)
+{
+    VA_CTX();
+    return va::GetShapeModelInfo(ctx, out_point_count, out_width, out_height);
+}
+
+int VA_CALL va_get_shape_model_points(void* handle,
+                                       VA_ShapePoint* out_points,
+                                       int max_count,
+                                       int* out_count)
+{
+    VA_CTX();
+    return va::GetShapeModelPoints(ctx, out_points, max_count, out_count);
+}
+
+int VA_CALL va_clear_shape_model(void* handle)
+{
+    VA_CTX();
+    return va::ClearShapeModel(ctx);
+}
+
+int VA_CALL va_find_shape_model(void* handle,
+                                 const VA_Image* gray,
+                                 const VA_ShapeParam* param,
+                                 const int* search_roi,
+                                 VA_ShapeMatch* out_matches,
+                                 int max_count,
+                                 int* out_count)
+{
+    VA_CTX();
+    return va::FindShapeModel(ctx, gray, param, search_roi, out_matches, max_count, out_count);
+}
+
 int VA_CALL va_edge_count(void* handle,
                           const VA_Image* gray,
                           int scan_row,

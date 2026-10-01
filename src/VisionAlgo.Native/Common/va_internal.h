@@ -9,14 +9,28 @@
 #include <vector>
 
 #include "va_types.h"
+// 形状匹配的参数与结果结构体声明在对外头文件里，内部实现直接复用
+#include "algo/va_shape.h"
 
 namespace va {
+
+// 形状匹配模型：模板 ROI 内的边缘点（相对中心）与其单位梯度方向
+struct ShapeModel {
+    std::vector<cv::Point2f> pts;   // 相对模板中心
+    std::vector<cv::Point2f> dir;   // 单位梯度方向
+    double width;                   // 模板 ROI 宽
+    double height;                  // 模板 ROI 高
+    bool   valid;
+
+    ShapeModel() : width(0.0), height(0.0), valid(false) {}
+};
 
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
     cv::Mat     tmpl;
     bool        hasTemplate;
+    ShapeModel  shape;              // 形状匹配模型
 
     Context() : hasTemplate(false) {}
 };
@@ -65,6 +79,22 @@ int TrainTemplate(Context* ctx, const VA_Image* gray, const int* roi);
 int MatchTemplate(Context* ctx, const VA_Image* gray, VA_MatchResult* out);
 
 int EdgeCount(Context* ctx, const VA_Image* gray, int scanRow, int delta, int* outCount);
+
+// 形状匹配（基于边缘轮廓）
+int CreateShapeModel(Context* ctx, const VA_Image* gray, const int* roi, double contrast);
+
+int CreateShapeModelEx(Context* ctx, const VA_Image* gray, const int* roi,
+                       const VA_ShapeTrainParam* param);
+
+int GetShapeModelInfo(Context* ctx, int* outPointCount, double* outWidth, double* outHeight);
+
+int GetShapeModelPoints(Context* ctx, VA_ShapePoint* outPoints, int maxCount, int* outCount);
+
+int ClearShapeModel(Context* ctx);
+
+int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* param,
+                   const int* searchRoi, VA_ShapeMatch* outMatches,
+                   int maxCount, int* outCount);
 
 } // namespace va
 

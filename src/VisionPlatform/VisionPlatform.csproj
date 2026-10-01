@@ -38,6 +38,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -71,6 +72,7 @@
     <Compile Include="UI\AlgoForm.Designer.cs">
       <DependentUpon>AlgoForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\ModelFeatureLayer.cs" />
     <Compile Include="UI\CameraForm.cs">
       <SubType>Form</SubType>
     </Compile>

@@ -18,47 +18,58 @@ namespace VisionPlatform.UI
 
             this.panelLeft = new System.Windows.Forms.Panel();
             this.tableParams = new System.Windows.Forms.TableLayoutPanel();
-            this.lblSectionPre = new System.Windows.Forms.Label();
-            this.lblBlur = new System.Windows.Forms.Label();
-            this.numBlur = new System.Windows.Forms.NumericUpDown();
-            this.lblThreshold = new System.Windows.Forms.Label();
-            this.numThreshold = new System.Windows.Forms.NumericUpDown();
-            this.lblMorph = new System.Windows.Forms.Label();
-            this.cmbMorph = new System.Windows.Forms.ComboBox();
-            this.lblSectionItems = new System.Windows.Forms.Label();
-            this.chkBlob = new System.Windows.Forms.CheckBox();
-            this.chkSharp = new System.Windows.Forms.CheckBox();
-            this.chkTemplate = new System.Windows.Forms.CheckBox();
-            this.chkCircle = new System.Windows.Forms.CheckBox();
-            this.lblSectionThresh = new System.Windows.Forms.Label();
-            this.lblMinArea = new System.Windows.Forms.Label();
-            this.numMinArea = new System.Windows.Forms.NumericUpDown();
-            this.lblMaxArea = new System.Windows.Forms.Label();
-            this.numMaxArea = new System.Windows.Forms.NumericUpDown();
-            this.lblExpected = new System.Windows.Forms.Label();
-            this.numExpected = new System.Windows.Forms.NumericUpDown();
-            this.lblMinScore = new System.Windows.Forms.Label();
-            this.numMinScore = new System.Windows.Forms.NumericUpDown();
-            this.lblMinSharp = new System.Windows.Forms.Label();
-            this.numMinSharp = new System.Windows.Forms.NumericUpDown();
-
-            this.btnOpenImage = new System.Windows.Forms.Button();
-            this.btnGrabRun = new System.Windows.Forms.Button();
-            this.btnTrain = new System.Windows.Forms.Button();
-            this.btnSaveRecipe = new System.Windows.Forms.Button();
-            this.btnFit = new System.Windows.Forms.Button();
-
             this.panelRight = new System.Windows.Forms.Panel();
             this.lblVerdict = new System.Windows.Forms.Label();
-            this.listResults = new System.Windows.Forms.ListBox();
+            this.gridResults = new System.Windows.Forms.DataGridView();
 
-            ((System.ComponentModel.ISupportInitialize)(this.numBlur)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numThreshold)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinArea)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMaxArea)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numExpected)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinScore)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinSharp)).BeginInit();
+            // ---------- 图像来源 ----------
+            this.btnOpenImage = new System.Windows.Forms.Button();
+            this.btnGrab = new System.Windows.Forms.Button();
+
+            // ---------- 模板区域 ----------
+            this.numTplX = MakeNum(0, 65535, 0, 0);
+            this.numTplY = MakeNum(0, 65535, 0, 0);
+            this.numTplW = MakeNum(0, 65535, 0, 0);
+            this.numTplH = MakeNum(0, 65535, 0, 0);
+            this.btnPickTemplate = new System.Windows.Forms.Button();
+            this.btnTemplateFull = new System.Windows.Forms.Button();
+
+            // ---------- 模型训练 ----------
+            this.numContrast = MakeNum(5, 200, 30, 0);
+            this.numMaxFeatures = MakeNum(50, 8000, 1500, 0);
+            this.numMinFeatureDist = MakeNum(1, 20, 2, 1);
+            this.btnTrain = new System.Windows.Forms.Button();
+            this.lblModelInfo = new System.Windows.Forms.Label();
+            this.chkShowFeatures = new System.Windows.Forms.CheckBox();
+
+            // ---------- 搜索参数 ----------
+            this.numAngleStart = MakeNum(-360, 360, -10, 1);
+            this.numAngleEnd = MakeNum(-360, 360, 10, 1);
+            this.numAngleStep = MakeNum(0.1m, 45, 1, 1);
+            this.numScaleMin = MakeNum(0.1m, 10, 1, 2);
+            this.numScaleMax = MakeNum(0.1m, 10, 1, 2);
+            this.numScaleStep = MakeNum(0, 2, 0, 2);
+            this.numPyramid = MakeNum(1, 8, 4, 0);
+            this.numMinScore = MakeNum(0, 1, 0.7m, 2);
+            this.numMaxMatches = MakeNum(1, 100, 1, 0);
+            this.numOverlap = MakeNum(0, 2, 0.5m, 2);
+            this.numGreediness = MakeNum(0, 1, 0.9m, 2);
+            this.chkSubpixel = new System.Windows.Forms.CheckBox();
+            this.lblPoseHint = new System.Windows.Forms.Label();
+
+            // ---------- 搜索区域 ----------
+            this.numSrchX = MakeNum(0, 65535, 0, 0);
+            this.numSrchY = MakeNum(0, 65535, 0, 0);
+            this.numSrchW = MakeNum(0, 65535, 0, 0);
+            this.numSrchH = MakeNum(0, 65535, 0, 0);
+            this.btnPickSearch = new System.Windows.Forms.Button();
+            this.btnSearchFull = new System.Windows.Forms.Button();
+
+            // ---------- 执行 ----------
+            this.btnMatch = new System.Windows.Forms.Button();
+            this.btnClearModel = new System.Windows.Forms.Button();
+            this.btnFit = new System.Windows.Forms.Button();
+
             this.panelLeft.SuspendLayout();
             this.tableParams.SuspendLayout();
             this.panelRight.SuspendLayout();
@@ -68,209 +79,141 @@ namespace VisionPlatform.UI
             this.panelLeft.AutoScroll = true;
             this.panelLeft.BackColor = System.Drawing.Color.FromArgb(45, 45, 52);
             this.panelLeft.Controls.Add(this.tableParams);
-            this.panelLeft.Controls.Add(this.btnOpenImage);
-            this.panelLeft.Controls.Add(this.btnGrabRun);
-            this.panelLeft.Controls.Add(this.btnTrain);
-            this.panelLeft.Controls.Add(this.btnSaveRecipe);
-            this.panelLeft.Controls.Add(this.btnFit);
             this.panelLeft.Dock = System.Windows.Forms.DockStyle.Left;
             this.panelLeft.Location = new System.Drawing.Point(0, 0);
             this.panelLeft.Name = "panelLeft";
             this.panelLeft.Padding = new System.Windows.Forms.Padding(8);
-            this.panelLeft.Size = new System.Drawing.Size(310, 620);
+            this.panelLeft.Size = new System.Drawing.Size(340, 620);
             this.panelLeft.TabIndex = 0;
 
             // ---------- tableParams ----------
             this.tableParams.ColumnCount = 2;
-            this.tableParams.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 118F));
+            this.tableParams.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 132F));
             this.tableParams.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableParams.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableParams.Location = new System.Drawing.Point(8, 8);
             this.tableParams.Name = "tableParams";
-            this.tableParams.RowCount = 15;
-            this.tableParams.Size = new System.Drawing.Size(294, 400);
+            this.tableParams.RowCount = kParamRows;
+            this.tableParams.Size = new System.Drawing.Size(324, kParamRows * kRowHeight);
             this.tableParams.TabIndex = 0;
 
-            for (int i = 0; i < 15; i++)
-                this.tableParams.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 26F));
+            for (int i = 0; i < kParamRows; i++)
+                this.tableParams.RowStyles.Add(new System.Windows.Forms.RowStyle(
+                    System.Windows.Forms.SizeType.Absolute, (float)kRowHeight));
 
-            // 行 0：预处理
-            this.lblSectionPre.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblSectionPre.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.lblSectionPre.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblSectionPre.Text = "预处理";
-            this.lblSectionPre.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.tableParams.Controls.Add(this.lblSectionPre, 0, 0);
-            this.tableParams.SetColumnSpan(this.lblSectionPre, 2);
+            int r = 0;
 
-            this.lblBlur.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblBlur.ForeColor = System.Drawing.Color.Silver;
-            this.lblBlur.Text = "高斯核";
-            this.lblBlur.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numBlur.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numBlur.Minimum = new decimal(new int[] { 0, 0, 0, 0 });
-            this.numBlur.Maximum = new decimal(new int[] { 31, 0, 0, 0 });
-            this.numBlur.Value = new decimal(new int[] { 3, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblBlur, 0, 1);
-            this.tableParams.Controls.Add(this.numBlur, 1, 1);
+            // ---------- 图像来源 ----------
+            AddSection("图像来源", r++);
+            AddFull(this.btnOpenImage, r++);
+            AddFull(this.btnGrab, r++);
 
-            this.lblThreshold.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblThreshold.ForeColor = System.Drawing.Color.Silver;
-            this.lblThreshold.Text = "二值阈值";
-            this.lblThreshold.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numThreshold.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numThreshold.Minimum = new decimal(new int[] { 1, 0, 0, -2147483648 });
-            this.numThreshold.Maximum = new decimal(new int[] { 255, 0, 0, 0 });
-            this.numThreshold.Value = new decimal(new int[] { 128, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblThreshold, 0, 2);
-            this.tableParams.Controls.Add(this.numThreshold, 1, 2);
+            // ---------- 模板区域 ----------
+            AddSection("模板区域（训练用）", r++);
+            AddRow("X", this.numTplX, r++);
+            AddRow("Y", this.numTplY, r++);
+            AddRow("宽度", this.numTplW, r++);
+            AddRow("高度", this.numTplH, r++);
+            AddFull(this.btnPickTemplate, r++);
+            AddFull(this.btnTemplateFull, r++);
 
-            this.lblMorph.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblMorph.ForeColor = System.Drawing.Color.Silver;
-            this.lblMorph.Text = "形态学";
-            this.lblMorph.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.cmbMorph.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.cmbMorph.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbMorph.Items.AddRange(new object[] { "无", "开运算", "闭运算" });
-            this.tableParams.Controls.Add(this.lblMorph, 0, 3);
-            this.tableParams.Controls.Add(this.cmbMorph, 1, 3);
+            // ---------- 模型训练 ----------
+            AddSection("模型训练", r++);
+            AddRow("边缘对比度", this.numContrast, r++);
+            AddRow("最多特征点数", this.numMaxFeatures, r++);
+            AddRow("特征点最小间距", this.numMinFeatureDist, r++);
+            AddFull(this.btnTrain, r++);
+            AddFull(this.lblModelInfo, r++);
+            AddFull(this.chkShowFeatures, r++);
 
-            // 行 4：检测项
-            this.lblSectionItems.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblSectionItems.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.lblSectionItems.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblSectionItems.Text = "检测项";
-            this.lblSectionItems.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.tableParams.Controls.Add(this.lblSectionItems, 0, 4);
-            this.tableParams.SetColumnSpan(this.lblSectionItems, 2);
+            // ---------- 搜索参数 ----------
+            AddSection("搜索参数", r++);
+            AddRow("起始角度(°)", this.numAngleStart, r++);
+            AddRow("结束角度(°)", this.numAngleEnd, r++);
+            AddRow("角度步长(°)", this.numAngleStep, r++);
+            AddRow("最小缩放", this.numScaleMin, r++);
+            AddRow("最大缩放", this.numScaleMax, r++);
+            AddRow("缩放步长(0=不缩放)", this.numScaleStep, r++);
+            AddRow("金字塔层数", this.numPyramid, r++);
+            AddRow("最小得分", this.numMinScore, r++);
+            AddRow("最多目标数", this.numMaxMatches, r++);
+            AddRow("重叠抑制阈值", this.numOverlap, r++);
+            AddRow("贪婪系数(大=快)", this.numGreediness, r++);
+            AddFull(this.chkSubpixel, r++);
+            AddFull(this.lblPoseHint, r++);
 
-            this.chkBlob.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkBlob.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkBlob.Text = "连通域";
-            this.chkBlob.Checked = true;
-            this.tableParams.Controls.Add(this.chkBlob, 0, 5);
-            this.tableParams.SetColumnSpan(this.chkBlob, 2);
+            // ---------- 搜索区域 ----------
+            AddSection("搜索区域（限制中心）", r++);
+            AddRow("X", this.numSrchX, r++);
+            AddRow("Y", this.numSrchY, r++);
+            AddRow("宽度(0=整图)", this.numSrchW, r++);
+            AddRow("高度(0=整图)", this.numSrchH, r++);
+            AddFull(this.btnPickSearch, r++);
+            AddFull(this.btnSearchFull, r++);
 
-            this.chkSharp.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkSharp.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkSharp.Text = "清晰度";
-            this.tableParams.Controls.Add(this.chkSharp, 0, 6);
-            this.tableParams.SetColumnSpan(this.chkSharp, 2);
+            // ---------- 执行 ----------
+            AddSection("执行", r++);
+            AddFull(this.btnMatch, r++);
+            AddFull(this.btnClearModel, r++);
+            AddFull(this.btnFit, r++);
 
-            this.chkTemplate.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkTemplate.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkTemplate.Text = "模板匹配";
-            this.tableParams.Controls.Add(this.chkTemplate, 0, 7);
-            this.tableParams.SetColumnSpan(this.chkTemplate, 2);
-
-            this.chkCircle.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkCircle.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkCircle.Text = "圆拟合";
-            this.tableParams.Controls.Add(this.chkCircle, 0, 8);
-            this.tableParams.SetColumnSpan(this.chkCircle, 2);
-
-            // 行 9：判定阈值
-            this.lblSectionThresh.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblSectionThresh.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.lblSectionThresh.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblSectionThresh.Text = "判定阈值";
-            this.lblSectionThresh.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.tableParams.Controls.Add(this.lblSectionThresh, 0, 9);
-            this.tableParams.SetColumnSpan(this.lblSectionThresh, 2);
-
-            this.lblMinArea.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblMinArea.ForeColor = System.Drawing.Color.Silver;
-            this.lblMinArea.Text = "最小面积";
-            this.lblMinArea.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numMinArea.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numMinArea.Maximum = new decimal(new int[] { 1000000, 0, 0, 0 });
-            this.numMinArea.Value = new decimal(new int[] { 100, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblMinArea, 0, 10);
-            this.tableParams.Controls.Add(this.numMinArea, 1, 10);
-
-            this.lblMaxArea.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblMaxArea.ForeColor = System.Drawing.Color.Silver;
-            this.lblMaxArea.Text = "最大面积";
-            this.lblMaxArea.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numMaxArea.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numMaxArea.Maximum = new decimal(new int[] { 1000000, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblMaxArea, 0, 11);
-            this.tableParams.Controls.Add(this.numMaxArea, 1, 11);
-
-            this.lblExpected.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblExpected.ForeColor = System.Drawing.Color.Silver;
-            this.lblExpected.Text = "期望数量";
-            this.lblExpected.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numExpected.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numExpected.Maximum = new decimal(new int[] { 100, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblExpected, 0, 12);
-            this.tableParams.Controls.Add(this.numExpected, 1, 12);
-
-            this.lblMinScore.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblMinScore.ForeColor = System.Drawing.Color.Silver;
-            this.lblMinScore.Text = "匹配下限";
-            this.lblMinScore.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numMinScore.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numMinScore.DecimalPlaces = 2;
-            this.numMinScore.Increment = new decimal(new int[] { 5, 0, 0, 131072 });
-            this.numMinScore.Maximum = new decimal(new int[] { 1, 0, 0, 0 });
-            this.numMinScore.Value = new decimal(new int[] { 80, 0, 0, 131072 });
-            this.tableParams.Controls.Add(this.lblMinScore, 0, 13);
-            this.tableParams.Controls.Add(this.numMinScore, 1, 13);
-
-            this.lblMinSharp.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblMinSharp.ForeColor = System.Drawing.Color.Silver;
-            this.lblMinSharp.Text = "清晰度下限";
-            this.lblMinSharp.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.numMinSharp.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.numMinSharp.Maximum = new decimal(new int[] { 100000, 0, 0, 0 });
-            this.numMinSharp.Value = new decimal(new int[] { 50, 0, 0, 0 });
-            this.tableParams.Controls.Add(this.lblMinSharp, 0, 14);
-            this.tableParams.Controls.Add(this.numMinSharp, 1, 14);
-
-            // ---------- 按钮 ----------
-            this.btnOpenImage.Location = new System.Drawing.Point(8, 414);
-            this.btnOpenImage.Name = "btnOpenImage";
-            this.btnOpenImage.Size = new System.Drawing.Size(286, 32);
-            this.btnOpenImage.TabIndex = 1;
-            this.btnOpenImage.Text = "打开本地图片并检测";
+            // ---------- 控件属性 ----------
+            this.btnOpenImage.Text = "打开本地图片";
             this.btnOpenImage.Click += new System.EventHandler(this.OnOpenImage);
 
-            this.btnGrabRun.Location = new System.Drawing.Point(8, 452);
-            this.btnGrabRun.Name = "btnGrabRun";
-            this.btnGrabRun.Size = new System.Drawing.Size(286, 32);
-            this.btnGrabRun.TabIndex = 2;
-            this.btnGrabRun.Text = "从相机取帧并检测";
-            this.btnGrabRun.Click += new System.EventHandler(this.OnGrabAndRun);
+            this.btnGrab.Text = "从相机取帧";
+            this.btnGrab.Click += new System.EventHandler(this.OnGrab);
 
-            this.btnTrain.Location = new System.Drawing.Point(8, 490);
-            this.btnTrain.Name = "btnTrain";
-            this.btnTrain.Size = new System.Drawing.Size(286, 32);
-            this.btnTrain.TabIndex = 3;
-            this.btnTrain.Text = "用当前图片训练模板";
+            this.btnPickTemplate.Text = "在图上框选模板";
+            this.btnPickTemplate.Click += new System.EventHandler(this.OnPickTemplate);
+
+            this.btnTemplateFull.Text = "使用整图作为模板";
+            this.btnTemplateFull.Click += new System.EventHandler(this.OnTemplateFull);
+
+            this.btnTrain.Text = "训练形状模型";
             this.btnTrain.Click += new System.EventHandler(this.OnTrain);
 
-            this.btnSaveRecipe.Location = new System.Drawing.Point(8, 528);
-            this.btnSaveRecipe.Name = "btnSaveRecipe";
-            this.btnSaveRecipe.Size = new System.Drawing.Size(286, 32);
-            this.btnSaveRecipe.TabIndex = 4;
-            this.btnSaveRecipe.Text = "保存为当前配方";
-            this.btnSaveRecipe.Click += new System.EventHandler(this.OnSaveRecipe);
+            this.lblModelInfo.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblModelInfo.ForeColor = System.Drawing.Color.Gold;
+            this.lblModelInfo.Text = "尚未训练模型";
+            this.lblModelInfo.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.btnFit.Location = new System.Drawing.Point(8, 566);
-            this.btnFit.Name = "btnFit";
-            this.btnFit.Size = new System.Drawing.Size(286, 32);
-            this.btnFit.TabIndex = 5;
+            this.chkShowFeatures.Text = "显示模板特征点（橙色图层）";
+            this.chkShowFeatures.Checked = true;
+            this.chkShowFeatures.CheckedChanged += new System.EventHandler(this.OnToggleFeatures);
+
+            this.chkSubpixel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.chkSubpixel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.chkSubpixel.Text = "亚像素精化（更慢更准）";
+            this.chkSubpixel.Checked = true;
+
+            this.lblPoseHint.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPoseHint.ForeColor = System.Drawing.Color.Gray;
+            this.lblPoseHint.Text = "";
+            this.lblPoseHint.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.btnPickSearch.Text = "在图上框选搜索区域";
+            this.btnPickSearch.Click += new System.EventHandler(this.OnPickSearch);
+
+            this.btnSearchFull.Text = "搜索整图";
+            this.btnSearchFull.Click += new System.EventHandler(this.OnSearchFull);
+
+            this.btnMatch.Text = "执行匹配";
+            this.btnMatch.Click += new System.EventHandler(this.OnMatch);
+
+            this.btnClearModel.Text = "清除模型";
+            this.btnClearModel.Click += new System.EventHandler(this.OnClearModel);
+
             this.btnFit.Text = "适应窗口";
             this.btnFit.Click += new System.EventHandler(this.OnFit);
 
             // ---------- panelRight ----------
             this.panelRight.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelRight.Location = new System.Drawing.Point(310, 0);
+            this.panelRight.Location = new System.Drawing.Point(340, 0);
             this.panelRight.Name = "panelRight";
             this.panelRight.Padding = new System.Windows.Forms.Padding(4);
-            this.panelRight.Size = new System.Drawing.Size(730, 620);
+            this.panelRight.Size = new System.Drawing.Size(700, 620);
             this.panelRight.TabIndex = 1;
 
             this.lblVerdict.Dock = System.Windows.Forms.DockStyle.Top;
@@ -278,23 +221,43 @@ namespace VisionPlatform.UI
             this.lblVerdict.ForeColor = System.Drawing.Color.Silver;
             this.lblVerdict.Location = new System.Drawing.Point(4, 4);
             this.lblVerdict.Name = "lblVerdict";
-            this.lblVerdict.Size = new System.Drawing.Size(722, 40);
+            this.lblVerdict.Size = new System.Drawing.Size(692, 40);
             this.lblVerdict.TabIndex = 0;
-            this.lblVerdict.Text = "尚未检测";
+            this.lblVerdict.Text = "请载入图像并训练形状模型";
             this.lblVerdict.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
 
-            this.listResults.BackColor = System.Drawing.Color.FromArgb(28, 28, 34);
-            this.listResults.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.listResults.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.listResults.ForeColor = System.Drawing.Color.Gainsboro;
-            this.listResults.IntegralHeight = false;
-            this.listResults.ItemHeight = 15;
-            this.listResults.Location = new System.Drawing.Point(4, 476);
-            this.listResults.Name = "listResults";
-            this.listResults.Size = new System.Drawing.Size(722, 140);
-            this.listResults.TabIndex = 1;
+            // ---------- gridResults：结果表格（点列头可排序）----------
+            this.gridResults.AllowUserToAddRows = false;
+            this.gridResults.AllowUserToDeleteRows = false;
+            this.gridResults.AllowUserToResizeRows = false;
+            this.gridResults.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.gridResults.BackgroundColor = System.Drawing.Color.FromArgb(28, 28, 34);
+            this.gridResults.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.gridResults.ColumnHeadersHeightSizeMode =
+                System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.gridResults.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.gridResults.EnableHeadersVisualStyles = false;
+            this.gridResults.ForeColor = System.Drawing.Color.Gainsboro;
+            this.gridResults.GridColor = System.Drawing.Color.FromArgb(60, 60, 70);
+            this.gridResults.Location = new System.Drawing.Point(4, 440);
+            this.gridResults.MultiSelect = false;
+            this.gridResults.Name = "gridResults";
+            this.gridResults.ReadOnly = true;
+            this.gridResults.RowHeadersVisible = false;
+            this.gridResults.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.gridResults.Size = new System.Drawing.Size(692, 176);
+            this.gridResults.TabIndex = 1;
 
-            // 显示控件由 AlgoForm 构造函数创建并加入 panelRight
+            this.gridResults.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(45, 45, 52);
+            this.gridResults.ColumnHeadersDefaultCellStyle.ForeColor = System.Drawing.Color.DeepSkyBlue;
+            this.gridResults.ColumnHeadersDefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(45, 45, 52);
+            this.gridResults.DefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(28, 28, 34);
+            this.gridResults.DefaultCellStyle.ForeColor = System.Drawing.Color.Gainsboro;
+            this.gridResults.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(0, 90, 130);
+            this.gridResults.DefaultCellStyle.SelectionForeColor = System.Drawing.Color.White;
+
+            // 显示控件 ImageViewer 由 AlgoForm 构造函数创建并加入 panelRight
+
             // ---------- AlgoForm ----------
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -306,15 +269,8 @@ namespace VisionPlatform.UI
             this.MinimumSize = new System.Drawing.Size(900, 500);
             this.Name = "AlgoForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "算法参数与离线测试";
+            this.Text = "形状匹配（基于边缘轮廓）";
 
-            ((System.ComponentModel.ISupportInitialize)(this.numBlur)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numThreshold)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinArea)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMaxArea)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numExpected)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinScore)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numMinSharp)).EndInit();
             this.panelLeft.ResumeLayout(false);
             this.panelLeft.PerformLayout();
             this.tableParams.ResumeLayout(false);
@@ -324,43 +280,100 @@ namespace VisionPlatform.UI
 
         #endregion
 
+        private const int kParamRows = 42;
+        private const int kRowHeight = 28;
+
+        // ---------- 布局辅助（手工编写，便于按行追加参数）----------
+
+        private static System.Windows.Forms.NumericUpDown MakeNum(decimal min, decimal max, decimal value, int decimals)
+        {
+            var n = new System.Windows.Forms.NumericUpDown();
+            n.Dock = System.Windows.Forms.DockStyle.Fill;
+            n.Minimum = min;
+            n.Maximum = max;
+            n.Value = value;
+            n.DecimalPlaces = decimals;
+            n.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            n.ForeColor = System.Drawing.Color.Gainsboro;
+            return n;
+        }
+
+        private void AddSection(string text, int row)
+        {
+            var l = new System.Windows.Forms.Label();
+            l.Dock = System.Windows.Forms.DockStyle.Fill;
+            l.ForeColor = System.Drawing.Color.DeepSkyBlue;
+            l.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Bold);
+            l.Text = text;
+            l.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.tableParams.Controls.Add(l, 0, row);
+            this.tableParams.SetColumnSpan(l, 2);
+        }
+
+        private void AddFull(System.Windows.Forms.Control c, int row)
+        {
+            c.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tableParams.Controls.Add(c, 0, row);
+            this.tableParams.SetColumnSpan(c, 2);
+        }
+
+        private void AddRow(string labelText, System.Windows.Forms.Control value, int row)
+        {
+            var l = new System.Windows.Forms.Label();
+            l.Dock = System.Windows.Forms.DockStyle.Fill;
+            l.ForeColor = System.Drawing.Color.Silver;
+            l.Text = labelText;
+            l.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.tableParams.Controls.Add(l, 0, row);
+            this.tableParams.Controls.Add(value, 1, row);
+        }
+
         private System.Windows.Forms.Panel panelLeft;
         private System.Windows.Forms.TableLayoutPanel tableParams;
-
-        private System.Windows.Forms.Label lblSectionPre;
-        private System.Windows.Forms.Label lblBlur;
-        private System.Windows.Forms.NumericUpDown numBlur;
-        private System.Windows.Forms.Label lblThreshold;
-        private System.Windows.Forms.NumericUpDown numThreshold;
-        private System.Windows.Forms.Label lblMorph;
-        private System.Windows.Forms.ComboBox cmbMorph;
-
-        private System.Windows.Forms.Label lblSectionItems;
-        private System.Windows.Forms.CheckBox chkBlob;
-        private System.Windows.Forms.CheckBox chkSharp;
-        private System.Windows.Forms.CheckBox chkTemplate;
-        private System.Windows.Forms.CheckBox chkCircle;
-
-        private System.Windows.Forms.Label lblSectionThresh;
-        private System.Windows.Forms.Label lblMinArea;
-        private System.Windows.Forms.NumericUpDown numMinArea;
-        private System.Windows.Forms.Label lblMaxArea;
-        private System.Windows.Forms.NumericUpDown numMaxArea;
-        private System.Windows.Forms.Label lblExpected;
-        private System.Windows.Forms.NumericUpDown numExpected;
-        private System.Windows.Forms.Label lblMinScore;
-        private System.Windows.Forms.NumericUpDown numMinScore;
-        private System.Windows.Forms.Label lblMinSharp;
-        private System.Windows.Forms.NumericUpDown numMinSharp;
-
-        private System.Windows.Forms.Button btnOpenImage;
-        private System.Windows.Forms.Button btnGrabRun;
-        private System.Windows.Forms.Button btnTrain;
-        private System.Windows.Forms.Button btnSaveRecipe;
-        private System.Windows.Forms.Button btnFit;
-
         private System.Windows.Forms.Panel panelRight;
         private System.Windows.Forms.Label lblVerdict;
-        private System.Windows.Forms.ListBox listResults;
+        private System.Windows.Forms.DataGridView gridResults;
+
+        private System.Windows.Forms.Button btnOpenImage;
+        private System.Windows.Forms.Button btnGrab;
+
+        private System.Windows.Forms.NumericUpDown numTplX;
+        private System.Windows.Forms.NumericUpDown numTplY;
+        private System.Windows.Forms.NumericUpDown numTplW;
+        private System.Windows.Forms.NumericUpDown numTplH;
+        private System.Windows.Forms.Button btnPickTemplate;
+        private System.Windows.Forms.Button btnTemplateFull;
+
+        private System.Windows.Forms.NumericUpDown numContrast;
+        private System.Windows.Forms.NumericUpDown numMaxFeatures;
+        private System.Windows.Forms.NumericUpDown numMinFeatureDist;
+        private System.Windows.Forms.Button btnTrain;
+        private System.Windows.Forms.Label lblModelInfo;
+        private System.Windows.Forms.CheckBox chkShowFeatures;
+
+        private System.Windows.Forms.NumericUpDown numAngleStart;
+        private System.Windows.Forms.NumericUpDown numAngleEnd;
+        private System.Windows.Forms.NumericUpDown numAngleStep;
+        private System.Windows.Forms.NumericUpDown numScaleMin;
+        private System.Windows.Forms.NumericUpDown numScaleMax;
+        private System.Windows.Forms.NumericUpDown numScaleStep;
+        private System.Windows.Forms.NumericUpDown numPyramid;
+        private System.Windows.Forms.NumericUpDown numMinScore;
+        private System.Windows.Forms.NumericUpDown numMaxMatches;
+        private System.Windows.Forms.NumericUpDown numOverlap;
+        private System.Windows.Forms.NumericUpDown numGreediness;
+        private System.Windows.Forms.CheckBox chkSubpixel;
+        private System.Windows.Forms.Label lblPoseHint;
+
+        private System.Windows.Forms.NumericUpDown numSrchX;
+        private System.Windows.Forms.NumericUpDown numSrchY;
+        private System.Windows.Forms.NumericUpDown numSrchW;
+        private System.Windows.Forms.NumericUpDown numSrchH;
+        private System.Windows.Forms.Button btnPickSearch;
+        private System.Windows.Forms.Button btnSearchFull;
+
+        private System.Windows.Forms.Button btnMatch;
+        private System.Windows.Forms.Button btnClearModel;
+        private System.Windows.Forms.Button btnFit;
     }
 }

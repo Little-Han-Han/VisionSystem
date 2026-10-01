@@ -9,7 +9,8 @@
  *    algo/va_preprocess.h    预处理
  *    algo/va_blob.h          连通域分析
  *    algo/va_fit.h           圆 / 直线拟合
- *    algo/va_match.h         模板训练与匹配
+ *    algo/va_match.h         模板训练与匹配（灰度归一化相关，仅平移）
+ *    algo/va_shape.h         基于边缘轮廓的形状匹配（角度 / 缩放 / 金字塔 / ROI）
  *    algo/va_measure.h       清晰度与边缘计数
  *
  *  设计约定（C# 侧 P/Invoke 依赖这些约定，改动需同步）：
@@ -30,6 +31,7 @@
 #include "algo/va_blob.h"
 #include "algo/va_fit.h"
 #include "algo/va_match.h"
+#include "algo/va_shape.h"
 #include "algo/va_measure.h"
 
 #endif /* VISION_ALGO_H */
