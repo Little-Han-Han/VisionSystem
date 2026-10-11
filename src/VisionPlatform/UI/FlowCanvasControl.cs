@@ -22,6 +22,53 @@ namespace VisionPlatform.UI
     }
 
     /// <summary>
+    /// 连线被拒事件参数（画布 toast 只显示 2.8 秒，容易漏看，因此同时发事件供日志区回看）。
+    /// 端子上下文可能为空（例如方向错误时尚未解析出「输出 → 输入」两端）。
+    /// </summary>
+    public sealed class FlowLinkRejectedEventArgs : EventArgs
+    {
+        /// <summary>中文拒绝原因（可直接进日志）。</summary>
+        public string Reason { get; private set; }
+
+        public string FromNodeId { get; private set; }
+        public string FromPort { get; private set; }
+        public string ToNodeId { get; private set; }
+        public string ToPort { get; private set; }
+
+        public FlowLinkRejectedEventArgs(string reason,
+                                         string fromNodeId, string fromPort,
+                                         string toNodeId, string toPort)
+        {
+            Reason = reason ?? "";
+            FromNodeId = fromNodeId ?? "";
+            FromPort = fromPort ?? "";
+            ToNodeId = toNodeId ?? "";
+            ToPort = toPort ?? "";
+        }
+
+        public override string ToString() { return Reason; }
+    }
+
+    /// <summary>
+    /// 连线被替换事件参数：同一输入端子重复连接时，旧边被新边替换（端口级唯一入边语义）。
+    /// 旧边同时会走 <c>LinkRemoved</c> 事件，两者都发是为了让日志区能区分「删线」与「换线」。
+    /// </summary>
+    public sealed class FlowLinkReplacedEventArgs : EventArgs
+    {
+        /// <summary>被替换掉的旧连线。</summary>
+        public FlowLink OldLink { get; private set; }
+
+        /// <summary>替换后的新连线。</summary>
+        public FlowLink NewLink { get; private set; }
+
+        public FlowLinkReplacedEventArgs(FlowLink oldLink, FlowLink newLink)
+        {
+            OldLink = oldLink;
+            NewLink = newLink;
+        }
+    }
+
+    /// <summary>
     /// 画布节点的运行状态（FR-ALG-23）：等待（灰）/ 运行中（蓝）/ 成功（绿）/ 失败（红）。
     /// 由执行期 <see cref="FlowNodeStatus"/> 映射而来，画布只认这四个视觉态。
     /// </summary>
@@ -178,6 +225,13 @@ namespace VisionPlatform.UI
         public event EventHandler<FlowNodeEventArgs> NodeSelected;
         public event EventHandler<FlowLinkEventArgs> LinkAdded;
         public event EventHandler<FlowLinkEventArgs> LinkRemoved;
+
+        /// <summary>连线被拒绝（类型不兼容 / 成环 / 自连 / 方向错 / 重复连接）。原因串可直接进日志区。</summary>
+        public event EventHandler<FlowLinkRejectedEventArgs> LinkRejected;
+
+        /// <summary>同一输入端子被重新连接：旧边被新边替换。</summary>
+        public event EventHandler<FlowLinkReplacedEventArgs> LinkReplaced;
+
         public event EventHandler Changed;
 
         #endregion
@@ -244,6 +298,127 @@ namespace VisionPlatform.UI
 
         /// <summary>清空选择并重绘（外部改绑流程后调用）。</summary>
         public void RefreshView() { Invalidate(); }
+
+        // ---------------------- 自动整理布局（供 FlowForm 按钮调用）----------------------
+
+        /// <summary>自动整理布局的列间距（固定）。</summary>
+        private const int AutoLayoutColGap = 180;
+
+        /// <summary>自动整理布局的列内行距（在节点实际高度之外再加这么多）。</summary>
+        private const int AutoLayoutRowGap = 12;
+
+        /// <summary>自动整理布局的外边距。</summary>
+        private const int AutoLayoutMargin = 24;
+
+        /// <summary>
+        /// 自动整理布局：按拓扑序分层，从左到右排列；列内按当前 Y 升序堆叠，
+        /// 行距 = 节点<strong>当前实际高度</strong> + 12 px（端子化后节点变高，不能再用旧的固定 44 px）；
+        /// 孤立节点与环上节点排在最右列。
+        /// 用途：老配置按旧节点高度存的坐标在端子化后可能重叠，由用户点按钮显式整理。
+        /// ⚠️ <strong>只应在用户显式调用时使用</strong>，加载配置时不得自动调用——
+        /// 静默改写用户坐标是本项目的红线（参考 MaxParallelFlows 的教训）。
+        /// </summary>
+        public void AutoLayout()
+        {
+            if (_flow == null || _flow.Nodes == null || _flow.Nodes.Count == 0) return;
+
+            List<FlowNode> order;
+            string error;
+            FlowOrder.Build(_flow, out order, out error);
+
+            // 上游表（去重，与 FlowOrder 的入度口径一致）+ 是否有出边
+            var upstream = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var hasOut = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (FlowNode n in _flow.Nodes)
+            {
+                if (n == null || string.IsNullOrEmpty(n.Id)) continue;
+                if (!upstream.ContainsKey(n.Id)) upstream[n.Id] = new List<string>();
+                if (!hasOut.ContainsKey(n.Id)) hasOut[n.Id] = false;
+            }
+            if (_flow.Links != null)
+            {
+                foreach (FlowLink l in _flow.Links)
+                {
+                    if (l == null) continue;
+                    if (!upstream.ContainsKey(l.ToNodeId) || !hasOut.ContainsKey(l.FromNodeId)) continue;
+                    if (!upstream[l.ToNodeId].Contains(l.FromNodeId)) upstream[l.ToNodeId].Add(l.FromNodeId);
+                    hasOut[l.FromNodeId] = true;
+                }
+            }
+
+            // 分层：rank = 1 + max(上游 rank)
+            var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+            var inOrder = new HashSet<string>(StringComparer.Ordinal);
+            foreach (FlowNode n in order)
+            {
+                if (n == null || string.IsNullOrEmpty(n.Id)) continue;
+                inOrder.Add(n.Id);
+
+                int r = 0;
+                List<string> ups;
+                if (upstream.TryGetValue(n.Id, out ups) && ups != null)
+                {
+                    foreach (string up in ups)
+                        r = Math.Max(r, rank.ContainsKey(up) ? rank[up] + 1 : 1);
+                }
+                rank[n.Id] = r;
+            }
+
+            int maxRank = 0;
+            foreach (KeyValuePair<string, int> kv in rank)
+                if (kv.Value > maxRank) maxRank = kv.Value;
+
+            // 孤立节点 / 不在拓扑序里的节点（环上）→ 最右列
+            int lastRank = maxRank + 1;
+            foreach (FlowNode n in _flow.Nodes)
+            {
+                if (n == null || string.IsNullOrEmpty(n.Id)) continue;
+                if (!inOrder.Contains(n.Id)) { rank[n.Id] = lastRank; continue; }
+
+                List<string> ups;
+                bool noIn = !upstream.TryGetValue(n.Id, out ups) || ups == null || ups.Count == 0;
+                bool noOut = !hasOut.ContainsKey(n.Id) || !hasOut[n.Id];
+                if (noIn && noOut) rank[n.Id] = lastRank;
+            }
+
+            // 按列落位：列内按当前 Y 升序（Y 相同再按 X / Id），纵向按实际高度累加
+            var columns = new SortedDictionary<int, List<FlowNode>>();
+            foreach (FlowNode n in _flow.Nodes)
+            {
+                if (n == null || string.IsNullOrEmpty(n.Id)) continue;
+
+                int r;
+                if (!rank.TryGetValue(n.Id, out r)) r = lastRank;
+
+                List<FlowNode> list;
+                if (!columns.TryGetValue(r, out list)) { list = new List<FlowNode>(); columns[r] = list; }
+                list.Add(n);
+            }
+
+            int colIndex = 0;
+            foreach (KeyValuePair<int, List<FlowNode>> kv in columns)
+            {
+                List<FlowNode> column = kv.Value;
+                column.Sort(delegate(FlowNode a, FlowNode b)
+                {
+                    int c = a.Y.CompareTo(b.Y);
+                    return c != 0 ? c : FlowOrder.CompareNodes(a, b);
+                });
+
+                float x = AutoLayoutMargin + colIndex * AutoLayoutColGap;
+                float y = AutoLayoutMargin;
+                foreach (FlowNode n in column)
+                {
+                    n.X = x;
+                    n.Y = y;
+                    y += NodeHeight(n) + AutoLayoutRowGap;
+                }
+                colIndex++;
+            }
+
+            RaiseChanged();     // 坐标变了，通知外部保存
+            Invalidate();
+        }
 
         // ---------------------- 运行状态（FR-ALG-23）----------------------
 
@@ -693,35 +868,37 @@ namespace VisionPlatform.UI
             }
             else
             {
-                ShowToast("连线只能从输出端子（右侧）连到输入端子（左侧）", true);
+                RejectLink("连线只能从输出端子（右侧）连到输入端子（左侧）", true,
+                           _linkSource.Node, _linkSource.Port, target.Node, target.Port);
                 return;
             }
 
             if (fromNode == toNode)
             {
-                ShowToast("不能连接到节点自身", true);
+                RejectLink("不能连接到节点自身", true, fromNode, fromPort, toNode, toPort);
                 return;
             }
 
             // ---- 类型兼容（FlowPortSchema）----
             if (!toPort.Accepts(fromPort.Kind))
             {
-                ShowToast("类型不兼容：" + fromPort.DisplayName + "(" + fromPort.Kind
-                          + ") 不能连到 " + toPort.DisplayName + "(" + toPort.Kind + ")", true);
+                RejectLink("类型不兼容：" + fromPort.DisplayName + "(" + fromPort.Kind
+                           + ") 不能连到 " + toPort.DisplayName + "(" + toPort.Kind + ")",
+                           true, fromNode, fromPort, toNode, toPort);
                 return;
             }
 
             // ---- 成环预检（FlowOrder）----
             if (FlowOrder.WouldCreateCycle(_flow, fromNode.Id, toNode.Id))
             {
-                ShowToast("该连线会形成环路，已拒绝", true);
+                RejectLink("该连线会形成环路，已拒绝", true, fromNode, fromPort, toNode, toPort);
                 return;
             }
 
             // ---- 重复连线：幂等处理，不再重复建链 / 发事件 ----
             if (LinkExists(fromNode.Id, fromPort.Key, toNode.Id, toPort.Key))
             {
-                ShowToast("该连线已存在", false);
+                RejectLink("该连线已存在", false, fromNode, fromPort, toNode, toPort);
                 return;
             }
 
@@ -729,7 +906,8 @@ namespace VisionPlatform.UI
             // 理由：端口化后一个输入端子语义上只有一个数据来源（执行器按端子取唯一输入），
             // 端子上已有连线时再连新线，用户意图明确是「换数据源」——按 VisionPro 的行为
             // 用「替换」而不是「拒绝」，省去先删旧线再连新线的两步操作。
-            // 被替换的旧边照常发 LinkRemoved，FlowForm 侧无需特殊处理。
+            // 被替换的旧边照常发 LinkRemoved，并额外发 LinkReplaced（让日志区能区分「删线」与「换线」）。
+            var replaced = new List<FlowLink>();
             for (int i = _flow.Links.Count - 1; i >= 0; i--)
             {
                 FlowLink l = _flow.Links[i];
@@ -738,6 +916,7 @@ namespace VisionPlatform.UI
                 {
                     _flow.Links.RemoveAt(i);
                     RaiseLinkRemoved(l);
+                    replaced.Add(l);
                 }
             }
 
@@ -746,8 +925,26 @@ namespace VisionPlatform.UI
             _selectedLinkIndex = _flow.Links.Count - 1;
             _selectedNodeId = null;
             RaiseLinkAdded(link);
+            foreach (FlowLink old in replaced) RaiseLinkReplaced(old, link);
             RaiseChanged();
             Invalidate();
+        }
+
+        /// <summary>
+        /// 拒绝建链的统一出口：画布 toast（短暂）+ <see cref="LinkRejected"/> 事件（可进日志长期可看）。
+        /// 两个出口都走，避免 2.8 秒后原因消失、用户在日志里查不到。
+        /// </summary>
+        private void RejectLink(string reason, bool error,
+                                FlowNode fromNode, FlowPortDef fromPort,
+                                FlowNode toNode, FlowPortDef toPort)
+        {
+            ShowToast(reason, error);
+
+            string fromNodeId = fromNode != null ? fromNode.Id : "";
+            string toNodeId = toNode != null ? toNode.Id : "";
+            string fromPortKey = fromPort != null ? fromPort.Key : "";
+            string toPortKey = toPort != null ? toPort.Key : "";
+            RaiseLinkRejected(reason, fromNodeId, fromPortKey, toNodeId, toPortKey);
         }
 
         /// <summary>连线是否已存在（同两端节点 + 同两端端子）。</summary>
@@ -1258,6 +1455,20 @@ namespace VisionPlatform.UI
         {
             EventHandler<FlowLinkEventArgs> h = LinkRemoved;
             if (h != null) h(this, new FlowLinkEventArgs(link));
+        }
+
+        private void RaiseLinkRejected(string reason,
+                                       string fromNodeId, string fromPort,
+                                       string toNodeId, string toPort)
+        {
+            EventHandler<FlowLinkRejectedEventArgs> h = LinkRejected;
+            if (h != null) h(this, new FlowLinkRejectedEventArgs(reason, fromNodeId, fromPort, toNodeId, toPort));
+        }
+
+        private void RaiseLinkReplaced(FlowLink oldLink, FlowLink newLink)
+        {
+            EventHandler<FlowLinkReplacedEventArgs> h = LinkReplaced;
+            if (h != null) h(this, new FlowLinkReplacedEventArgs(oldLink, newLink));
         }
 
         private void RaiseChanged()
