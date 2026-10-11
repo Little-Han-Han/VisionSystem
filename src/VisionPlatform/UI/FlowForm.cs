@@ -8,9 +8,88 @@ using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Core;
 using VisionPlatform.Flow;
+using VisionSystem.Controls;
+using VisionSystem.Controls.Geometry;
 
 namespace VisionPlatform.UI
 {
+    /// <summary>预览区可手动画出的几何类型（对应不同卡尺 / ROI 参数）。</summary>
+    public enum DrawShapeKind
+    {
+        /// <summary>轴对齐矩形 ROI（X / Y / W / H）。</summary>
+        Rect,
+
+        /// <summary>直线卡尺的扫描线段（X1 / Y1 / X2 / Y2）。</summary>
+        Line,
+
+        /// <summary>圆卡尺的环形 ROI（Cx / Cy / InnerRadius / OuterRadius）。</summary>
+        Ring
+    }
+
+    /// <summary>
+    /// 预览区「画几何」的一组参数：要画什么形状、用哪种交互模式、显示名、历史主键，
+    /// 以及写回节点的四参数键（按 <see cref="Kind"/> 解释前四个键的含义）。
+    /// <para>
+    /// 不硬编码节点类型：由 <see cref="FindDrawSpecs"/> 按参数表实际字段匹配生成，
+    /// 哪个节点真的有这些键就对它可用。矩形适用于模板区域 / ROI 裁剪 / 搜索区域；
+    /// 直线与圆环分别适用于直线卡尺 / 圆卡尺的扫描几何。
+    /// </para>
+    /// </summary>
+    public sealed class DrawSpec
+    {
+        /// <summary>几何类型。</summary>
+        public readonly DrawShapeKind Kind;
+
+        /// <summary>进入绘制时控件应切换到的交互模式。</summary>
+        public readonly InteractionMode Mode;
+
+        /// <summary>菜单 / 提示里显示的名称（一般取参数表分组标题）。</summary>
+        public readonly string Label;
+
+        /// <summary>历史选择用的稳定主键（矩形=该组的 X 键；直线=X1；圆环=Cx）。</summary>
+        public readonly string PrimaryKey;
+
+        /// <summary>进入绘制时已有的几何（用于预览）；可能为 null。</summary>
+        public IGeometryShape Current;
+
+        // 写回键：含义随 Kind 而定
+        public readonly string X, Y, W, H;                 // Rect: X / Y / W / H
+        public readonly string X1, Y1, X2, Y2;             // Line: 线段两端点
+        public readonly string Cx, Cy, InnerRadius, OuterRadius; // Ring: 圆心与内外半径
+
+        private DrawSpec(DrawShapeKind kind, InteractionMode mode, string label, string primaryKey,
+            string x, string y, string w, string h,
+            string x1, string y1, string x2, string y2,
+            string cx, string cy, string inner, string outer)
+        {
+            Kind = kind; Mode = mode; Label = label; PrimaryKey = primaryKey;
+            X = x; Y = y; W = w; H = h;
+            X1 = x1; Y1 = y1; X2 = x2; Y2 = y2;
+            Cx = cx; Cy = cy; InnerRadius = inner; OuterRadius = outer;
+        }
+
+        /// <summary>构造矩形 ROI 描述（模板区域 / ROI 裁剪 / 搜索区域）。</summary>
+        public static DrawSpec MakeRect(string label, string x, string y, string w, string h)
+        {
+            return new DrawSpec(DrawShapeKind.Rect, InteractionMode.DrawRectangle, label, x,
+                x, y, w, h, null, null, null, null, null, null, null, null);
+        }
+
+        /// <summary>构造直线卡尺描述（扫描线段 X1/Y1/X2/Y2）。</summary>
+        public static DrawSpec MakeLine(string label)
+        {
+            return new DrawSpec(DrawShapeKind.Line, InteractionMode.DrawLine, label, "X1",
+                null, null, null, null, "X1", "Y1", "X2", "Y2", null, null, null, null);
+        }
+
+        /// <summary>构造圆卡尺描述（环形 ROI Cx/Cy/InnerRadius/OuterRadius）。</summary>
+        public static DrawSpec MakeRing(string label)
+        {
+            return new DrawSpec(DrawShapeKind.Ring, InteractionMode.DrawRing, label, "Cx",
+                null, null, null, null, null, null, null, null, "Cx", "Cy", "InnerRadius", "OuterRadius");
+        }
+    }
+
     /// <summary>
     /// 流程编排页：工具箱拖拽源 / 画布 / 节点参数面板 / 底部流程管理与绑定。
     /// 所有编辑即时写回 <see cref="ConfigStore"/>；运行单链流程并把结果经
@@ -32,7 +111,7 @@ namespace VisionPlatform.UI
         private const string OverlayClearedHint = "叠加图形已清除，重新运行可再次显示。";
 
         private FlowNode _selectedNode; // 画布当前选中节点（画 ROI / 回填图像源都优先用它）
-        private RoiGroup _roiGroup;     // 本次正在画的是哪一组 ROI（多组并存时由用户选）
+        private DrawSpec _drawSpec;     // 本次正在画的是哪一组几何（多组并存时由用户选）
 
         /// <summary>
         /// 每个节点上次画的是哪一组 ROI：key = 节点 Id，value = 该组的 X 参数键（组标识）。
@@ -100,8 +179,9 @@ namespace VisionPlatform.UI
 
             // 「画 ROI」按钮在预览区顶条（FlowPreviewPanel 内，与「载入图片」并排在其左侧）：
             // 它作用于预览图，放在预览区语义更贴切，也避免挤在「绑定与运行」分组里。
-            flowPreview.RoiPicked += OnRoiPicked;
-            flowPreview.RoiPickRequested += OnRoiPickRequested;
+            // 画几何（矩形 ROI / 直线 / 圆环）统一走 ShapePicked；RoiPickRequested / RoiPickCancelled 保留兼容
+            flowPreview.ShapePicked += OnShapePicked;
+            flowPreview.RoiPickRequested += OnDrawRequested;
             flowPreview.RoiPickCancelled += OnRoiPickCancelled;
         }
 
@@ -593,53 +673,7 @@ namespace VisionPlatform.UI
             return false;
         }
 
-        #region 画 ROI（B）
-
-        /// <summary>一组「矩形 ROI」四参数键（X / Y / W / H）及其显示名（取自参数表分组标题）。</summary>
-        private sealed class RoiGroup
-        {
-            public readonly string X;
-            public readonly string Y;
-            public readonly string W;
-            public readonly string H;
-            public readonly string Label;
-
-            public RoiGroup(string x, string y, string w, string h, string label)
-            {
-                X = x; Y = y; W = w; H = h; Label = label;
-            }
-        }
-
-        /// <summary>
-        /// 候选矩形 ROI 参数组。<strong>不硬编码节点类型</strong>：按参数表实际字段匹配，
-        /// 哪个节点真的有这四个键就对它可用（ImageSource = ROI 裁剪；
-        /// ShapeMatch / TemplateMatch = 模板区域 + 搜索区域，两组并存时由用户选）。
-        /// 显示名优先取参数表里最近的分组标题（去掉括号里的补充说明），取不到才用这里的兜底名。
-        /// <para>
-        /// 【数组顺序 = 优先级】模板/训练区域 &gt; ROI 裁剪 &gt; 搜索区域。
-        /// 理由：ShapeMatch / TemplateMatch 的训练区域是算法的「输入定义」，没画就没法建模，
-        /// 是第一步必做的事；搜索区域默认整图即可，属于后续调优。故无历史选择时取第 0 项。
-        /// </para>
-        /// <para>
-        /// 【圆环 ROI 不做】圆卡尺 / 圆环卡尺参数表里的「环形 ROI」（Cx / Cy / 内径 / 外径）
-        /// 是圆环带而非矩形，暂不支持；当前矩形即搜索区域 —— 与 VisionPro FindCircle 语义一致
-        /// （在矩形范围内找圆 / 圆环），因此不是缺陷、也不是遗漏。
-        /// </para>
-        /// </summary>
-        private static readonly RoiGroup[] RoiCandidates =
-        {
-            new RoiGroup("TemplateX", "TemplateY", "TemplateW", "TemplateH", "模板区域"),
-            new RoiGroup("RoiX", "RoiY", "RoiW", "RoiH", "ROI 裁剪"),
-            new RoiGroup("SearchX", "SearchY", "SearchW", "SearchH", "搜索区域")
-        };
-
-        /// <summary>候选组在 <see cref="RoiCandidates"/> 中的序号（即优先级）；不在表中时排最后。</summary>
-        private static int RoiCandidateOrder(RoiGroup g)
-        {
-            for (int i = 0; i < RoiCandidates.Length; i++)
-                if (string.Equals(RoiCandidates[i].X, g.X, StringComparison.Ordinal)) return i;
-            return int.MaxValue;
-        }
+        #region 画几何（ROI / 直线 / 圆环）
 
         /// <summary>分组标题去掉括号补充说明，得到菜单里的短名（「搜索区域（宽或高为 0 = 整图）」→「搜索区域」）。</summary>
         private static string ShortGroupName(string groupTitle)
@@ -652,13 +686,34 @@ namespace VisionPlatform.UI
             return s.Trim();
         }
 
-        /// <summary>
-        /// 按参数表实际字段找出该节点的<strong>所有</strong>矩形 ROI 参数组（顺序与参数面板一致）。
-        /// 没有则返回空列表。
-        /// </summary>
-        private static List<RoiGroup> FindRoiGroups(FlowNode node)
+        /// <summary>参数表是否含某个键。</summary>
+        private static bool HasKey(NodeParamTable table, string key)
         {
-            var result = new List<RoiGroup>();
+            return table.Fields.Exists(x => x != null && string.Equals(x.Key, key, StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// 候选「矩形 ROI」参数组（模板区域 / ROI 裁剪 / 搜索区域）。仅作字段匹配模板，
+        /// 实际是否可用由 <see cref="FindDrawSpecs"/> 按参数表字段判定。
+        /// </summary>
+        private static readonly string[][] RectCandidates =
+        {
+            new[] { "TemplateX", "TemplateY", "TemplateW", "TemplateH", "模板区域" },
+            new[] { "RoiX", "RoiY", "RoiW", "RoiH", "ROI 裁剪" },
+            new[] { "SearchX", "SearchY", "SearchW", "SearchH", "搜索区域" }
+        };
+
+        /// <summary>
+        /// 按参数表实际字段找出该节点的<strong>所有</strong>可绘制几何组（矩形 / 直线 / 圆环），
+        /// 顺序与参数面板一致。没有则返回空列表。
+        /// <para>
+        /// 【优先级】模板/训练区域 &gt; ROI 裁剪 &gt; 搜索区域 &gt; 直线卡尺 &gt; 圆卡尺。
+        /// 模板/训练区域是算法「输入定义」，没画就没法建模，故排最前；直线/圆环通常各自独立成节点，顺序无影响。
+        /// </para>
+        /// </summary>
+        private static List<DrawSpec> FindDrawSpecs(FlowNode node)
+        {
+            var result = new List<DrawSpec>();
             if (node == null) return result;
 
             FlowNodeType type;
@@ -680,125 +735,184 @@ namespace VisionPlatform.UI
 
                 if (string.IsNullOrEmpty(f.Key)) continue;
 
-                foreach (RoiGroup g in RoiCandidates)
+                // 矩形 ROI：模板区域 / ROI 裁剪 / 搜索区域
+                for (int i = 0; i < RectCandidates.Length; i++)
                 {
-                    if (!string.Equals(f.Key, g.X, StringComparison.Ordinal)) continue;
-                    if (!HasKey(table, g.Y) || !HasKey(table, g.W) || !HasKey(table, g.H)) continue;
+                    string[] c = RectCandidates[i];
+                    if (!string.Equals(f.Key, c[0], StringComparison.Ordinal)) continue;
+                    if (!HasKey(table, c[1]) || !HasKey(table, c[2]) || !HasKey(table, c[3])) continue;
 
-                    string label = string.IsNullOrEmpty(groupTitle) ? g.Label : groupTitle;
-                    // 同一节点不会重复，但兜底去重，避免菜单出现同名项
-                    if (!result.Exists(x => string.Equals(x.X, g.X, StringComparison.Ordinal)))
-                        result.Add(new RoiGroup(g.X, g.Y, g.W, g.H, label));
+                    string label = string.IsNullOrEmpty(groupTitle) ? c[4] : groupTitle;
+                    if (!result.Exists(x => string.Equals(x.PrimaryKey, c[0], StringComparison.Ordinal)))
+                        result.Add(DrawSpec.MakeRect(label, c[0], c[1], c[2], c[3]));
+                }
+
+                // 直线卡尺：扫描线段 X1 / Y1 / X2 / Y2
+                if (f.Key == "X1" && HasKey(table, "Y1") && HasKey(table, "X2") && HasKey(table, "Y2")
+                    && !result.Exists(x => x.Kind == DrawShapeKind.Line))
+                {
+                    result.Add(DrawSpec.MakeLine(string.IsNullOrEmpty(groupTitle) ? "扫描线段" : groupTitle));
+                }
+
+                // 圆卡尺：环形 ROI Cx / Cy / InnerRadius / OuterRadius
+                if (f.Key == "Cx" && HasKey(table, "Cy") && HasKey(table, "InnerRadius") && HasKey(table, "OuterRadius")
+                    && !result.Exists(x => x.Kind == DrawShapeKind.Ring))
+                {
+                    result.Add(DrawSpec.MakeRing(string.IsNullOrEmpty(groupTitle) ? "环形 ROI" : groupTitle));
                 }
             }
 
-            // 按候选优先级排序：模板/训练区域在前，搜索区域在后（第 0 项即默认组）
-            result.Sort(delegate (RoiGroup a, RoiGroup b)
-            {
-                return RoiCandidateOrder(a).CompareTo(RoiCandidateOrder(b));
-            });
+            result.Sort((a, b) => SpecOrder(a).CompareTo(SpecOrder(b)));
             return result;
         }
 
-        private static bool HasKey(NodeParamTable table, string key)
+        /// <summary>几何组在菜单中的优先级（越小越靠前）。</summary>
+        private static int SpecOrder(DrawSpec s)
         {
-            return table.Fields.Exists(x => x != null && string.Equals(x.Key, key, StringComparison.Ordinal));
+            switch (s.Kind)
+            {
+                case DrawShapeKind.Rect:
+                    if (s.PrimaryKey == "TemplateX") return 0;
+                    if (s.PrimaryKey == "RoiX") return 1;
+                    if (s.PrimaryKey == "SearchX") return 2;
+                    return 2;
+                case DrawShapeKind.Line: return 3;
+                case DrawShapeKind.Ring: return 4;
+                default: return 9;
+            }
         }
 
-        /// <summary>菜单项文字：组名 + 当前值，例如「搜索区域（120,80 240×160）」；未设置显示「（未设置）」。</summary>
-        private static string DescribeRoiGroup(FlowNode node, RoiGroup g)
+        /// <summary>读出节点当前的几何（图像坐标），用于菜单预览与进入绘制时的已有值显示；未设置时返回零几何。</summary>
+        private static IGeometryShape ReadCurrentGeometry(FlowNode node, DrawSpec spec)
         {
-            RectangleF r = ReadRoiRect(node, g);
-            string value = (r.Width > 0f && r.Height > 0f)
-                ? string.Format("{0},{1} {2}×{3}",
-                    (int)Math.Round(r.X), (int)Math.Round(r.Y),
-                    (int)Math.Round(r.Width), (int)Math.Round(r.Height))
-                : "未设置";
+            if (node == null) return null;
 
-            return g.Label + "（" + value + "）";
+            if (spec.Kind == DrawShapeKind.Rect)
+                return new RectangleShape(
+                    (float)node.GetDouble(spec.X, 0.0),
+                    (float)node.GetDouble(spec.Y, 0.0),
+                    (float)node.GetDouble(spec.W, 0.0),
+                    (float)node.GetDouble(spec.H, 0.0));
+
+            if (spec.Kind == DrawShapeKind.Line)
+                return new LineSegmentShape(
+                    (float)node.GetDouble(spec.X1, 0.0),
+                    (float)node.GetDouble(spec.Y1, 0.0),
+                    (float)node.GetDouble(spec.X2, 0.0),
+                    (float)node.GetDouble(spec.Y2, 0.0));
+
+            float cx = (float)node.GetDouble(spec.Cx, 0.0);
+            float cy = (float)node.GetDouble(spec.Cy, 0.0);
+            float inner = (float)node.GetDouble(spec.InnerRadius, 0.0);
+            float outer = (float)node.GetDouble(spec.OuterRadius, 0.0);
+            return new RingShape(new PointF(cx, cy), outer, inner);
         }
 
-        /// <summary>读出节点当前的 ROI 矩形（图像坐标；未设置时宽高为 0）。</summary>
-        private static RectangleF ReadRoiRect(FlowNode node, RoiGroup k)
+        /// <summary>菜单项文字：组名 + 当前值，例如「搜索区域（120,80 240×160）」「扫描线段（100,100->300,100）」「环形 ROI（C=(320,240) 80~120）」。</summary>
+        private static string DescribeDrawSpec(FlowNode node, DrawSpec s)
         {
-            return new RectangleF(
-                (float)node.GetDouble(k.X, 0.0),
-                (float)node.GetDouble(k.Y, 0.0),
-                (float)node.GetDouble(k.W, 0.0),
-                (float)node.GetDouble(k.H, 0.0));
+            IGeometryShape cur = ReadCurrentGeometry(node, s);
+            string value = "未设置";
+
+            if (s.Kind == DrawShapeKind.Rect)
+            {
+                RectangleF r = ((RectangleShape)cur).Rect;
+                if (r.Width > 0f && r.Height > 0f)
+                    value = string.Format("{0},{1} {2}×{3}",
+                        (int)Math.Round(r.X), (int)Math.Round(r.Y),
+                        (int)Math.Round(r.Width), (int)Math.Round(r.Height));
+            }
+            else if (s.Kind == DrawShapeKind.Line)
+            {
+                LineSegmentShape ls = (LineSegmentShape)cur;
+                if (ls.Length > 0f)
+                    value = string.Format("({0},{1})->({2},{3})",
+                        (int)Math.Round(ls.P1.X), (int)Math.Round(ls.P1.Y),
+                        (int)Math.Round(ls.P2.X), (int)Math.Round(ls.P2.Y));
+            }
+            else
+            {
+                RingShape ring = (RingShape)cur;
+                if (ring.OuterRadius > 0f)
+                    value = string.Format("C=({0},{1}) {2}~{3}",
+                        (int)Math.Round(ring.Center.X), (int)Math.Round(ring.Center.Y),
+                        (int)Math.Round(ring.InnerRadius), (int)Math.Round(ring.OuterRadius));
+            }
+
+            return s.Label + "（" + value + "）";
         }
 
-        /// <summary>「画 ROI」按钮可用态：仅当选中节点确实有矩形 ROI 参数时可用。</summary>
+        /// <summary>「画几何」按钮可用态：仅当选中节点确实有可绘制的几何参数时可用。</summary>
         private void UpdateRoiButton()
         {
-            flowPreview.SetRoiEnabled(FindRoiGroups(_selectedNode ?? nodeParamPanel.Node).Count > 0);
+            flowPreview.SetRoiEnabled(FindDrawSpecs(_selectedNode ?? nodeParamPanel.Node).Count > 0);
         }
 
         /// <summary>
-        /// 点预览区顶条的「画 ROI」：单组直接进拖框；<strong>多组每次都弹菜单</strong>
+        /// 点预览区顶条的「画几何」：单组直接进绘制；<strong>多组每次都弹菜单</strong>
         /// （不沿用历史直接进，否则用户想换组只能重选节点或重启，等于功能废一半）。
         /// 历史只用来把上次选的组排到第一项并加 ✓，让「沿用」退化为一次点击。
         /// </summary>
-        private void OnRoiPickRequested(object sender, EventArgs e)
+        private void OnDrawRequested(object sender, EventArgs e)
         {
             FlowNode node = _selectedNode ?? nodeParamPanel.Node;
             if (node == null)
             {
-                MessageBox.Show(this, "请先在画布上选中一个节点，再画 ROI。", "画 ROI",
+                MessageBox.Show(this, "请先在画布上选中一个节点，再画几何。", "画几何",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            List<RoiGroup> groups = FindRoiGroups(node);
-            if (groups.Count == 0)
+            List<DrawSpec> specs = FindDrawSpecs(node);
+            if (specs.Count == 0)
             {
-                MessageBox.Show(this, "节点「" + node.Name + "」没有可绘制的 ROI 参数，无需画 ROI。", "画 ROI",
+                MessageBox.Show(this, "节点「" + node.Name + "」没有可绘制的几何参数，无需画几何。", "画几何",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            // 单组直接进拖框；≥2 组每次都弹菜单（随时可换组）
-            if (groups.Count == 1) { StartRoiPick(node, groups[0]); return; }
+            // 单组直接进绘制；≥2 组每次都弹菜单（随时可换组）
+            if (specs.Count == 1) { StartDraw(node, specs[0]); return; }
 
-            ShowRoiGroupMenu(node, groups);
+            ShowDrawSpecMenu(node, specs);
         }
 
         /// <summary>
-        /// 在「画 ROI」按钮下方弹出 ROI 组选择菜单。
+        /// 在「画几何」按钮下方弹出几何组选择菜单。
         /// 该节点上次选过的组排在第一项并加 <c>✓</c> 前缀，其余保持原顺序。
         /// </summary>
-        private void ShowRoiGroupMenu(FlowNode node, List<RoiGroup> groups)
+        private void ShowDrawSpecMenu(FlowNode node, List<DrawSpec> specs)
         {
             Control anchor = flowPreview.RoiPickAnchor;
-            if (anchor == null) { StartRoiPick(node, groups[0]); return; }
+            if (anchor == null) { StartDraw(node, specs[0]); return; }
 
             // 把上次选的组提到最前（保持其余组的相对顺序，故不用 Sort）
-            var ordered = new List<RoiGroup>();
+            var ordered = new List<DrawSpec>();
             string last;
             _roiLastGroup.TryGetValue(node.Id, out last);
 
             if (!string.IsNullOrEmpty(last))
             {
-                RoiGroup first = groups.Find(g => string.Equals(g.X, last, StringComparison.Ordinal));
+                DrawSpec first = specs.Find(g => string.Equals(g.PrimaryKey, last, StringComparison.Ordinal));
                 if (first != null) ordered.Add(first);
             }
-            foreach (RoiGroup g in groups)
+            foreach (DrawSpec g in specs)
                 if (!ordered.Contains(g)) ordered.Add(g);
 
             var menu = new ContextMenuStrip();
             for (int i = 0; i < ordered.Count; i++)
             {
-                RoiGroup picked = ordered[i];   // 闭包捕获
+                DrawSpec picked = ordered[i];   // 闭包捕获
                 bool isLast = !string.IsNullOrEmpty(last)
-                              && string.Equals(picked.X, last, StringComparison.Ordinal);
+                              && string.Equals(picked.PrimaryKey, last, StringComparison.Ordinal);
 
-                var item = new ToolStripMenuItem((isLast ? "✓ " : "") + DescribeRoiGroup(node, picked));
-                item.Click += delegate { StartRoiPick(node, picked); };
+                var item = new ToolStripMenuItem((isLast ? "✓ " : "") + DescribeDrawSpec(node, picked));
+                item.Click += delegate { StartDraw(node, picked); };
                 menu.Items.Add(item);
             }
 
             // ⚠️ 菜单是一次性的，但【不要】在 Closed 里立刻 Dispose：
-            // 点菜单项会走 StartRoiPick → BeginRoiPick → viewer.Focus()，Focus 抢走焦点会让
+            // 点菜单项会走 StartDraw → BeginDraw → viewer.Focus()，Focus 抢走焦点会让
             // 菜单在它自身的「点击→关闭」流程里被关闭，此时立刻 Dispose 会与 ToolStrip 内部的
             // 句柄访问（SetVisibleCore→ReparentToDropDownOwnerWindow→get_Handle）并发，
             // 抛 ObjectDisposedException「无法访问已释放的对象」（已从线上日志真实抓到）。
@@ -806,74 +920,116 @@ namespace VisionPlatform.UI
             menu.Show(anchor, new Point(0, anchor.Height));
         }
 
-        /// <summary>进入拖框（先确保有图，再记住本次画的是哪一组）。</summary>
-        private void StartRoiPick(FlowNode node, RoiGroup group)
+        /// <summary>进入绘制（先确保有图，再记住本次画的是哪一组几何）。</summary>
+        private void StartDraw(FlowNode node, DrawSpec spec)
         {
-            // 没有图像就拖不了框：先按「图像源」节点的本地图片自动载入一张
+            // 没有图像就拖不了：先按「图像源」节点的本地图片自动载入一张
             if (!flowPreview.HasImage) PreviewImageSourceFile();
 
             // 兜底：当前编辑的不是图像源节点时，改从流程里任意一个「本地图片」图像源载图。
-            // 否则用户在选中「模板匹配」这类节点时点「画 ROI」会卡在「预览区还没有图像」。
+            // 否则用户在选中「模板匹配」这类节点时点「画几何」会卡在「预览区还没有图像」。
             if (!flowPreview.HasImage) LoadFirstFileImageSource();
 
             if (!flowPreview.HasImage)
             {
                 MessageBox.Show(this,
-                    "预览区还没有图像。请先点预览区的「载入图片」或运行一次流程，再画 ROI。",
-                    "画 ROI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "预览区还没有图像。请先点预览区的「载入图片」或运行一次流程，再画几何。",
+                    "画几何", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            _roiGroup = group;   // 记住当前画的是哪一组，OnRoiPicked 据此写回
+            spec.Current = ReadCurrentGeometry(node, spec);   // 进入时预览已有几何
+            _drawSpec = spec;   // 记住当前画的是哪一组，OnShapePicked 据此写回
 
-            // 记住该节点的选择：下次点「画 ROI」直接沿用，不再弹菜单
-            if (!string.IsNullOrEmpty(node.Id)) _roiLastGroup[node.Id] = group.X;
-            flowPreview.BeginRoiPick(ReadRoiRect(node, group), "画 ROI：" + group.Label);
-            SetStatus("请在预览区图像上拖动绘制「" + group.Label + "」，按 Esc 取消");
+            // 记住该节点的选择：下次点「画几何」直接沿用，不再弹菜单
+            if (!string.IsNullOrEmpty(node.Id)) _roiLastGroup[node.Id] = spec.PrimaryKey;
+            flowPreview.BeginDraw(spec);
+            SetStatus("请在预览区图像上拖动绘制「" + spec.Label + "」，按 Esc 取消");
         }
 
-        /// <summary>拖框完成：把图像坐标的矩形写回用户选中的那一组参数并持久化。</summary>
-        private void OnRoiPicked(object sender, RectangleF rect)
+        /// <summary>
+        /// 绘制完成：把图像坐标的几何写回用户选中的那一组参数并持久化。
+        /// 按 <see cref="_drawSpec.Kind"/> 分流：矩形→X/Y/W/H；直线→X1/Y1/X2/Y2；圆环→Cx/Cy/InnerRadius/OuterRadius。
+        /// </summary>
+        private void OnShapePicked(object sender, ShapeEventArgs e)
         {
             FlowNode node = _selectedNode ?? nodeParamPanel.Node;
-            if (node == null) return;
+            if (node == null) { _drawSpec = null; return; }
 
-            RoiGroup keys = _roiGroup;
-            if (keys == null)
+            DrawSpec spec = _drawSpec;
+            if (spec == null || e == null || e.Shape == null) { _drawSpec = null; return; }
+
+            if (spec.Kind == DrawShapeKind.Rect)
             {
-                // 兜底：没有记录组时取该节点的第一组
-                List<RoiGroup> groups = FindRoiGroups(node);
-                if (groups.Count == 0) return;
-                keys = groups[0];
+                RectangleShape rs = e.Shape as RectangleShape;
+                if (rs == null) { _drawSpec = null; return; }
+
+                RectangleF r = rs.Rect;
+                int x = (int)Math.Round(r.X);
+                int y = (int)Math.Round(r.Y);
+                int w = (int)Math.Round(r.Width);
+                int h = (int)Math.Round(r.Height);
+                if (x < 0) x = 0;
+                if (y < 0) y = 0;
+                if (w < 0) w = 0;
+                if (h < 0) h = 0;
+
+                node.Set(spec.X, x);
+                node.Set(spec.Y, y);
+                node.Set(spec.W, w);
+                node.Set(spec.H, h);
+                SyncAndReport(node, spec, string.Format("X={0}, Y={1}, {2}×{3}", x, y, w, h));
             }
+            else if (spec.Kind == DrawShapeKind.Line)
+            {
+                LineSegmentShape ls = e.Shape as LineSegmentShape;
+                if (ls == null) { _drawSpec = null; return; }
 
-            int x = (int)Math.Round(rect.X);
-            int y = (int)Math.Round(rect.Y);
-            int w = (int)Math.Round(rect.Width);
-            int h = (int)Math.Round(rect.Height);
-            if (x < 0) x = 0;
-            if (y < 0) y = 0;
-            if (w < 0) w = 0;
-            if (h < 0) h = 0;
+                int x1 = (int)Math.Round(ls.P1.X);
+                int y1 = (int)Math.Round(ls.P1.Y);
+                int x2 = (int)Math.Round(ls.P2.X);
+                int y2 = (int)Math.Round(ls.P2.Y);
 
-            node.Set(keys.X, x);
-            node.Set(keys.Y, y);
-            node.Set(keys.W, w);
-            node.Set(keys.H, h);
+                node.Set(spec.X1, x1);
+                node.Set(spec.Y1, y1);
+                node.Set(spec.X2, x2);
+                node.Set(spec.Y2, y2);
+                SyncAndReport(node, spec, string.Format("({0},{1})->({2},{3})", x1, y1, x2, y2));
+            }
+            else // Ring
+            {
+                RingShape ring = e.Shape as RingShape;
+                if (ring == null) { _drawSpec = null; return; }
 
+                int cx = (int)Math.Round(ring.Center.X);
+                int cy = (int)Math.Round(ring.Center.Y);
+                int inner = (int)Math.Round(ring.InnerRadius);
+                int outer = (int)Math.Round(ring.OuterRadius);
+                if (inner < 0) inner = 0;
+                if (outer < inner + 1) outer = inner + 1;   // 保证内径 < 外径
+
+                node.Set(spec.Cx, cx);
+                node.Set(spec.Cy, cy);
+                node.Set(spec.InnerRadius, inner);
+                node.Set(spec.OuterRadius, outer);
+                SyncAndReport(node, spec, string.Format("C=({0},{1}) 内={2} 外={3}", cx, cy, inner, outer));
+            }
+        }
+
+        /// <summary>写回后同步参数面板、持久化并给出状态提示。</summary>
+        private void SyncAndReport(FlowNode node, DrawSpec spec, string valueText)
+        {
             // 参数面板正显示该节点时同步回填，避免界面与配置不一致
             FlowNode shown = nodeParamPanel.Node;
             if (shown != null && shown.Id == node.Id) nodeParamPanel.SetNode(node);
 
             SaveFlows();
-            SetStatus(string.Format("已更新 ROI（{0}）：X={1}, Y={2}, {3}×{4}；{5}",
-                keys.Label, x, y, w, h, OverlayClearedHint));
-
-            _roiGroup = null;
+            SetStatus(string.Format("已更新「{0}」：{1}；{2}", spec.Label, valueText, OverlayClearedHint));
+            _drawSpec = null;
         }
 
         /// <summary>
-        /// 清掉已删除节点的 ROI 组历史，避免字典无限增长。
+        /// 清掉已删除节点的几何组历史，避免字典无限增长。
         /// 画布没有 NodeRemoved 事件，故在「加载流程」与「画布被编辑」后统一清理。
         /// </summary>
         private void PruneRoiHistory()
@@ -894,11 +1050,11 @@ namespace VisionPlatform.UI
             foreach (string id in dead) _roiLastGroup.Remove(id);
         }
 
-        /// <summary>取消画 ROI：叠加图形同样被清掉了，提示一句免得用户以为是 bug。</summary>
+        /// <summary>取消画几何：叠加图形同样被清掉了，提示一句免得用户以为是 bug。</summary>
         private void OnRoiPickCancelled(object sender, EventArgs e)
         {
-            _roiGroup = null;
-            SetStatus("已取消画 ROI；" + OverlayClearedHint);
+            _drawSpec = null;
+            SetStatus("已取消画几何；" + OverlayClearedHint);
         }
 
         #endregion

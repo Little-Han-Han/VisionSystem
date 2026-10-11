@@ -47,9 +47,10 @@ namespace VisionPlatform.UI
         private bool _hasRun;
         private bool _staticShown;      // 当前显示的是「载入图片」的静态图（切换模式时不被 Reset 清掉）
 
-        private bool _roiPicking;                                   // 是否处于「画 ROI」拖框状态
+        private bool _roiPicking;                                   // 是否处于「画几何」拖框状态
         private InteractionMode _modeBeforeRoi = InteractionMode.Select;
         private string _infoBeforeRoi = "";                         // 进入拖框前的顶条文本，退出时还原
+        private DrawSpec _drawSpec;                                 // 当前要画的几何（矩形/直线/圆环）；null 视为矩形（兼容旧 BeginRoiPick）
 
         private Panel panelTop;
         private ComboBox cmbMode;
@@ -271,6 +272,13 @@ namespace VisionPlatform.UI
         /// </summary>
         public event EventHandler<RectangleF> RoiPicked;
 
+        /// <summary>
+        /// 用户在预览区画完一个几何后触发（参数是对应图形：矩形/<see cref="LineSegmentShape"/>/<see cref="RingShape"/>）。
+        /// 几何太小（短于 <see cref="MinRoiSizePx"/>）视为误操作，不触发本事件。
+        /// 矩形仍兼容触发 <see cref="RoiPicked"/>，新代码统一订阅本事件按 <c>Shape</c> 类型分流即可。
+        /// </summary>
+        public event EventHandler<ShapeEventArgs> ShapePicked;
+
         /// <summary>预览区当前是否有图像（无图时无法拖框）。</summary>
         public bool HasImage
         {
@@ -315,6 +323,7 @@ namespace VisionPlatform.UI
             if (_roiPicking) return;
 
             _roiPicking = true;
+            _drawSpec = null;     // 旧矩形路径：路由时按 Rect 处理
             _modeBeforeRoi = viewer.Mode;
             _infoBeforeRoi = lblInfo.Text;
 
@@ -331,6 +340,51 @@ namespace VisionPlatform.UI
                            + "：请在图像上拖动绘制 ROI，Esc 取消";
 
             viewer.Focus();   // 让后续 Esc 落在视图上而不是按钮上
+        }
+
+        /// <summary>
+        /// 进入「画几何」拖拽状态（矩形 / 直线 / 圆环统一入口）。按 <paramref name="spec"/> 的
+        /// <see cref="DrawSpec.Mode"/> 切交互模式；若 <see cref="DrawSpec.Current"/> 非空，先把它作为
+        /// 已有几何画出来让用户看到当前值；顶条给出操作提示。
+        /// </summary>
+        public void BeginDraw(DrawSpec spec)
+        {
+            if (_roiPicking) return;
+            if (spec == null) return;
+
+            _drawSpec = spec;
+            _roiPicking = true;
+            _modeBeforeRoi = viewer.Mode;
+            _infoBeforeRoi = lblInfo.Text;
+
+            // 屏幕→图像坐标换算由 ImageViewer 内部完成，这里只需切模式
+            viewer.Mode = spec.Mode;
+
+            viewer.ClearShapes();
+            if (spec.Current != null)
+            {
+                viewer.Shapes.Add(spec.Current);
+                viewer.Shapes.NotifyChanged();
+            }
+
+            lblEmpty.Visible = false;
+            lblVerdict.Visible = false;
+            lblSummary.Visible = false;
+            lblInfo.Text = (string.IsNullOrEmpty(spec.Label) ? "画几何" : spec.Label)
+                           + "：" + PromptFor(spec.Kind) + "，Esc 取消";
+
+            viewer.Focus();   // 让后续 Esc 落在视图上而不是按钮上
+        }
+
+        /// <summary>按几何类型给出拖拽提示语。</summary>
+        private static string PromptFor(DrawShapeKind kind)
+        {
+            switch (kind)
+            {
+                case DrawShapeKind.Line: return "在图像上拖动绘制线段（直线卡尺扫描线）";
+                case DrawShapeKind.Ring: return "在图像上拖动绘制圆环（圆卡尺环形 ROI）";
+                default: return "在图像上拖动绘制 ROI";
+            }
         }
 
         /// <summary>
@@ -421,12 +475,37 @@ namespace VisionPlatform.UI
             viewer.Shapes.NotifyChanged();
         }
 
+        /// <summary>只画一条线段叠加（直线卡尺扫描线）。</summary>
+        private void ShowLine(LineSegmentShape line)
+        {
+            viewer.ClearShapes();
+
+            var shape = new LineSegmentShape(line.P1, line.P2);
+            shape.Name = "扫描线段";
+            shape.StrokeColor = UiTheme.ColorAccent;
+            viewer.Shapes.Add(shape);
+            viewer.Shapes.NotifyChanged();
+        }
+
+        /// <summary>只画一个圆环叠加（圆卡尺环形 ROI）。</summary>
+        private void ShowRing(RingShape ring)
+        {
+            viewer.ClearShapes();
+
+            var shape = new RingShape(ring.Center, ring.OuterRadius, ring.InnerRadius);
+            shape.Name = "环形ROI";
+            shape.StrokeColor = UiTheme.ColorAccent;
+            viewer.Shapes.Add(shape);
+            viewer.Shapes.NotifyChanged();
+        }
+
         /// <summary>结束拖框状态但不还原界面（Reset / 彻底清空时用）。</summary>
         private void EndRoiPickSilently()
         {
             if (!_roiPicking) return;
 
             _roiPicking = false;
+            _drawSpec = null;
             viewer.Mode = _modeBeforeRoi;
             _infoBeforeRoi = "";
         }
@@ -618,30 +697,91 @@ namespace VisionPlatform.UI
             if (!_roiPicking) return;
             if (e == null || e.Shape == null) return;
 
-            RectangleShape rectShape = e.Shape as RectangleShape;
-            RectangleF r = rectShape != null ? rectShape.Rect : e.Shape.Bounds;
+            DrawShapeKind kind = (_drawSpec != null) ? _drawSpec.Kind : DrawShapeKind.Rect;
 
-            if (r.Width < MinRoiSizePx || r.Height < MinRoiSizePx)
+            if (kind == DrawShapeKind.Rect)
+            {
+                RectangleShape rectShape = e.Shape as RectangleShape;
+                RectangleF r = rectShape != null ? rectShape.Rect : e.Shape.Bounds;
+
+                if (r.Width < MinRoiSizePx || r.Height < MinRoiSizePx)
+                {
+                    viewer.ClearShapes();
+                    viewer.Shapes.NotifyChanged();
+
+                    MessageBox.Show(this,
+                        string.Format("ROI 太小（{0:F0}×{1:F0} 像素，宽或高需 ≥ {2} 像素），已忽略，请重新拖动。",
+                            r.Width, r.Height, MinRoiSizePx),
+                        "画几何", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 退出拖框：恢复原交互模式（给 Mode 赋值会顺带取消控件内部的绘制态）
+                _roiPicking = false;
+                viewer.Mode = _modeBeforeRoi;
+                lblInfo.Text = _infoBeforeRoi;
+
+                ShowRoiRect(r);
+
+                EventHandler<RectangleF> hRoi = RoiPicked;
+                if (hRoi != null) hRoi(this, r);
+                EventHandler<ShapeEventArgs> hShape = ShapePicked;
+                if (hShape != null) hShape(this, new ShapeEventArgs(new RectangleShape(r)));
+                return;
+            }
+
+            if (kind == DrawShapeKind.Line)
+            {
+                LineSegmentShape lineShape = e.Shape as LineSegmentShape;
+                if (lineShape == null) return;
+
+                if (lineShape.Length < MinRoiSizePx)
+                {
+                    viewer.ClearShapes();
+                    viewer.Shapes.NotifyChanged();
+
+                    MessageBox.Show(this,
+                        string.Format("线段太短（{0:F0} 像素，需 ≥ {1} 像素），已忽略，请重新拖动。",
+                            lineShape.Length, MinRoiSizePx),
+                        "画几何", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                _roiPicking = false;
+                viewer.Mode = _modeBeforeRoi;
+                lblInfo.Text = _infoBeforeRoi;
+
+                ShowLine(lineShape);
+
+                EventHandler<ShapeEventArgs> hShape = ShapePicked;
+                if (hShape != null) hShape(this, new ShapeEventArgs(new LineSegmentShape(lineShape.P1, lineShape.P2)));
+                return;
+            }
+
+            // Ring
+            RingShape ringShape = e.Shape as RingShape;
+            if (ringShape == null) return;
+
+            if (ringShape.OuterRadius < MinRoiSizePx)
             {
                 viewer.ClearShapes();
                 viewer.Shapes.NotifyChanged();
 
                 MessageBox.Show(this,
-                    string.Format("ROI 太小（{0:F0}×{1:F0} 像素，宽或高需 ≥ {2} 像素），已忽略，请重新拖动。",
-                        r.Width, r.Height, MinRoiSizePx),
-                    "画 ROI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    string.Format("圆环外半径太小（{0:F0} 像素，需 ≥ {1} 像素），已忽略，请重新拖动。",
+                        ringShape.OuterRadius, MinRoiSizePx),
+                    "画几何", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            // 退出拖框：恢复原交互模式（给 Mode 赋值会顺带取消控件内部的绘制态）
             _roiPicking = false;
             viewer.Mode = _modeBeforeRoi;
             lblInfo.Text = _infoBeforeRoi;
 
-            ShowRoiRect(r);
+            ShowRing(ringShape);
 
-            EventHandler<RectangleF> handler = RoiPicked;
-            if (handler != null) handler(this, r);
+            EventHandler<ShapeEventArgs> hRing = ShapePicked;
+            if (hRing != null) hRing(this, new ShapeEventArgs(new RingShape(ringShape.Center, ringShape.OuterRadius, ringShape.InnerRadius)));
         }
 
         /// <summary>Esc 取消画 ROI（不写回参数）。</summary>

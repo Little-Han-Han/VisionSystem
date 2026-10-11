@@ -49,6 +49,7 @@ namespace SmokeUi
             TestUiGrid();
             TestToolbarRenderer();
             TestFlowRoiRun();
+            TestCaliperSchemaContract();
 
             Console.WriteLine();
             Console.WriteLine("=== PASS " + _pass + " / FAIL " + _fail + " ===");
@@ -316,8 +317,38 @@ namespace SmokeUi
             }
             catch (Exception ex)
             {
-                Check("FlowRunController.RunTo", false, ex.GetType().Name + ": " + ex.Message);
+                    Check("FlowRunController.RunTo", false, ex.GetType().Name + ": " + ex.Message);
             }
+        }
+
+        // =====================================================================
+        //  卡尺参数表契约：直线卡尺必须有 X1/Y1/X2/Y2，圆卡尺必须有
+        //  Cx/Cy/InnerRadius/OuterRadius（预览区画几何按这些键回写）。
+        // =====================================================================
+        private static void TestCaliperSchemaContract()
+        {
+            Console.WriteLine();
+            Console.WriteLine("-- NodeParamSchema 卡尺字段契约 --");
+
+            NodeParamTable line = NodeParamSchema.For(FlowNodeType.LineCaliper);
+            NodeParamTable circle = NodeParamSchema.For(FlowNodeType.CircleCaliper);
+
+            bool ok = HasKeys(line, "X1", "Y1", "X2", "Y2")
+                   && HasKeys(circle, "Cx", "Cy", "InnerRadius", "OuterRadius");
+
+            string detail = string.Format("LineCaliper={0} CircleCaliper={1}",
+                line != null ? "ok" : "null", circle != null ? "ok" : "null");
+
+            Check("卡尺字段契约（LineCaliper:X1/Y1/X2/Y2；CircleCaliper:Cx/Cy/InnerRadius/OuterRadius）", ok, detail);
+        }
+
+        private static bool HasKeys(NodeParamTable table, params string[] keys)
+        {
+            if (table == null || table.Fields == null) return false;
+            foreach (string k in keys)
+                if (!table.Fields.Exists(x => x != null && string.Equals(x.Key, k, StringComparison.Ordinal)))
+                    return false;
+            return true;
         }
     }
 }

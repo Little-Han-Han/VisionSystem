@@ -31,7 +31,10 @@ namespace VisionSystem.Controls
         DrawRotatedRect = 4,
 
         /// <summary>拖拽绘制圆环：按下定圆心，拖动定外半径，内半径默认取外半径的一半。</summary>
-        DrawRing = 5
+        DrawRing = 5,
+
+        /// <summary>拖拽绘制线段：按下定起点，拖动定终点（直线卡尺的扫描线）。</summary>
+        DrawLine = 6
     }
 
     /// <summary>携带单个图形的事件参数。</summary>
@@ -916,6 +919,13 @@ namespace VisionSystem.Controls
                     break;
                 }
 
+                case InteractionMode.DrawLine:
+                {
+                    // 线段：起点固定为按下点，终点跟随当前鼠标（图像坐标）
+                    _previewShape = new LineSegmentShape(_drawStartImage, imagePt);
+                    break;
+                }
+
                 default:
                     return;
             }
@@ -1029,7 +1039,8 @@ namespace VisionSystem.Controls
             return mode == InteractionMode.DrawCircle
                 || mode == InteractionMode.DrawRectangle
                 || mode == InteractionMode.DrawRotatedRect
-                || mode == InteractionMode.DrawRing;
+                || mode == InteractionMode.DrawRing
+                || mode == InteractionMode.DrawLine;
         }
 
         private void UpdateCursor()

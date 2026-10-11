@@ -189,7 +189,8 @@ namespace VisionPlatform.Flow
 
             if (!ok) session.Passed = false;
 
-            if (session.CaptureFrames && session.Current != null)
+            // 节点内（改动1）已克隆预览帧时不再重复克隆，避免重复分配与泄漏
+            if (session.CaptureFrames && session.Current != null && p.Frame == null)
             {
                 try { p.Frame = (Bitmap)session.Current.Clone(); }
                 catch (Exception) { p.Frame = null; }
@@ -480,6 +481,15 @@ namespace VisionPlatform.Flow
 
         private bool RunPositionCorrect(FlowRunSession s, FlowNode node, FlowNodeProgress p)
         {
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
             string refSource = node.GetString("RefSource", "Auto");
 
             double rx, ry, ra;
@@ -824,6 +834,15 @@ namespace VisionPlatform.Flow
                 return true;
             }
 
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
             string binMode = node.GetString("BinMode", "Inherit");
             string polarity = node.GetString("Polarity", "Bright");
             bool dark = string.Equals(polarity, "Dark", StringComparison.OrdinalIgnoreCase);
@@ -837,6 +856,7 @@ namespace VisionPlatform.Flow
             int maxCount = node.GetInt("MaxCount", 50);
 
             Bitmap work = null;
+            Bitmap cropped = null;
             try
             {
                 Bitmap input = s.Current;
@@ -858,10 +878,37 @@ namespace VisionPlatform.Flow
                     input = work;
                 }
 
+                // 可选 ROI：限制分析区域。用户输入为图像坐标，减去 ROI 裁剪偏移换算到工作帧，
+                // 再夹到图像范围内；ROI 无效（宽高<=0 或完全在图外）则退化为整帧分析。
+                Bitmap analyzeOn = input;
+                Rectangle usedRoi = Rectangle.Empty;
+
+                int roiX = node.GetInt("RoiX", 0);
+                int roiY = node.GetInt("RoiY", 0);
+                int roiW = node.GetInt("RoiW", 0);
+                int roiH = node.GetInt("RoiH", 0);
+
+                if (roiW > 0 && roiH > 0)
+                {
+                    int rx = (int)Math.Round(roiX - s.OffsetX);
+                    int ry = (int)Math.Round(roiY - s.OffsetY);
+                    rx = Math.Max(0, Math.Min(rx, input.Width - 1));
+                    ry = Math.Max(0, Math.Min(ry, input.Height - 1));
+                    int rw = Math.Max(0, Math.Min(roiW, input.Width - rx));
+                    int rh = Math.Max(0, Math.Min(roiH, input.Height - ry));
+                    if (rw > 0 && rh > 0)
+                    {
+                        var rect = new Rectangle(rx, ry, rw, rh);
+                        cropped = CropTemplate(input, rect);
+                        analyzeOn = cropped;
+                        usedRoi = rect;
+                    }
+                }
+
                 // 先多取一些，本地按宽高 / 圆度过滤后再截断到 MaxCount
                 int cap = maxCount > 0 ? Math.Min(maxCount * 4 + 8, 256) : 256;
 
-                var br = _algo.AnalyzeBlobs(input, minArea, maxArea, cap);
+                var br = _algo.AnalyzeBlobs(analyzeOn, minArea, maxArea, cap);
                 if (!br.Success)
                 {
                     p.Summary = "Blob 失败：" + br.Message;
@@ -881,8 +928,16 @@ namespace VisionPlatform.Flow
                 kept.Sort(delegate (BlobResult a, BlobResult b) { return b.Area.CompareTo(a.Area); });
                 if (maxCount > 0 && kept.Count > maxCount) kept.RemoveRange(maxCount, kept.Count - maxCount);
 
+                // ROI 裁剪后，Blob 坐标相对裁剪图；加回裁剪区左上角还原到工作帧坐标
                 foreach (BlobResult b in kept)
-                    p.Shapes.Add(FlowShapes.BlobMarker(b.Cx, b.Cy, b.Area));
+                {
+                    double cx = b.Cx + usedRoi.X;
+                    double cy = b.Cy + usedRoi.Y;
+                    p.Shapes.Add(FlowShapes.BlobMarker(cx, cy, b.Area));
+                }
+
+                if (!usedRoi.IsEmpty)
+                    p.Shapes.AddRange(FlowShapes.RoiOutline(usedRoi));
 
                 // 判定：期望个数范围 + 单个面积范围（0 = 不限）
                 double expectMin = node.GetDouble("ExpectMin", 0);
@@ -927,6 +982,7 @@ namespace VisionPlatform.Flow
             finally
             {
                 if (work != null) work.Dispose();
+                if (cropped != null) cropped.Dispose();
             }
         }
 
@@ -954,6 +1010,15 @@ namespace VisionPlatform.Flow
                 p.Status = FlowNodeStatus.Skipped;
                 p.Summary = "直线卡尺：无输入帧";
                 return true;
+            }
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
             }
 
             // 扫描线段是几何属性（图像坐标），需先经位置修正变换
@@ -1043,6 +1108,15 @@ namespace VisionPlatform.Flow
                 p.Status = FlowNodeStatus.Skipped;
                 p.Summary = "圆卡尺：无输入帧";
                 return true;
+            }
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
             }
 
             double roiCx = node.GetDouble("Cx", 320) - s.OffsetX;
@@ -1138,6 +1212,15 @@ namespace VisionPlatform.Flow
                 return true;
             }
 
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
             var sr = _algo.Sharpness(s.Current);
             if (!sr.Success)
             {
@@ -1157,6 +1240,15 @@ namespace VisionPlatform.Flow
                 p.Status = FlowNodeStatus.Skipped;
                 p.Summary = "圆拟合：无输入帧";
                 return true;
+            }
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
             }
 
             var cr = _algo.FitCircle(s.Current);
@@ -1193,6 +1285,15 @@ namespace VisionPlatform.Flow
                 p.Status = FlowNodeStatus.Skipped;
                 p.Summary = "直线拟合：无输入帧";
                 return true;
+            }
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
             }
 
             var lr = _algo.FitLine(s.Current);

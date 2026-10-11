@@ -391,6 +391,12 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Enum("Polarity", "统计对象", "Bright",
                 new[] { "亮目标", "暗目标" }, new[] { "Bright", "Dark" }));
 
+            t.Fields.Add(Group("ROI（宽或高为 0 = 整图）"));
+            t.Fields.Add(Int("RoiX", "X", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiY", "Y", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
+
             t.Fields.Add(Group("过滤（0 = 不限）"));
             t.Fields.Add(Dbl("MinArea", "最小面积", 0, 100000000, 0, 10m, "100"));
             t.Fields.Add(Dbl("MaxArea", "最大面积", 0, 100000000, 0, 10m, "0"));
