@@ -582,7 +582,10 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            if (mode == FlowPreviewMode.SelectedNode && !snap.IsChainEnd)
+            // 「选中节点」模式：链尾（最终结果）快照同样按节点过滤——否则它总是最后一个
+            // 被拉取并覆盖，导致选中非末节点时预览仍停留在最终结果图（用户反馈的 bug）。
+            // 仅当选中节点恰好是链尾节点时，链尾快照才会通过过滤并显示（含 OK/NG 结论）。
+            if (mode == FlowPreviewMode.SelectedNode)
             {
                 if (!string.IsNullOrEmpty(_selectedNodeId) && snap.NodeId != _selectedNodeId)
                 {
