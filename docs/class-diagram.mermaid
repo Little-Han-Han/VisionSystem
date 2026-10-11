@@ -1,0 +1,244 @@
+%% VisionSystem 增量：本机摄像头 + 流程编排 —— 类图
+%% 说明：C++ 侧仅示意相机句柄与导出；C# 侧给出完整数据模型与协作关系。
+
+classDiagram
+    direction LR
+
+    %% ========================= C# 相机层 =========================
+    class ICamera {
+        <<interface>>
+        +CameraInfo Info
+        +bool IsOpen
+        +bool IsGrabbing
+        +OpResult Open()
+        +OpResult Close()
+        +OpResult StartGrab()
+        +OpResult StopGrab()
+        +OpResult~Bitmap~ GrabOne(timeoutMs)
+        +event EventHandler~Bitmap~ FrameReceived
+        +event EventHandler~string~ ErrorOccurred
+    }
+    class SimCamera {
+        +CameraInfo Info
+        +OpResult StartGrab()
+        -void GrabLoop()
+    }
+    class HikCamera {
+        +static List~CameraInfo~ Enumerate()
+    }
+    class LocalCamera {
+        -IntPtr _handle
+        -int _index
+        -Thread _thread
+        -volatile bool _stopFlag
+        +static List~CameraInfo~ Enumerate()
+        +OpResult Open()
+        +OpResult StartGrab()
+        -void GrabLoop()
+        +OpResult~Bitmap~ GrabOne(timeoutMs)
+    }
+    class CameraManager {
+        -Dictionary~string,ICamera~ _opened
+        +List~ICamera~ OpenedCameras
+        +List~CameraInfo~ Enumerate()
+        +OpResult~ICamera~ Open(id)
+        +OpResult Close(id)
+        -ICamera CreateById(id)
+    }
+    class CameraInfo {
+        +string Id
+        +string Name
+        +string Vendor
+        +string Serial
+        +string Model
+        +string Ip
+    }
+    class NativeCamera {
+        <<static>>
+        +int Enum()
+        +IntPtr Open(index, opt)
+        +int Grab(handle, dst, timeoutMs)
+        +int GetSize(handle, out w, out h)
+        +int Close(handle)
+        +string LastError(handle)
+    }
+
+    ICamera <|.. SimCamera
+    ICamera <|.. HikCamera
+    ICamera <|.. LocalCamera
+    CameraManager o-- ICamera : 管理多实例
+    CameraManager ..> CameraInfo : Enumerate 产出
+    ICamera ..> CameraInfo : Info
+    LocalCamera ..> NativeCamera : P/Invoke
+    LocalCamera ..> CameraInfo : 生产
+
+    %% ========================= C# 流程模型 =========================
+    class FlowNodeType {
+        <<enumeration>>
+        ImageSource
+        Preprocess
+        ShapeMatch
+        Blob
+        Sharpness
+        FitCircle
+        FitLine
+        ResultOutput
+    }
+    class ParamItem {
+        +string Key
+        +string Value
+    }
+    class FlowNode {
+        +string Id
+        +string Type
+        +string Name
+        +float X
+        +float Y
+        +List~ParamItem~ Params
+        +double GetDouble(key, def)
+        +void Set(key, value)
+        +FlowNode Clone()
+    }
+    class FlowLink {
+        +string FromNodeId
+        +string ToNodeId
+    }
+    class FlowDefinition {
+        +string Id
+        +string Name
+        +string CameraId
+        +int ViewIndex
+        +List~FlowNode~ Nodes
+        +List~FlowLink~ Links
+        +static FlowDefinition CreateEmpty(name)
+        +FlowDefinition Clone()
+    }
+    class FlowSettings {
+        +int SchemaVersion
+        +string ActiveFlowId
+        +List~FlowDefinition~ Flows
+    }
+    class FlowModule {
+        <<static>>
+        +List~FlowModuleDef~ Catalog
+        +FlowNode CreateNode(type, x, y)
+    }
+
+    FlowDefinition "1" *-- "many" FlowNode
+    FlowDefinition "1" *-- "many" FlowLink
+    FlowNode "1" *-- "many" ParamItem
+    FlowNode ..> FlowNodeType : Type 映射
+    FlowSettings "1" *-- "many" FlowDefinition
+    FlowModule ..> FlowNode : 创建并铺默认参数
+
+    %% ========================= C# 配置 =========================
+    class AppConfig {
+        +SystemSettings System
+        +AlgorithmSettings Algorithm
+        +UiSettings Ui
+        +FlowSettings Flows  <<新增>>
+    }
+    class ConfigStore {
+        <<static>>
+        +AppConfig Current
+        +AppConfig Load()
+        +void Save()
+        +event Changed
+    }
+    AppConfig "1" *-- "1" FlowSettings
+    ConfigStore ..> AppConfig
+
+    %% ========================= C# 执行与回传 =========================
+    class FlowRunner {
+        -VisionAlgo _algo  <<独立上下文>>
+        +FlowRunResult Run(flow, camera)
+        +event OutputReady
+    }
+    class FlowOutputChannel {
+        <<static>>
+        +event EventHandler~FlowOutputEventArgs~ OutputReady
+        +void Publish(e)
+    }
+    class FlowOutputEventArgs {
+        +int ViewIndex
+        +Bitmap Frame
+        +List~IGeometryShape~ Shapes
+        +bool? Passed
+        +string Summary
+        +string CameraName
+    }
+    FlowRunner ..> FlowDefinition : 执行
+    FlowRunner ..> ICamera : GrabOne
+    FlowRunner ..> VisionAlgo : 复用算法
+    FlowRunner ..> FlowOutputChannel : Publish
+    FlowOutputChannel ..> FlowOutputEventArgs
+
+    %% ========================= C# UI =========================
+    class FlowCanvasControl {
+        +FlowDefinition Flow
+        +string SelectedNodeId
+        +bool AllowDrop
+        +event NodeAdded
+        +event NodeMoved
+        +event NodeSelected
+        +event LinkAdded
+        +event LinkRemoved
+        +event Changed
+        -void OnPaint()
+        -void OnMouseDown(MouseEventArgs)
+        -void OnMouseUp(MouseEventArgs)
+        -void OnDragDrop(DragEventArgs)
+        -FlowNode HitTestNode(Point)
+    }
+    class ShapeMatchNodePanel {
+        +Bind(FlowNode node)
+        +void ApplyToNode()
+    }
+    class FlowForm {
+        +FlowSettings _settings
+        -FlowCanvasControl _canvas
+        -FlowRunner _runner
+        +void LoadFlow(id)
+        +void SaveFlow()
+        +void RunCurrent()
+    }
+    class MainForm {
+        +void ShowFrame(viewIndex, name, frame)
+        -void OnFlowOutput(e)
+    }
+
+    FlowForm *-- FlowCanvasControl
+    FlowForm *-- ShapeMatchNodePanel
+    FlowForm o-- FlowRunner
+    FlowForm ..> FlowSettings : 编辑/持久化
+    FlowForm ..> FlowOutputChannel : 订阅?
+    MainForm ..> FlowOutputChannel : 订阅
+    MainForm ..> FlowOutputEventArgs
+
+    %% ========================= C++ 侧（示意） =========================
+    class CameraSource {
+        +VideoCapture cap
+        +mutex mtx
+        +string lastError
+        +int width
+        +int height
+        +bool opened
+    }
+    class VisionAlgoContext {
+        +string lastError
+        +Mat tmpl
+        +ShapeModel shape
+    }
+    class va_camera_api {
+        <<extern C>>
+        +int va_camera_enum(out count)
+        +void* va_camera_open(index, opt)
+        +int va_camera_grab(cam, dst, timeoutMs)
+        +int va_camera_get_size(cam, out w, out h)
+        +int va_camera_close(cam)
+        +int va_camera_get_last_error(cam, buf, size)
+    }
+
+    NativeCamera ..> va_camera_api : DllImport
+    va_camera_api ..> CameraSource : 句柄=实例
+    CameraSource ..> CameraSource : 与 VisionAlgoContext 相互独立

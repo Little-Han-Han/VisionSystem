@@ -37,10 +37,20 @@ namespace VisionPlatform.Camera
         /// <summary>当前相机变化时触发。</summary>
         public event EventHandler CurrentChanged;
 
-        /// <summary>枚举所有可用相机（模拟相机始终存在，海康取决于 SDK）。</summary>
+        /// <summary>枚举所有可用相机（本机摄像头 → 模拟相机 → 海康，取决于硬件/SDK）。</summary>
         public List<CameraInfo> Enumerate()
         {
             var list = new List<CameraInfo>();
+
+            // 本机摄像头（USB / 内置摄像头），无设备时为空
+            try
+            {
+                list.AddRange(LocalCamera.Enumerate());
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("枚举本机摄像头失败：" + ex.Message);
+            }
 
             // 模拟相机：无硬件时的兜底设备
             var sim = new SimCamera();
@@ -130,6 +140,15 @@ namespace VisionPlatform.Camera
         {
             if (id.StartsWith("SIM", StringComparison.OrdinalIgnoreCase))
                 return new SimCamera();
+
+            // 本机摄像头：Id 形如 "USB-1"，后缀即设备序号
+            if (id.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
+            {
+                int index = 0;
+                int dash = id.IndexOf('-');
+                if (dash >= 0) int.TryParse(id.Substring(dash + 1), out index);
+                return new LocalCamera(index);
+            }
 
             if (id.StartsWith("HIK", StringComparison.OrdinalIgnoreCase))
                 return new HikCamera(new CameraInfo { Id = id, Vendor = "Hik" });

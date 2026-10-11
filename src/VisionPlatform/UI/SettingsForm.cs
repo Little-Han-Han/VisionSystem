@@ -18,6 +18,12 @@ namespace VisionPlatform.UI
 
             LoadFrom(ConfigStore.Current.System);
             lblCommState.Text = "当前：" + CommState.Describe();
+
+            UiStyle.ApplyForm(this);
+
+            // 语义色：确定=绿，清理历史（删除文件）=红；其余中性
+            btnOk.Kind = UiButtonKind.Start;
+            btnCleanup.Kind = UiButtonKind.Stop;
         }
 
         // ---------- 界面 ↔ 设置 ----------
@@ -32,6 +38,7 @@ namespace VisionPlatform.UI
             chkAutoSave.Checked = s.AutoSaveEnabled;
             chkNgOnly.Checked = s.SaveNgOnly;
             chkRequireComm.Checked = s.RequireCommBeforeRun;
+            numYieldAlarm.Value = ClampPercent(s.YieldAlarmPercent);
         }
 
         private SystemSettings CollectFromUi()
@@ -44,6 +51,7 @@ namespace VisionPlatform.UI
             s.AutoSaveEnabled = chkAutoSave.Checked;
             s.SaveNgOnly = chkNgOnly.Checked;
             s.RequireCommBeforeRun = chkRequireComm.Checked;
+            s.YieldAlarmPercent = (double)numYieldAlarm.Value;
 
             return s;
         }
@@ -53,6 +61,15 @@ namespace VisionPlatform.UI
         {
             ConfigStore.Current.System = CollectFromUi();
             ConfigStore.Save();
+        }
+
+        /// <summary>把配置里的良率告警下限夹到 [0,100]，缺失或非法时取默认 95。</summary>
+        private static decimal ClampPercent(double percent)
+        {
+            if (double.IsNaN(percent) || double.IsInfinity(percent) || percent <= 0.0)
+                percent = SystemSettings.DefaultYieldAlarmPercent;
+            if (percent > 100.0) percent = 100.0;
+            return (decimal)percent;
         }
 
         private static decimal ClampDays(int days)

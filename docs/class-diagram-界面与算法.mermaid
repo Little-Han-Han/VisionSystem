@@ -1,0 +1,480 @@
+%% 增量架构：界面布局工程化 + 算法模块完善与实时显示
+%% 类图：新增/修改的关键类型与关系（既有类型仅列出与本期相关成员）
+
+classDiagram
+    %% ================= 主题（新增） =================
+    class UiTheme {
+        <<static>>
+        +Color ColorAppBg
+        +Color ColorPanelBg
+        +Color ColorCardBg
+        +Color ColorHeaderBg
+        +Color ColorViewBg
+        +Color ColorDivider
+        +Color ColorTextPrimary
+        +Color ColorTextSecondary
+        +Color ColorAccent
+        +Color ColorOk
+        +Color ColorNg
+        +Color ColorWarn
+        +Color ColorRunning
+        +Color ColorDisabled
+        +Font FontBody
+        +Font FontGroupTitle
+        +Font FontBadge
+        +Font FontYield
+        +Font FontStat
+        +Font FontButton
+        +int RightPanelWidth
+        +int BadgeHeight
+        +StyleButton(Button, ButtonKind) void
+        +StyleBadge(Label, VerdictState) void
+        +StyleStatValue(Label, StatKind) void
+        +StyleGroupTitle(Label) void
+    }
+    class VerdictState {
+        <<enum>>
+        None
+        Ok
+        Ng
+    }
+    class ButtonKind {
+        <<enum>>
+        Run
+        Pause
+        Stop
+        Grab
+        Reset
+    }
+    class StatKind {
+        <<enum>>
+        Plain
+        Ok
+        Ng
+        Yield
+        Cycle
+    }
+
+    %% ================= 流程模型（修改） =================
+    class FlowNodeType {
+        <<enum>>
+        ImageSource
+        Preprocess
+        ShapeMatch
+        Blob
+        Sharpness
+        FitCircle
+        FitLine
+        ResultOutput
+        TemplateMatch
+        PositionCorrect
+        LineCaliper
+        CircleCaliper
+    }
+    class FlowNode {
+        +string Id
+        +string Type
+        +string Name
+        +float X
+        +float Y
+        +List~ParamItem~ Params
+        +GetString(key, def) string
+        +GetDouble(key, def) double
+        +GetInt(key, def) int
+        +GetBool(key, def) bool
+        +Set(key, value) void
+    }
+    class FlowSettings {
+        +int SchemaVersion
+        +string ActiveFlowId
+        +List~FlowDefinition~ Flows
+    }
+    class SystemSettings {
+        +string ImageSavePath
+        +bool RequireCommBeforeRun
+        +double YieldAlarmPercent
+    }
+
+    %% ================= 参数面板（新增） =================
+    class FieldKind {
+        <<enum>>
+        Int
+        Double
+        Bool
+        Enum
+        Text
+        File
+        Action
+        Note
+    }
+    class NodeParamField {
+        +string Key
+        +string Label
+        +FieldKind Kind
+        +string Group
+        +string Note
+        +double Min
+        +double Max
+        +double Step
+        +int Decimals
+        +string[] EnumOptions
+    }
+    class NodeParamSchema {
+        <<static>>
+        +For(FlowNodeType) List~NodeParamField~
+    }
+    class NodeParamPanel {
+        -FlowNode _node
+        -bool _updating
+        +SetNode(FlowNode) void
+        +ShowRuntime(string) void
+        +event ParamsChanged
+        -AddNum(TableLayoutPanel, NodeParamField) void
+        -AddCombo(TableLayoutPanel, NodeParamField) void
+        -AddCheck(TableLayoutPanel, NodeParamField) void
+        -AddFile(TableLayoutPanel, NodeParamField) void
+        -AddButton(TableLayoutPanel, NodeParamField) void
+        -AddNote(TableLayoutPanel, NodeParamField) void
+    }
+
+    %% ================= 执行内核（新增/修改） =================
+    class RunTransform {
+        +bool HasValue
+        +double Dx
+        +double Dy
+        +double DAngle
+        +double DScale
+        +double RefX
+        +double RefY
+        +bool EnableAngle
+        +ApplyToRect(RectangleF) RectangleF
+        +Reset() void
+    }
+    class FlowNodeProgress {
+        +int Index
+        +int Total
+        +FlowNode Node
+        +Bitmap Frame
+        +List~IGeometryShape~ Shapes
+        +int ElapsedMs
+        +bool Passed
+        +string Message
+        +string ValueText
+        +DisposeFrame() void
+    }
+    class FlowRunSession {
+        +FlowDefinition Flow
+        +ICamera Camera
+        +List~FlowNode~ Chain
+        +int Cursor
+        +Bitmap Current
+        +RunTransform Transform
+        +bool Passed
+        +Dictionary~string,int~ NodeMs
+        +StepNext() FlowNodeProgress
+        +Finish() FlowRunResult
+        +Dispose() void
+    }
+    class FlowRunner {
+        -VisionAlgo _algo
+        -bool _disposed
+        +Begin(FlowDefinition, ICamera) FlowRunSession
+        +Run(FlowDefinition, ICamera) FlowRunResult
+        +Validate(FlowDefinition, out string) bool
+        +event OutputReady
+        -ExecuteNode(FlowNode, FlowRunSession) FlowNodeProgress
+        -RunTemplateMatch(FlowNode, FlowRunSession) void
+        -RunPositionCorrect(FlowNode, FlowRunSession) void
+        -RunLineCaliper(FlowNode, FlowRunSession) void
+        -RunCircleCaliper(FlowNode, FlowRunSession) void
+        -RunImageSource(FlowNode, FlowRunSession) void
+        +Dispose() void
+    }
+    class FlowRunController {
+        -Thread _thread
+        -volatile bool _cancel
+        -FlowNodeProgress _pending
+        -double _fps
+        +RunOnce() void
+        +StepOnce() void
+        +StartLoop() void
+        +StopLoop() void
+        +Join(int) bool
+        +TakePending() FlowNodeProgress
+        +event ProgressReady
+    }
+    class FlowShapes {
+        +BuildLineCaliperShapes(CaliperLineResult, FlowNode) List~IGeometryShape~
+        +BuildCircleCaliperShapes(CaliperCircleResult, FlowNode) List~IGeometryShape~
+        +BuildPositionCorrectShapes(RunTransform, FlowNode) List~IGeometryShape~
+        +BuildBlobShapes(List~BlobResult~) List~IGeometryShape~
+        +BuildMatchShapes(List~ShapeMatchResult~) List~IGeometryShape~
+    }
+
+    %% ================= 界面（新增/修改） =================
+    class PreviewMode {
+        <<enum>>
+        SelectedNode
+        ChainTail
+        RawImage
+    }
+    class FlowPreviewPanel {
+        -ImageViewer _viewer
+        -Timer _pump
+        -Label _lblVerdict
+        -FlowNodeProgress _pending
+        +PreviewMode Mode
+        +bool PauseAutoRefresh
+        +SetProgress(FlowNodeProgress) void
+        +SetDisplayMode(PreviewMode) void
+        +SetVerdict(bool?) void
+        +Clear() void
+    }
+    class NodeStatus {
+        <<enum>>
+        Waiting
+        Running
+        Ok
+        Failed
+    }
+    class FlowCanvasControl {
+        +FlowDefinition Flow
+        +string SelectedNodeId
+        +SetNodeStatus(string, NodeStatus, int) void
+        +HighlightRunning(string) void
+        +ClearStatus() void
+        +AddNode(string, float, float) FlowNode
+        +DeleteSelected() void
+    }
+    class FlowForm {
+        -FlowRunner _runner
+        -FlowRunController _ctl
+        -NodeParamPanel _paramPanel
+        -Thread _runThread
+        -bool _closeWhenIdle
+        +OnRun(object, EventArgs) void
+        +OnStep(object, EventArgs) void
+        +OnRunLoop(object, EventArgs) void
+        +OnStop(object, EventArgs) void
+        +OnCanvasNodeSelected(object, FlowNodeEventArgs) void
+        +OnParamsChanged(object, EventArgs) void
+    }
+    class MainForm {
+        -bool _running
+        -bool _paused
+        -int _statTotal
+        -int _statOk
+        -int _statNg
+        -int _consecutiveNg
+        +ApplyTheme() void
+        +SetVerdict(bool?) void
+        +UpdateStats() void
+        +UpdateRunButtons() void
+        +OnFlowOutput(object, FlowOutputEventArgs) void
+    }
+    class RunState {
+        <<enum>>
+        Stopped
+        Running
+        Paused
+    }
+
+    %% ================= 原生与 P/Invoke（新增） =================
+    class VA_CaliperParam {
+        <<struct>>
+        +double x1
+        +double y1
+        +double x2
+        +double y2
+        +double cx
+        +double cy
+        +double inner_radius
+        +double outer_radius
+        +double start_angle
+        +double angle_span
+        +int caliper_count
+        +double projection_length
+        +int polarity
+        +double edge_threshold
+        +int filter_half_width
+        +int select_mode
+        +int min_edge_count
+        +int reject_outliers
+        +double outlier_tolerance
+    }
+    class VA_CaliperPoint {
+        <<struct>>
+        +double px1
+        +double py1
+        +double px2
+        +double py2
+        +double x
+        +double y
+        +double strength
+        +int valid
+    }
+    class CaliperParam {
+        +double X1
+        +double Y1
+        +double X2
+        +double Y2
+        +double Cx
+        +double Cy
+        +double InnerRadius
+        +double OuterRadius
+        +double StartAngle
+        +double AngleSpan
+        +int CaliperCount
+        +double ProjectionLength
+        +int Polarity
+        +double EdgeThreshold
+        +int FilterHalfWidth
+        +int SelectMode
+        +int MinEdgeCount
+        +int RejectOutliers
+        +double OutlierTolerance
+        +ToNative() VA_CaliperParam
+    }
+    class CaliperPoint {
+        +double Px1
+        +double Py1
+        +double Px2
+        +double Py2
+        +double X
+        +double Y
+        +double Strength
+        +bool Valid
+    }
+    class CaliperLineResult {
+        +List~CaliperPoint~ Points
+        +LineResult Line
+        +double Rms
+        +double Length
+        +double AngleDeg
+    }
+    class CaliperCircleResult {
+        +List~CaliperPoint~ Points
+        +CircleResult Circle
+        +double Rms
+        +double Diameter
+    }
+    class VisionAlgo {
+        +LineCaliper(Bitmap, CaliperParam) OpResult~CaliperLineResult~
+        +CircleCaliper(Bitmap, CaliperParam) OpResult~CaliperCircleResult~
+        +TrainTemplate(Bitmap, Rectangle) OpResult
+        +MatchTemplate(Bitmap) OpResult~MatchResult~
+        +FindShapeModel(Bitmap, ShapeParam, Rectangle) OpResult~List~ShapeMatchResult~~
+        +AnalyzeBlobs(Bitmap, double, double) OpResult~List~BlobResult~~
+        +LastError string
+    }
+
+    %% ================= 控件库新增几何图形 =================
+    class IGeometryShape {
+        <<interface>>
+        +string Name
+        +Color StrokeColor
+        +float LineWidth
+        +bool Visible
+        +bool IsFilled
+        +RectangleF Bounds
+        +Draw(Graphics, Viewport, RenderOptions) void
+        +HitTest(PointF, float) bool
+        +Translate(float, float) void
+        +GetHandles() IList~ShapeHandle~
+        +SetHandlePosition(int, PointF) void
+        +Clone() IGeometryShape
+    }
+    class LineSegmentShape {
+        +PointF P1
+        +PointF P2
+        +DashStyle Dash
+        +Color StrokeColor
+        +float LineWidth
+        +Draw(Graphics, Viewport, RenderOptions) void
+        +HitTest(PointF, float) bool
+        +Clone() IGeometryShape
+    }
+    class MarkerKind {
+        <<enum>>
+        Square
+        Cross
+    }
+    class PointMarkerShape {
+        +PointF Center
+        +float Size
+        +MarkerKind Kind
+        +Draw(Graphics, Viewport, RenderOptions) void
+        +Clone() IGeometryShape
+    }
+    class ShapeCollection {
+        +AddRange(IEnumerable~IGeometryShape~) void
+        +NotifyChanged() void
+        +Clear() void
+    }
+    class ImageViewer {
+        +Bitmap Image
+        +ShapeCollection Shapes
+        +bool OwnsImage
+        +SetImage(Bitmap, bool) void
+        +ClearShapes() void
+    }
+
+    %% ================= 关系 =================
+    FlowRunner --> FlowRunSession : creates
+    FlowRunSession *-- RunTransform : 覆盖式唯一实例
+    FlowRunSession --> FlowNodeProgress : produces
+    FlowRunSession --> FlowNode : iterates Chain
+    FlowRunner --> VisionAlgo : owns(独立上下文)
+    FlowRunner ..> FlowShapes : uses
+    FlowRunner --> FlowNodeType : switch dispatch
+
+    FlowRunController --> FlowRunSession : drives Begin/StepNext
+    FlowRunController ..> FlowNodeProgress : _pending 覆盖式投递
+    FlowRunController --> FlowRunSession : 每周期 Finish
+
+    FlowForm --> FlowRunController
+    FlowForm --> FlowRunner
+    FlowForm --> FlowPreviewPanel
+    FlowForm --> FlowCanvasControl
+    FlowForm --> NodeParamPanel
+    FlowForm ..> RunState : 三态互斥
+
+    NodeParamPanel ..> NodeParamSchema : reads
+    NodeParamSchema --> NodeParamField
+    NodeParamField --> FieldKind
+    NodeParamSchema ..> FlowNodeType
+    NodeParamPanel --> FlowNode : 读写 Params
+    NodeParamPanel ..> UiTheme
+
+    FlowPreviewPanel --> ImageViewer
+    FlowPreviewPanel --> PreviewMode
+    FlowPreviewPanel ..> FlowNodeProgress : 33ms 拉取
+    FlowCanvasControl --> NodeStatus
+    FlowCanvasControl --> FlowNode : 绘制
+
+    VisionAlgo --> CaliperParam
+    VisionAlgo --> VA_CaliperParam : ToNative
+    VisionAlgo --> VA_CaliperPoint
+    VisionAlgo ..> CaliperLineResult : produces
+    VisionAlgo ..> CaliperCircleResult : produces
+    CaliperLineResult --> CaliperPoint
+    CaliperCircleResult --> CaliperPoint
+
+    FlowShapes ..> LineSegmentShape : creates
+    FlowShapes ..> PointMarkerShape : creates
+    FlowShapes --> CaliperLineResult
+    FlowShapes --> CaliperCircleResult
+    FlowShapes --> RunTransform
+    LineSegmentShape ..|> IGeometryShape
+    PointMarkerShape ..|> IGeometryShape
+    ImageViewer --> ShapeCollection
+    ShapeCollection --> IGeometryShape
+
+    MainForm ..> UiTheme
+    MainForm --> SystemSettings
+    MainForm ..> VerdictState
+    FlowForm ..> UiTheme
+    FlowSettings --> FlowNode
+    UiTheme ..> VerdictState
+    UiTheme ..> ButtonKind
+    UiTheme ..> StatKind

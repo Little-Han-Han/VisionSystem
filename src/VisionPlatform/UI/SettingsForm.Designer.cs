@@ -20,7 +20,7 @@ namespace VisionPlatform.UI
             this.groupSave = new System.Windows.Forms.GroupBox();
             this.lblPath = new System.Windows.Forms.Label();
             this.txtSavePath = new System.Windows.Forms.TextBox();
-            this.btnBrowse = new System.Windows.Forms.Button();
+            this.btnBrowse = new VisionPlatform.UI.UiButton();
             this.lblFormat = new System.Windows.Forms.Label();
             this.cmbFormat = new System.Windows.Forms.ComboBox();
             this.lblDays = new System.Windows.Forms.Label();
@@ -28,19 +28,23 @@ namespace VisionPlatform.UI
             this.lblDaysUnit = new System.Windows.Forms.Label();
             this.chkAutoSave = new System.Windows.Forms.CheckBox();
             this.chkNgOnly = new System.Windows.Forms.CheckBox();
-            this.btnCleanup = new System.Windows.Forms.Button();
+            this.btnCleanup = new VisionPlatform.UI.UiButton();
             this.lblHint = new System.Windows.Forms.Label();
 
             this.groupRun = new System.Windows.Forms.GroupBox();
             this.chkRequireComm = new System.Windows.Forms.CheckBox();
             this.lblCommState = new System.Windows.Forms.Label();
+            this.lblYieldAlarm = new System.Windows.Forms.Label();
+            this.numYieldAlarm = new System.Windows.Forms.NumericUpDown();
+            this.lblYieldAlarmUnit = new System.Windows.Forms.Label();
 
             this.panelButtons = new System.Windows.Forms.Panel();
-            this.btnDefault = new System.Windows.Forms.Button();
-            this.btnOk = new System.Windows.Forms.Button();
-            this.btnCancel = new System.Windows.Forms.Button();
+            this.btnDefault = new VisionPlatform.UI.UiButton();
+            this.btnOk = new VisionPlatform.UI.UiButton();
+            this.btnCancel = new VisionPlatform.UI.UiButton();
 
             ((System.ComponentModel.ISupportInitialize)(this.numDays)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numYieldAlarm)).BeginInit();
             this.groupSave.SuspendLayout();
             this.groupRun.SuspendLayout();
             this.panelButtons.SuspendLayout();
@@ -167,12 +171,15 @@ namespace VisionPlatform.UI
             this.lblHint.Text = "目录结构：{保存路径}\\{日期}\\{时间}_{标签}_{OK或NG}{扩展名}";
 
             // ---------- groupRun ----------
+            this.groupRun.Controls.Add(this.lblYieldAlarmUnit);
+            this.groupRun.Controls.Add(this.numYieldAlarm);
+            this.groupRun.Controls.Add(this.lblYieldAlarm);
             this.groupRun.Controls.Add(this.lblCommState);
             this.groupRun.Controls.Add(this.chkRequireComm);
             this.groupRun.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.groupRun.Location = new System.Drawing.Point(12, 210);
             this.groupRun.Name = "groupRun";
-            this.groupRun.Size = new System.Drawing.Size(496, 92);
+            this.groupRun.Size = new System.Drawing.Size(496, 124);
             this.groupRun.TabIndex = 1;
             this.groupRun.TabStop = false;
             this.groupRun.Text = "运行前置条件";
@@ -193,6 +200,34 @@ namespace VisionPlatform.UI
             this.lblCommState.Size = new System.Drawing.Size(50, 15);
             this.lblCommState.TabIndex = 1;
             this.lblCommState.Text = "当前：";
+
+            this.lblYieldAlarm.AutoSize = true;
+            this.lblYieldAlarm.ForeColor = System.Drawing.Color.Silver;
+            this.lblYieldAlarm.Location = new System.Drawing.Point(14, 86);
+            this.lblYieldAlarm.Name = "lblYieldAlarm";
+            this.lblYieldAlarm.Size = new System.Drawing.Size(88, 15);
+            this.lblYieldAlarm.TabIndex = 2;
+            this.lblYieldAlarm.Text = "良率告警下限：";
+
+            this.numYieldAlarm.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.numYieldAlarm.DecimalPlaces = 1;
+            this.numYieldAlarm.ForeColor = System.Drawing.Color.Gainsboro;
+            this.numYieldAlarm.Increment = new decimal(new int[] { 5, 0, 0, 0 });
+            this.numYieldAlarm.Location = new System.Drawing.Point(108, 83);
+            this.numYieldAlarm.Maximum = new decimal(new int[] { 100, 0, 0, 0 });
+            this.numYieldAlarm.Minimum = new decimal(new int[] { 0, 0, 0, 0 });
+            this.numYieldAlarm.Name = "numYieldAlarm";
+            this.numYieldAlarm.Size = new System.Drawing.Size(70, 23);
+            this.numYieldAlarm.TabIndex = 3;
+            this.numYieldAlarm.Value = new decimal(new int[] { 95, 0, 0, 0 });
+
+            this.lblYieldAlarmUnit.AutoSize = true;
+            this.lblYieldAlarmUnit.ForeColor = System.Drawing.Color.Gray;
+            this.lblYieldAlarmUnit.Location = new System.Drawing.Point(184, 86);
+            this.lblYieldAlarmUnit.Name = "lblYieldAlarmUnit";
+            this.lblYieldAlarmUnit.Size = new System.Drawing.Size(260, 15);
+            this.lblYieldAlarmUnit.TabIndex = 4;
+            this.lblYieldAlarmUnit.Text = "%（低于此值良率转橙，低于一半转红；0 = 不告警）";
 
             // ---------- panelButtons ----------
             this.panelButtons.Controls.Add(this.btnCancel);
@@ -237,7 +272,7 @@ namespace VisionPlatform.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(520, 380);
+            this.ClientSize = new System.Drawing.Size(520, 412);
             this.Controls.Add(this.groupSave);
             this.Controls.Add(this.groupRun);
             this.Controls.Add(this.panelButtons);
@@ -251,6 +286,7 @@ namespace VisionPlatform.UI
             this.Text = "系统设置";
 
             ((System.ComponentModel.ISupportInitialize)(this.numDays)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numYieldAlarm)).EndInit();
             this.groupSave.ResumeLayout(false);
             this.groupSave.PerformLayout();
             this.groupRun.ResumeLayout(false);
@@ -264,7 +300,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.GroupBox groupSave;
         private System.Windows.Forms.Label lblPath;
         private System.Windows.Forms.TextBox txtSavePath;
-        private System.Windows.Forms.Button btnBrowse;
+        private VisionPlatform.UI.UiButton btnBrowse;
         private System.Windows.Forms.Label lblFormat;
         private System.Windows.Forms.ComboBox cmbFormat;
         private System.Windows.Forms.Label lblDays;
@@ -272,16 +308,19 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblDaysUnit;
         private System.Windows.Forms.CheckBox chkAutoSave;
         private System.Windows.Forms.CheckBox chkNgOnly;
-        private System.Windows.Forms.Button btnCleanup;
+        private VisionPlatform.UI.UiButton btnCleanup;
         private System.Windows.Forms.Label lblHint;
 
         private System.Windows.Forms.GroupBox groupRun;
         private System.Windows.Forms.CheckBox chkRequireComm;
         private System.Windows.Forms.Label lblCommState;
+        private System.Windows.Forms.Label lblYieldAlarm;
+        private System.Windows.Forms.NumericUpDown numYieldAlarm;
+        private System.Windows.Forms.Label lblYieldAlarmUnit;
 
         private System.Windows.Forms.Panel panelButtons;
-        private System.Windows.Forms.Button btnDefault;
-        private System.Windows.Forms.Button btnOk;
-        private System.Windows.Forms.Button btnCancel;
+        private VisionPlatform.UI.UiButton btnDefault;
+        private VisionPlatform.UI.UiButton btnOk;
+        private VisionPlatform.UI.UiButton btnCancel;
     }
 }

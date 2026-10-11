@@ -59,6 +59,9 @@ const char* VA_CALL va_error_string(int code)
         case VA_ERR_TYPE:        return "unsupported image type";
         case VA_ERR_INTERNAL:    return "internal error";
         case VA_ERR_NO_TEMPLATE: return "template not trained";
+        case VA_ERR_TIMEOUT:     return "timeout";
+        case VA_ERR_CAMERA:      return "camera error";
+        case VA_ERR_NO_EDGE:     return "no edge found";
         default:                 return "unknown error";
     }
 }
@@ -180,6 +183,83 @@ int VA_CALL va_edge_count(void* handle,
 {
     VA_CTX();
     return va::EdgeCount(ctx, gray, scan_row, threshold_delta, out_count);
+}
+
+// ---------------------- 卡尺（直线 / 圆）----------------------
+
+int VA_CALL va_line_caliper(void* handle,
+                             const VA_Image* gray,
+                             const VA_CaliperParam* param,
+                             VA_CaliperPoint* out_points,
+                             int max_count,
+                             int* out_count,
+                             VA_Line* out_line,
+                             double* out_rms)
+{
+    VA_CTX();
+    return va::LineCaliper(ctx, gray, param, out_points, max_count, out_count, out_line, out_rms);
+}
+
+int VA_CALL va_circle_caliper(void* handle,
+                               const VA_Image* gray,
+                               const VA_CaliperParam* param,
+                               VA_CaliperPoint* out_points,
+                               int max_count,
+                               int* out_count,
+                               VA_Circle* out_circle,
+                               double* out_rms)
+{
+    VA_CTX();
+    return va::CircleCaliper(ctx, gray, param, out_points, max_count, out_count, out_circle, out_rms);
+}
+
+// ---------------------- 摄像头（独立句柄，平行于算法 Context）----------------------
+
+/* 相机句柄取用：空句柄直接返回 VA_ERR_HANDLE */
+#define VA_CAM()                                                   \
+    va::CameraSource* cam = static_cast<va::CameraSource*>(handle); \
+    if (cam == 0) return VA_ERR_HANDLE;
+
+int VA_CALL va_camera_enum(int* out_count)
+{
+    return va::CameraEnum(out_count);
+}
+
+void* VA_CALL va_camera_open(int index, const VA_CameraOption* opt)
+{
+    return va::CameraOpen(index, opt);
+}
+
+int VA_CALL va_camera_grab(void* handle, VA_Image* dst, int timeout_ms)
+{
+    VA_CAM();
+    return va::CameraGrab(cam, dst, timeout_ms);
+}
+
+int VA_CALL va_camera_get_size(void* handle, int* out_w, int* out_h)
+{
+    VA_CAM();
+    return va::CameraGetSize(cam, out_w, out_h);
+}
+
+int VA_CALL va_camera_close(void* handle)
+{
+    VA_CAM();
+    return va::CameraClose(cam);
+}
+
+int VA_CALL va_camera_get_last_error(void* handle, char* buffer, int size)
+{
+    if (handle == 0 || buffer == 0 || size <= 0) return 0;
+
+    va::CameraSource* cam = static_cast<va::CameraSource*>(handle);
+    const std::string& s = cam->lastError;
+
+    int n = (int)s.size();
+    if (n > size - 1) n = size - 1;
+    if (n > 0) std::memcpy(buffer, s.c_str(), (size_t)n);
+    buffer[n] = '\0';
+    return n;
 }
 
 } // extern "C"

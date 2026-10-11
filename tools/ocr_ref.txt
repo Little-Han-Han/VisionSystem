@@ -1,0 +1,73 @@
+# OCR result  lang=zh-Hans-CN  lines=1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+# format: text <TAB> x,y,w,h
+过	0,0,0,0
+VisionPro QuickBuild - lC:\Program Files\Cognex\VisionPro C++ & .NEnVisionPr010]	0,0,0,0
+FIIe 100 H 已 0	0,0,0,0
+Workspace Explorer	0,0,0,0
+HOme	0,0,0,0
+TO 引 引 [ ℃ kl	0,0,0,0
+Acquisition	0,0,0,0
+lmage Databases	0,0,0,0
+V	0,0,0,0
+To 引 5	0,0,0,0
+lnputs/Outputs	0,0,0,0
+闩 [lnputs]	0,0,0,0
+种 《 lnputlmage	0,0,0,0
+PMAllgnT0011	0,0,0,0
+Graphics	0,0,0,0
+C:\Program 下 i s \ 〔 og ．	0,0,0,0
+同 引 引 ockl	0,0,0,0
+COmmun ℃	0,0,0,0
+匯 ， DIO Device	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+lnputlmage	0,0,0,0
+Results.Count	0,0,0,0
+R 凵 《 t tem(0 〕 ℃ 毆 卩 0 0	0,0,0,0
+R 凵 《 t tem(0 〕 ℃ 毆 卩 0 就 Tr 已 n 引 已 tionX	0,0,0,0
+R 凸 凵 《 t tem 〔 0 〕 ℃ 毆 PO Tr 已 n 引 已 tionY	0,0,0,0
+R 凵 t tem(0 〕 毆 卩 0 Rot tion	0,0,0,0
+Results.ltem(0 〕 .Score	0,0,0,0
+LastRumPMAignT0011 ]nputlmage	0,0,0,0
+Time D 已 罗 { 爿	0,0,0,0
+To 引 t	0,0,0,0
+厶 匚 qF 0T0 引	0,0,0,0
+引 obTo 引	0,0,0,0
+CaliperTool	0,0,0,0
+lmageFileTool	0,0,0,0
+PMAlignTool	0,0,0,0
+PMRedLineTooI	0,0,0,0
+To 引 引 0	0,0,0,0
+Calibration & Fixturing	0,0,0,0
+Deep Learning	0,0,0,0
+Geometry - Finding & Fitting	0,0,0,0
+ID & Metrics	0,0,0,0
+lmage Processing	0,0,0,0
+0	0,0,0,0
+LineMaxTooII	0,0,0,0
+和 lnputlmage	0,0,0,0
+种 Results.ltem(0 〕 .GetLineO	0,0,0,0
+种 Results.ltem(0 〕 .GetLineSegmentO	0,0,0,0
+引 obTo 引 1	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+种	0,0,0,0
+lnputlmage	0,0,0,0
+R 凸 凵 《 t G 毆 引 ob 蜊 ℃ 0 凵 nt	0,0,0,0
+R凸凵《t筮G毆引0b蜊」tEm0 〕 .CenterOfMasrnX	0,0,0,0
+R凸凵《t氲G毆引0b蜊」tEm〔D 〕 .CenterOfMassY	0,0,0,0
+R 凸 凵 《 t G 毆 引 ob 蜊 」 tem 〔 0 〕 r “	0,0,0,0
+[Outputs]	0,0,0,0
+、 习 彐 94g5ms 》 123b2m5	0,0,0,0
+Filmstrip	0,0,0,0
+。 lnputlmage 〔 CXProgram Fi 讼 〔 ogn 》	0,0,0,0
+# S	0,0,0,0
+0	0,0,0,0
+匚 已 〗 〗 571 1 1	0,0,0,0
+• Zoom: 1 引 卫 5 ％	0,0,0,0
+ÄEX	0,0,0,0

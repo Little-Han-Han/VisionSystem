@@ -43,6 +43,8 @@
   <ItemGroup>
     <Compile Include="Geometry\CircleShape.cs" />
     <Compile Include="Geometry\IGeometryShape.cs" />
+    <Compile Include="Geometry\LineSegmentShape.cs" />
+    <Compile Include="Geometry\PointMarkerShape.cs" />
     <Compile Include="Geometry\RectangleShape.cs" />
     <Compile Include="Geometry\RingShape.cs" />
     <Compile Include="Geometry\RotatedRectShape.cs" />

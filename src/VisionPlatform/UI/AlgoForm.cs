@@ -38,6 +38,15 @@ namespace VisionPlatform.UI
             InitResultGrid();
             SyncParamToUi();
             UpdatePoseHint();
+
+            // 统一深色工程配色（放在最后，业务语义色在运行时覆盖）
+            UiStyle.ApplyForm(this);
+
+            // 语义色：取帧=蓝、执行匹配=绿、清除模型=红；其余保持中性（次要动作）
+            btnOpenImage.Kind = UiButtonKind.Grab;
+            btnGrab.Kind = UiButtonKind.Grab;
+            btnMatch.Kind = UiButtonKind.Start;
+            btnClearModel.Kind = UiButtonKind.Stop;
         }
 
         /// <summary>

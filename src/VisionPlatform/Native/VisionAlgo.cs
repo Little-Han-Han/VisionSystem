@@ -70,6 +70,52 @@ namespace VisionPlatform.Native
         public double y2;
     }
 
+    /// <summary>
+    /// 卡尺参数（对应 C 端 VA_CaliperParam）。字段顺序、类型与 C 端严格一一对应：
+    /// 直线模式只用 x1/y1/x2/y2，圆模式只用 cx/cy/inner_radius/outer_radius/start_angle/angle_span。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_CaliperParam
+    {
+        public double x1;
+        public double y1;
+        public double x2;
+        public double y2;
+        public double cx;
+        public double cy;
+        public double inner_radius;
+        public double outer_radius;
+        public double start_angle;
+        public double angle_span;
+        public int    caliper_count;
+        public double projection_length;
+        public int    polarity;
+        public double edge_threshold;
+        public int    filter_half_width;
+        public int    select_mode;
+        public int    min_edge_count;
+        public int    reject_outliers;
+        public double outlier_tolerance;
+    }
+
+    /// <summary>
+    /// 单个卡尺的输出（对应 C 端 VA_CaliperPoint）。
+    /// px1/py1/px2/py2 为投影窗口两端（未命中也有效，供可视化）；
+    /// x/y 为亚像素命中点，valid=1 表示命中。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_CaliperPoint
+    {
+        public double px1;
+        public double py1;
+        public double px2;
+        public double py2;
+        public double x;
+        public double y;
+        public double strength;
+        public int    valid;
+    }
+
     /// <summary>形状匹配参数（对应 C 端 VA_ShapeParam）。全为标量，可直接 Sequential 映射。</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct VA_ShapeParam
@@ -132,6 +178,9 @@ namespace VisionPlatform.Native
         public const int ErrType = 4;
         public const int ErrInternal = 5;
         public const int ErrNoTemplate = 6;
+        public const int ErrTimeout = 7;
+        public const int ErrCamera = 8;
+        public const int ErrNoEdge = 9;
 
         public static string ToString(int code)
         {
@@ -144,6 +193,9 @@ namespace VisionPlatform.Native
                 case ErrType: return "图像类型不支持";
                 case ErrInternal: return "算法内部错误";
                 case ErrNoTemplate: return "未训练模板";
+                case ErrTimeout: return "读帧超时";
+                case ErrCamera: return "相机错误";
+                case ErrNoEdge: return "有效边缘点不足";
                 default: return "未知错误 " + code;
             }
         }
@@ -222,6 +274,22 @@ namespace VisionPlatform.Native
         public static extern int va_get_shape_model_points(IntPtr handle,
                                                             [In, Out] VA_ShapePoint[] out_points,
                                                             int max_count, out int out_count);
+
+        // ---- 卡尺（直线 / 圆）----
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_line_caliper(IntPtr handle, ref VA_Image gray,
+                                                 ref VA_CaliperParam param,
+                                                 [In, Out] VA_CaliperPoint[] out_points,
+                                                 int max_count, out int out_count,
+                                                 out VA_Line out_line, out double out_rms);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_circle_caliper(IntPtr handle, ref VA_Image gray,
+                                                   ref VA_CaliperParam param,
+                                                   [In, Out] VA_CaliperPoint[] out_points,
+                                                   int max_count, out int out_count,
+                                                   out VA_Circle out_circle, out double out_rms);
     }
 
     /// <summary>
@@ -646,6 +714,108 @@ namespace VisionPlatform.Native
             }
         }
 
+        // ---------------------- 卡尺（直线 / 圆）----------------------
+
+        /// <summary>
+        /// 直线卡尺：沿扫描线段法向等分投放投影卡尺找边，最小二乘拟合直线。
+        /// 返回命中点（含未命中的窗口，供可视化）、拟合线段、直线度残差 RMS。
+        /// </summary>
+        public OpResult<CaliperLineResult> LineCaliper(Bitmap gray, CaliperParam param)
+        {
+            if (gray == null) return OpResult<CaliperLineResult>.Fail("输入图像为空");
+            if (param == null) param = CaliperParam.LineDefault();
+
+            // 统一转成 8bpp 灰度再交给算法库（彩色图按 Rec.601 亮度公式转换）
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_CaliperParam p = param.ToNative();
+
+                    int count = param.CaliperCount > 0 ? param.CaliperCount : 1;
+                    VA_CaliperPoint[] raw = new VA_CaliperPoint[count];
+                    int outCount = 0;
+                    VA_Line line;
+                    double rms;
+
+                    int rc = NativeMethods.va_line_caliper(_handle, ref img, ref p,
+                                                           raw, count, out outCount,
+                                                           out line, out rms);
+                    if (rc != VaResult.OK)
+                        return OpResult<CaliperLineResult>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var result = new CaliperLineResult();
+                    result.Points = ToCaliperPoints(raw, outCount);
+                    result.Line = new LineResult(line.x1, line.y1, line.x2, line.y2);
+                    result.Rms = rms;
+                    return OpResult<CaliperLineResult>.Ok(result);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<CaliperLineResult>.Fail("直线卡尺失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 圆卡尺：沿圆周等分投放径向卡尺找边，代数最小二乘拟合圆。
+        /// 返回命中点（含未命中的窗口）、圆心 / 半径 / 直径、圆度残差 RMS。
+        /// </summary>
+        public OpResult<CaliperCircleResult> CircleCaliper(Bitmap gray, CaliperParam param)
+        {
+            if (gray == null) return OpResult<CaliperCircleResult>.Fail("输入图像为空");
+            if (param == null) param = CaliperParam.CircleDefault();
+
+            // 统一转成 8bpp 灰度再交给算法库（彩色图按 Rec.601 亮度公式转换）
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_CaliperParam p = param.ToNative();
+
+                    int count = param.CaliperCount > 0 ? param.CaliperCount : 1;
+                    VA_CaliperPoint[] raw = new VA_CaliperPoint[count];
+                    int outCount = 0;
+                    VA_Circle circle;
+                    double rms;
+
+                    int rc = NativeMethods.va_circle_caliper(_handle, ref img, ref p,
+                                                             raw, count, out outCount,
+                                                             out circle, out rms);
+                    if (rc != VaResult.OK)
+                        return OpResult<CaliperCircleResult>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var result = new CaliperCircleResult();
+                    result.Points = ToCaliperPoints(raw, outCount);
+                    result.Circle = new CircleResult(circle.cx, circle.cy, circle.radius, circle.residual);
+                    result.Rms = rms;
+                    return OpResult<CaliperCircleResult>.Ok(result);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<CaliperCircleResult>.Fail("圆卡尺失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>把原生卡尺点数组转成托管列表（未命中的也保留，供可视化区分）。</summary>
+        private static List<CaliperPoint> ToCaliperPoints(VA_CaliperPoint[] raw, int count)
+        {
+            var list = new List<CaliperPoint>();
+            if (raw == null) return list;
+
+            int n = count;
+            if (n < 0) n = 0;
+            if (n > raw.Length) n = raw.Length;
+
+            for (int i = 0; i < n; i++)
+                list.Add(CaliperPoint.FromNative(raw[i]));
+
+            return list;
+        }
+
         #endregion
 
         #region 辅助
@@ -899,6 +1069,277 @@ namespace VisionPlatform.Native
         {
             return string.Format("Line ({0:F1},{1:F1})->({2:F1},{3:F1}) len={4:F1}",
                 X1, Y1, X2, Y2, Length);
+        }
+    }
+
+    /// <summary>卡尺边缘极性：沿投影正方向（直线法线 / 圆径向外）观察灰度变化。</summary>
+    public static class CaliperPolarity
+    {
+        /// <summary>不过滤极性（默认）。</summary>
+        public const int Any = 0;
+        /// <summary>由暗变亮。</summary>
+        public const int DarkToLight = 1;
+        /// <summary>由亮变暗。</summary>
+        public const int LightToDark = 2;
+    }
+
+    /// <summary>单个卡尺命中多个候选边缘时的选边策略。</summary>
+    public static class CaliperSelectMode
+    {
+        /// <summary>取跳变幅值最大的一个（默认）。</summary>
+        public const int Strongest = 0;
+        /// <summary>取沿投影方向最靠前的一个。</summary>
+        public const int First = 1;
+        /// <summary>取沿投影方向最靠后的一个。</summary>
+        public const int Last = 2;
+    }
+
+    /// <summary>
+    /// 卡尺参数。字段与 <see cref="VA_CaliperParam"/> 同名同义；
+    /// 直线模式用 X1/Y1/X2/Y2，圆模式用 Cx/Cy/InnerRadius/OuterRadius/StartAngle/AngleSpan。
+    /// 角度单位为度，0° = +X 轴，顺时针为正。
+    /// </summary>
+    public class CaliperParam
+    {
+        /// <summary>扫描线段起点 X（图像坐标）。</summary>
+        public double X1 { get; set; }
+        /// <summary>扫描线段起点 Y（图像坐标）。</summary>
+        public double Y1 { get; set; }
+        /// <summary>扫描线段终点 X（图像坐标）。</summary>
+        public double X2 { get; set; }
+        /// <summary>扫描线段终点 Y（图像坐标）。</summary>
+        public double Y2 { get; set; }
+
+        /// <summary>圆心 X（图像坐标）。</summary>
+        public double Cx { get; set; }
+        /// <summary>圆心 Y（图像坐标）。</summary>
+        public double Cy { get; set; }
+        /// <summary>内径。</summary>
+        public double InnerRadius { get; set; }
+        /// <summary>外径；小于或等于内径时原生侧按 内径 + ProjectionLength 处理。</summary>
+        public double OuterRadius { get; set; }
+        /// <summary>起始角（度）。</summary>
+        public double StartAngle { get; set; }
+        /// <summary>角度跨度（度）；大于 360 时原生侧截断为 360。</summary>
+        public double AngleSpan { get; set; }
+
+        /// <summary>卡尺个数（直线默认 10 / 圆默认 20）。</summary>
+        public int CaliperCount { get; set; }
+        /// <summary>投影窗口长度（px），默认 20。</summary>
+        public double ProjectionLength { get; set; }
+        /// <summary>边缘极性，见 <see cref="CaliperPolarity"/>，默认 Any。</summary>
+        public int Polarity { get; set; }
+        /// <summary>边缘跳变幅值阈值（灰度差），默认 30。</summary>
+        public double EdgeThreshold { get; set; }
+        /// <summary>一维均值滤波半宽，默认 2。</summary>
+        public int FilterHalfWidth { get; set; }
+        /// <summary>选边策略，见 <see cref="CaliperSelectMode"/>，默认 Strongest。</summary>
+        public int SelectMode { get; set; }
+        /// <summary>有效边缘点下限（直线 3 / 圆 5）。</summary>
+        public int MinEdgeCount { get; set; }
+        /// <summary>是否剔除离群点一轮（默认 1）。</summary>
+        public int RejectOutliers { get; set; }
+        /// <summary>残差剔除阈值（px），默认 2.0。</summary>
+        public double OutlierTolerance { get; set; }
+
+        /// <summary>直线卡尺默认参数（对齐 PRD 假设 C）。</summary>
+        public static CaliperParam LineDefault()
+        {
+            return new CaliperParam
+            {
+                X1 = 0.0, Y1 = 0.0, X2 = 100.0, Y2 = 0.0,
+                Cx = 0.0, Cy = 0.0, InnerRadius = 0.0, OuterRadius = 0.0,
+                StartAngle = 0.0, AngleSpan = 360.0,
+                CaliperCount = 10,
+                ProjectionLength = 20.0,
+                Polarity = CaliperPolarity.Any,
+                EdgeThreshold = 30.0,
+                FilterHalfWidth = 2,
+                SelectMode = CaliperSelectMode.Strongest,
+                MinEdgeCount = 3,
+                RejectOutliers = 1,
+                OutlierTolerance = 2.0
+            };
+        }
+
+        /// <summary>圆卡尺默认参数（对齐 PRD 假设 C）。</summary>
+        public static CaliperParam CircleDefault()
+        {
+            var p = LineDefault();
+            p.X1 = 0.0; p.Y1 = 0.0; p.X2 = 0.0; p.Y2 = 0.0;
+            p.InnerRadius = 80.0;
+            p.OuterRadius = 120.0;
+            p.StartAngle = 0.0;
+            p.AngleSpan = 360.0;
+            p.CaliperCount = 20;
+            p.MinEdgeCount = 5;
+            return p;
+        }
+
+        internal VA_CaliperParam ToNative()
+        {
+            VA_CaliperParam p = new VA_CaliperParam();
+            p.x1 = X1; p.y1 = Y1; p.x2 = X2; p.y2 = Y2;
+            p.cx = Cx; p.cy = Cy;
+            p.inner_radius = InnerRadius;
+            p.outer_radius = OuterRadius;
+            p.start_angle = StartAngle;
+            p.angle_span = AngleSpan;
+            p.caliper_count = CaliperCount;
+            p.projection_length = ProjectionLength;
+            p.polarity = Polarity;
+            p.edge_threshold = EdgeThreshold;
+            p.filter_half_width = FilterHalfWidth;
+            p.select_mode = SelectMode;
+            p.min_edge_count = MinEdgeCount;
+            p.reject_outliers = RejectOutliers;
+            p.outlier_tolerance = OutlierTolerance;
+            return p;
+        }
+
+        public override string ToString()
+        {
+            return string.Format("卡尺 {0} 个，投影 {1:F0} px，阈值 {2:F0}，最少 {3} 点",
+                CaliperCount, ProjectionLength, EdgeThreshold, MinEdgeCount);
+        }
+    }
+
+    /// <summary>单个卡尺的输出：投影窗口两端（未命中也有效）+ 命中边缘点。</summary>
+    public class CaliperPoint
+    {
+        /// <summary>投影窗口起点 X（图像坐标）。</summary>
+        public double Px1 { get; set; }
+        /// <summary>投影窗口起点 Y（图像坐标）。</summary>
+        public double Py1 { get; set; }
+        /// <summary>投影窗口终点 X（图像坐标）。</summary>
+        public double Px2 { get; set; }
+        /// <summary>投影窗口终点 Y（图像坐标）。</summary>
+        public double Py2 { get; set; }
+        /// <summary>命中边缘点 X（亚像素，图像坐标）。</summary>
+        public double X { get; set; }
+        /// <summary>命中边缘点 Y（亚像素，图像坐标）。</summary>
+        public double Y { get; set; }
+        /// <summary>边缘强度（灰度跳变幅值）。</summary>
+        public double Strength { get; set; }
+        /// <summary>是否命中。</summary>
+        public bool Valid { get; set; }
+
+        public CaliperPoint() { }
+
+        internal static CaliperPoint FromNative(VA_CaliperPoint p)
+        {
+            return new CaliperPoint
+            {
+                Px1 = p.px1, Py1 = p.py1, Px2 = p.px2, Py2 = p.py2,
+                X = p.x, Y = p.y,
+                Strength = p.strength,
+                Valid = p.valid != 0
+            };
+        }
+
+        public override string ToString()
+        {
+            return Valid
+                ? string.Format("({0:F2}, {1:F2}) 强度 {2:F1}", X, Y, Strength)
+                : "未命中";
+        }
+    }
+
+    /// <summary>直线卡尺结果：命中点 + 拟合线段 + 直线度残差。</summary>
+    public class CaliperLineResult
+    {
+        /// <summary>全部卡尺（含未命中，供可视化区分）。</summary>
+        public List<CaliperPoint> Points { get; set; }
+        /// <summary>拟合线段（图像坐标）。</summary>
+        public LineResult Line { get; set; }
+        /// <summary>直线度残差 RMS（px）。</summary>
+        public double Rms { get; set; }
+
+        public CaliperLineResult()
+        {
+            Points = new List<CaliperPoint>();
+            Line = new LineResult();
+        }
+
+        /// <summary>拟合线段长度（px）。</summary>
+        public double Length
+        {
+            get { return Line == null ? 0.0 : Line.Length; }
+        }
+
+        /// <summary>拟合直线角度（度），归一化到 (-90°, 90°]。</summary>
+        public double AngleDeg
+        {
+            get
+            {
+                if (Line == null) return 0.0;
+                double a = Math.Atan2(Line.Y2 - Line.Y1, Line.X2 - Line.X1) * 180.0 / Math.PI;
+                while (a <= -90.0) a += 180.0;
+                while (a > 90.0) a -= 180.0;
+                return a;
+            }
+        }
+
+        /// <summary>命中的边缘点个数。</summary>
+        public int ValidCount
+        {
+            get
+            {
+                int n = 0;
+                if (Points == null) return 0;
+                for (int i = 0; i < Points.Count; i++)
+                    if (Points[i].Valid) n++;
+                return n;
+            }
+        }
+
+        public override string ToString()
+        {
+            return string.Format("长度 {0:F2} px / 角度 {1:F2}° / RMS {2:F2} / 有效点 {3}/{4}",
+                Length, AngleDeg, Rms, ValidCount, Points == null ? 0 : Points.Count);
+        }
+    }
+
+    /// <summary>圆卡尺结果：命中点 + 圆心半径 + 圆度残差。</summary>
+    public class CaliperCircleResult
+    {
+        /// <summary>全部卡尺（含未命中，供可视化区分）。</summary>
+        public List<CaliperPoint> Points { get; set; }
+        /// <summary>拟合圆（residual 字段回填圆度 RMS）。</summary>
+        public CircleResult Circle { get; set; }
+        /// <summary>圆度残差 RMS（px）。</summary>
+        public double Rms { get; set; }
+
+        public CaliperCircleResult()
+        {
+            Points = new List<CaliperPoint>();
+            Circle = new CircleResult();
+        }
+
+        /// <summary>拟合直径（px）。</summary>
+        public double Diameter
+        {
+            get { return Circle == null ? 0.0 : Circle.Radius * 2.0; }
+        }
+
+        /// <summary>命中的边缘点个数。</summary>
+        public int ValidCount
+        {
+            get
+            {
+                int n = 0;
+                if (Points == null) return 0;
+                for (int i = 0; i < Points.Count; i++)
+                    if (Points[i].Valid) n++;
+                return n;
+            }
+        }
+
+        public override string ToString()
+        {
+            return string.Format("直径 {0:F2} px / 圆心 ({1:F2}, {2:F2}) / RMS {3:F2} / 有效点 {4}/{5}",
+                Diameter, Circle == null ? 0.0 : Circle.Cx, Circle == null ? 0.0 : Circle.Cy,
+                Rms, ValidCount, Points == null ? 0 : Points.Count);
         }
     }
 

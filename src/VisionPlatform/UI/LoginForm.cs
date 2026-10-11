@@ -18,6 +18,8 @@ namespace VisionPlatform.UI
 
             txtUser.Text = "admin";
             txtUser.SelectAll();
+
+            UiStyle.ApplyForm(this);
         }
 
         private void OnLogin(object sender, EventArgs e)

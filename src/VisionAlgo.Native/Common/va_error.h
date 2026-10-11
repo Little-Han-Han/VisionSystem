@@ -15,6 +15,9 @@ extern "C" {
 #define VA_ERR_TYPE        4   /* 图像类型不支持（通道数不是 1/3/4，或要求单通道却给了彩色） */
 #define VA_ERR_INTERNAL    5   /* OpenCV 内部异常，详情见 va_get_last_error */
 #define VA_ERR_NO_TEMPLATE 6   /* 未训练模板就调用匹配 */
+#define VA_ERR_TIMEOUT     7   /* 读帧超时 / 无图像 */
+#define VA_ERR_CAMERA      8   /* 相机打开失败 / 设备丢失 / 读帧失败 */
+#define VA_ERR_NO_EDGE     9   /* 卡尺等工具未找到足够的边缘点，详情见 va_get_last_error */
 
 /* 错误码转可读文本（始终返回静态字符串，不会失败） */
 VA_API const char* VA_CALL va_error_string(int code);

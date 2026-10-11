@@ -19,12 +19,12 @@ namespace VisionPlatform.UI
             this.panelLeft = new System.Windows.Forms.Panel();
             this.listCameras = new System.Windows.Forms.ListBox();
             this.panelButtons = new System.Windows.Forms.FlowLayoutPanel();
-            this.btnRefresh = new System.Windows.Forms.Button();
-            this.btnOpen = new System.Windows.Forms.Button();
-            this.btnClose = new System.Windows.Forms.Button();
-            this.btnStart = new System.Windows.Forms.Button();
-            this.btnStop = new System.Windows.Forms.Button();
-            this.btnGrab = new System.Windows.Forms.Button();
+            this.btnRefresh = new VisionPlatform.UI.UiButton();
+            this.btnOpen = new VisionPlatform.UI.UiButton();
+            this.btnClose = new VisionPlatform.UI.UiButton();
+            this.btnStart = new VisionPlatform.UI.UiButton();
+            this.btnStop = new VisionPlatform.UI.UiButton();
+            this.btnGrab = new VisionPlatform.UI.UiButton();
             this.lblStatus = new System.Windows.Forms.Label();
 
             this.panelRight = new System.Windows.Forms.Panel();
@@ -154,12 +154,12 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Panel panelLeft;
         private System.Windows.Forms.ListBox listCameras;
         private System.Windows.Forms.FlowLayoutPanel panelButtons;
-        private System.Windows.Forms.Button btnRefresh;
-        private System.Windows.Forms.Button btnOpen;
-        private System.Windows.Forms.Button btnClose;
-        private System.Windows.Forms.Button btnStart;
-        private System.Windows.Forms.Button btnStop;
-        private System.Windows.Forms.Button btnGrab;
+        private VisionPlatform.UI.UiButton btnRefresh;
+        private VisionPlatform.UI.UiButton btnOpen;
+        private VisionPlatform.UI.UiButton btnClose;
+        private VisionPlatform.UI.UiButton btnStart;
+        private VisionPlatform.UI.UiButton btnStop;
+        private VisionPlatform.UI.UiButton btnGrab;
         private System.Windows.Forms.Label lblStatus;
         private System.Windows.Forms.Panel panelRight;
     }

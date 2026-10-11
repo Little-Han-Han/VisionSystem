@@ -19,11 +19,11 @@ namespace VisionPlatform.UI
             this.panelLeft = new System.Windows.Forms.Panel();
             this.listRecipes = new System.Windows.Forms.ListBox();
             this.panelButtons = new System.Windows.Forms.FlowLayoutPanel();
-            this.btnRefresh = new System.Windows.Forms.Button();
-            this.btnNew = new System.Windows.Forms.Button();
-            this.btnLoad = new System.Windows.Forms.Button();
-            this.btnSave = new System.Windows.Forms.Button();
-            this.btnDelete = new System.Windows.Forms.Button();
+            this.btnRefresh = new VisionPlatform.UI.UiButton();
+            this.btnNew = new VisionPlatform.UI.UiButton();
+            this.btnLoad = new VisionPlatform.UI.UiButton();
+            this.btnSave = new VisionPlatform.UI.UiButton();
+            this.btnDelete = new VisionPlatform.UI.UiButton();
 
             this.panelRight = new System.Windows.Forms.Panel();
             this.tableEdit = new System.Windows.Forms.TableLayoutPanel();
@@ -219,11 +219,11 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Panel panelLeft;
         private System.Windows.Forms.ListBox listRecipes;
         private System.Windows.Forms.FlowLayoutPanel panelButtons;
-        private System.Windows.Forms.Button btnRefresh;
-        private System.Windows.Forms.Button btnNew;
-        private System.Windows.Forms.Button btnLoad;
-        private System.Windows.Forms.Button btnSave;
-        private System.Windows.Forms.Button btnDelete;
+        private VisionPlatform.UI.UiButton btnRefresh;
+        private VisionPlatform.UI.UiButton btnNew;
+        private VisionPlatform.UI.UiButton btnLoad;
+        private VisionPlatform.UI.UiButton btnSave;
+        private VisionPlatform.UI.UiButton btnDelete;
 
         private System.Windows.Forms.Panel panelRight;
         private System.Windows.Forms.TableLayoutPanel tableEdit;

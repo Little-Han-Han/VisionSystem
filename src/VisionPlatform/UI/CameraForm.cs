@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Threading;
 using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Core;
@@ -14,12 +15,26 @@ namespace VisionPlatform.UI
         private ImageViewer _viewer;
         private ICamera _camera;
 
+        // 覆盖式投递：后台线程只保留「最新一帧」，避免 BeginInvoke 消息队列积压 Bitmap
+        private Bitmap _pendingFrame;
+        private int _pendingPosted;    // 0 = 队列中无待显示帧；1 = 已投递一帧待处理
+        private bool _viewerFitted;    // 首个实时帧做一次 FitToWindow，确保看到完整画面
+
         public CameraForm()
         {
             InitializeComponent();
 
             CreateViewer();
             RefreshList();
+
+            UiStyle.ApplyForm(this);
+
+            // 语义色：打开/开始采集=绿，关闭/停止=红，单帧=蓝，刷新=中性
+            btnOpen.Kind = UiButtonKind.Start;
+            btnStart.Kind = UiButtonKind.Start;
+            btnClose.Kind = UiButtonKind.Stop;
+            btnStop.Kind = UiButtonKind.Stop;
+            btnGrab.Kind = UiButtonKind.Grab;
         }
 
         private void CreateViewer()
@@ -64,9 +79,28 @@ namespace VisionPlatform.UI
             btnStop.Enabled = has && _camera.IsGrabbing;
             btnGrab.Enabled = has;
 
-            lblStatus.Text = has
-                ? (_camera.Info + Environment.NewLine + (_camera.IsGrabbing ? "采集中…" : "已停止"))
-                : (SelectedInfo != null ? ("已选择：" + SelectedInfo) : "未选择相机");
+            if (has)
+            {
+                string res = string.IsNullOrEmpty(_camera.Info.Model) ? "默认" : _camera.Info.Model;
+                lblStatus.Text = string.Format("{0}{1}来源：{2}    分辨率：{3}{1}{4}",
+                    _camera.Info, Environment.NewLine,
+                    SourceName(_camera.Info.Vendor), res,
+                    _camera.IsGrabbing ? "采集中…" : "已停止");
+            }
+            else
+            {
+                lblStatus.Text = (SelectedInfo != null) ? ("已选择：" + SelectedInfo) : "未选择相机";
+            }
+        }
+
+        /// <summary>相机厂商 → 中文来源名（列表前缀由 CameraInfo.ToString 的 [Vendor] 统一呈现）。</summary>
+        private static string SourceName(string vendor)
+        {
+            if (string.IsNullOrEmpty(vendor)) return "未知";
+            if (vendor.StartsWith("USB", StringComparison.OrdinalIgnoreCase)) return "本机摄像头";
+            if (vendor.StartsWith("Sim", StringComparison.OrdinalIgnoreCase)) return "模拟相机";
+            if (vendor.StartsWith("Hik", StringComparison.OrdinalIgnoreCase)) return "海康相机";
+            return vendor;
         }
 
         private void OnRefresh(object sender, EventArgs e) { RefreshList(); }
@@ -88,7 +122,19 @@ namespace VisionPlatform.UI
 
             _camera = r.Value;
             _camera.FrameReceived += OnFrame;
-            _camera.ErrorOccurred += (s, msg) => Logger.Error("相机错误：" + msg);
+            _viewerFitted = false;
+            _camera.ErrorOccurred += (s, msg) =>
+            {
+                Logger.Error("相机错误：" + msg);
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (!IsDisposed && IsHandleCreated)
+                            lblStatus.Text = "相机错误：" + msg;
+                    });
+                }
+            };
 
             UpdateButtons();
         }
@@ -135,7 +181,10 @@ namespace VisionPlatform.UI
             _viewer.FitToWindow();
         }
 
-        /// <summary>采集线程回调：切回 UI 线程显示。</summary>
+        /// <summary>
+        /// 采集线程回调：覆盖式投递到 UI 线程显示。
+        /// 只保留最新一帧，队列中已有待显示帧时直接丢弃本帧 → 防止高帧率下 Bitmap 积压。
+        /// </summary>
         private void OnFrame(object sender, Bitmap frame)
         {
             if (IsDisposed || !IsHandleCreated)
@@ -144,17 +193,36 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            // 用最新帧替换待显示帧（旧帧立即释放）
+            Bitmap old = Interlocked.Exchange(ref _pendingFrame, frame);
+            if (old != null) old.Dispose();
+
+            // 队列里已有一帧待处理：丢弃本帧
+            if (Interlocked.Exchange(ref _pendingPosted, 1) == 1) return;
+
             try
             {
                 BeginInvoke((MethodInvoker)delegate
                 {
-                    try { _viewer.SetImage(frame, false); }
-                    catch (Exception ex) { Logger.Warn("显示帧失败：" + ex.Message); }
+                    Bitmap bmp = Interlocked.Exchange(ref _pendingFrame, null);
+                    Interlocked.Exchange(ref _pendingPosted, 0);
+
+                    if (bmp == null) return;
+                    if (IsDisposed || !IsHandleCreated) { bmp.Dispose(); return; }
+
+                    try {
+                        _viewer.SetImage(bmp, false);
+                        if (!_viewerFitted) { _viewer.FitToWindow(); _viewerFitted = true; }
+                    }
+                    catch (Exception ex) { bmp.Dispose(); Logger.Warn("显示帧失败：" + ex.Message); }
                 });
             }
             catch (Exception)
             {
-                if (frame != null) frame.Dispose();
+                // 窗口已销毁：清空投递状态并释放待显示帧
+                Interlocked.Exchange(ref _pendingPosted, 0);
+                Bitmap bmp = Interlocked.Exchange(ref _pendingFrame, null);
+                if (bmp != null) bmp.Dispose();
             }
         }
 
@@ -166,6 +234,11 @@ namespace VisionPlatform.UI
                 _camera.FrameReceived -= OnFrame;
                 _camera = null;
             }
+
+            // 释放可能残留的待显示帧，避免泄漏
+            Bitmap bmp = Interlocked.Exchange(ref _pendingFrame, null);
+            Interlocked.Exchange(ref _pendingPosted, 0);
+            if (bmp != null) bmp.Dispose();
         }
     }
 }

@@ -17,6 +17,13 @@ namespace VisionPlatform.UI
             RefreshList();
             ShowCurrent();
             RecipeStore.CurrentChanged += (s, e) => ShowCurrent();
+
+            UiStyle.ApplyForm(this);
+
+            // 语义色：保存=绿，加载=蓝，删除=红；其余中性
+            btnSave.Kind = UiButtonKind.Start;
+            btnLoad.Kind = UiButtonKind.Grab;
+            btnDelete.Kind = UiButtonKind.Stop;
         }
 
         private void RefreshList()

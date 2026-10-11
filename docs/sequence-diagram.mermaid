@@ -1,0 +1,107 @@
+%% VisionSystem 增量：本机摄像头 + 流程编排 —— 时序图
+%% 场景一：打开本机摄像头并实时预览
+%% 场景二：编排流程（新建→拖入→连线→绑定→执行→结果显示）
+
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant CF as CameraForm
+    participant CM as CameraManager
+    participant LC as LocalCamera
+    participant NC as NativeCamera(P/Invoke)
+    participant CPP as VisionAlgo.Native(va_camera)
+    participant CV as OpenCV VideoCapture
+    participant IV as ImageViewer
+
+    rect rgb(36,44,54)
+    Note over U,IV: 场景一：打开本机摄像头并实时预览
+    U->>CF: 点「刷新列表」
+    CF->>CM: Enumerate()
+    CM->>LC: Enumerate() (静态)
+    LC->>NC: va_camera_enum(&count)
+    NC->>CPP: va_camera_enum
+    CPP->>CV: 逐个 DShow open/isOpened/release
+    CPP-->>NC: count
+    NC-->>LC: count
+    LC-->>CM: List<CameraInfo>("USB-i")
+    CM-->>CF: [本机..., 模拟, 海康...]
+    CF-->>U: 列表刷新([本机]/[模拟] 前缀)
+
+    U->>CF: 选中本机摄像头，点「打开」
+    CF->>CM: Open("USB-0")
+    CM->>LC: new LocalCamera(0) -> Open()
+    LC->>NC: va_camera_open(0, opt)
+    NC->>CPP: va_camera_open
+    CPP->>CV: VideoCapture(0, MSMF) and set(W/H/FPS)
+    alt 打开成功
+        CPP-->>NC: handle
+        LC->>NC: va_camera_get_size()
+        NC-->>LC: w,h -> Info.Model="1280x720"
+        LC-->>CM: OpResult.Ok
+    else 被占用/拔除
+        CPP-->>NC: NULL (VA_ERR_CAMERA)
+        LC-->>CM: OpResult.Fail(LastError)
+    end
+    CM-->>CF: OpResult<ICamera>
+    CF->>LC: FrameReceived += OnFrame
+
+    U->>CF: 点「开始采集」
+    CF->>LC: StartGrab()
+    LC->>LC: 启动采集线程 GrabLoop
+    loop 每帧
+        LC->>NC: va_camera_grab(handle, VA_Image(dst BGR), timeout)
+        NC->>CPP: va_camera_grab (CopyOut cv::Mat to dst)
+        CPP-->>LC: VA_OK
+        LC->>LC: 新 Bitmap(24bpp) 填充，触发 FrameReceived
+        LC-->>CF: FrameReceived(frame)
+        CF->>CF: BeginInvoke(切 UI 线程)
+        CF->>IV: SetImage(frame, false)
+    end
+    U->>CF: 点「停止采集」
+    CF->>LC: StopGrab() (stopFlag + Join)
+    end
+
+    participant FF as FlowForm
+    participant FC as FlowCanvasControl
+    participant FM as FlowModule
+    participant CS as ConfigStore
+    participant FR as FlowRunner
+    participant OC as FlowOutputChannel
+    participant MF as MainForm
+
+    rect rgb(44,40,54)
+    Note over U,MF: 场景二：编排流程（新建->拖入->连线->绑定->执行->结果显示）
+    U->>FF: 点「新建流程」
+    FF->>CS: Flows.Add(FlowDefinition.CreateEmpty("流程 N"))
+    FF->>CS: ActiveFlowId = 新Id; Save()
+    FF->>FC: Flow = 新流程（画布清空）
+
+    U->>FC: 从工具箱拖「形状匹配」到画布
+    FC->>FM: 取模块默认参数
+    FC->>FC: 落点创建 FlowNode(Type="ShapeMatch")
+    FC-->>FF: NodeAdded(node)
+    FF->>CS: 写回流程; Save()
+
+    U->>FC: 从节点输出口拖到另一节点输入口
+    FC->>FC: 建立 FlowLink
+    FC-->>FF: LinkAdded(link)
+    FF->>CS: Save()
+
+    U->>FF: 选中节点 -> 右侧改「最小得分」
+    FF->>CS: node.Set("minScore","0.75"); Save()
+
+    U->>FF: 绑定 显示窗口=视图3 / 相机=USB-0
+    FF->>CS: flow.ViewIndex=3; flow.CameraId="USB-0"; Save()
+
+    U->>FF: 点「运行」
+    FF->>FF: 校验单链（无成环/断链）
+    FF->>FR: Run(flow, CameraManager["USB-0"])
+    FR->>LC: GrabOne()（图像源节点）
+    LC-->>FR: frame
+    FR->>FR: 形状匹配（自建 VisionAlgo 上下文）
+    FR-->>OC: Publish(FlowOutputEventArgs{ViewIndex=3, frame, shapes, passed})
+    OC-->>MF: OutputReady 事件
+    MF->>MF: BeginInvoke，ShowFrame(2, "USB-0", frame)
+    MF->>MF: ClearShapes + 叠加 shapes + Shapes.NotifyChanged()
+    MF-->>U: 视图3 显示流程结果
+    end

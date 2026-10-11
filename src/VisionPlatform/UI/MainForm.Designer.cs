@@ -15,6 +15,13 @@ namespace VisionPlatform.UI
 
         #region Windows Form Designer generated code
 
+        /// <summary>
+        /// 控件树与布局。
+        /// 【铁律】本文件只写结构与尺寸，颜色 / 字体一律在 MainForm.ApplyTheme() 里
+        /// 统一套用（主题单一来源 UiTheme），因此设计器中看不到真实配色（已知代价）。
+        /// 右栏自下而上四区块：①判定徽标 ②统计卡片 ③运行控制大按钮 ④运行状态（Fill 自动收缩）。
+        /// 注意 WinForms 停靠按集合逆序生效：先加的控件最终位于下方。
+        /// </summary>
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
@@ -22,26 +29,28 @@ namespace VisionPlatform.UI
             this.tsLabelCamera = new System.Windows.Forms.ToolStripLabel();
             this.tsComboCameras = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnRefresh = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnGrabOnce = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnSyncGrab = new System.Windows.Forms.ToolStripButton();
             this.tsSep1 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelLayout = new System.Windows.Forms.ToolStripLabel();
             this.tsComboLayout = new System.Windows.Forms.ToolStripComboBox();
+            this.tsBtnRightPanel = new System.Windows.Forms.ToolStripButton();
             this.tsSep2 = new System.Windows.Forms.ToolStripSeparator();
-            this.tsBtnGrabOnce = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnSyncGrab = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnStartLoop = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnPause = new System.Windows.Forms.ToolStripButton();
-            this.tsSep3 = new System.Windows.Forms.ToolStripSeparator();
             this.tsBtnCameraMgr = new System.Windows.Forms.ToolStripButton();
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnFlow = new System.Windows.Forms.ToolStripButton();
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
+            this.tsSep3 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelStatus = new System.Windows.Forms.ToolStripLabel();
 
             this.panelCenter = new System.Windows.Forms.Panel();
             this.tableViews = new System.Windows.Forms.TableLayoutPanel();
 
             this.panelRight = new System.Windows.Forms.Panel();
+            this.panelVerdict = new System.Windows.Forms.Panel();
+            this.lblVerdict = new System.Windows.Forms.Label();
             this.groupStats = new System.Windows.Forms.GroupBox();
             this.tableStats = new System.Windows.Forms.TableLayoutPanel();
             this.lblTotalCap = new System.Windows.Forms.Label();
@@ -54,12 +63,26 @@ namespace VisionPlatform.UI
             this.lblYieldValue = new System.Windows.Forms.Label();
             this.lblCycleCap = new System.Windows.Forms.Label();
             this.lblCycleValue = new System.Windows.Forms.Label();
-            this.btnLoop = new System.Windows.Forms.Button();
-            this.btnPause = new System.Windows.Forms.Button();
-            this.btnStop = new System.Windows.Forms.Button();
-            this.btnResetStats = new System.Windows.Forms.Button();
+            this.panelRunCtrl = new System.Windows.Forms.Panel();
+            this.btnLoop = new VisionPlatform.UI.UiButton();
+            this.btnPause = new VisionPlatform.UI.UiButton();
+            this.btnStop = new VisionPlatform.UI.UiButton();
+            this.btnGrabOnce = new VisionPlatform.UI.UiButton();
+            this.btnResetStats = new VisionPlatform.UI.UiButton();
+            this.panelRunState = new System.Windows.Forms.Panel();
+            this.tableRunState = new System.Windows.Forms.TableLayoutPanel();
+            this.lblRunStateCap = new System.Windows.Forms.Label();
+            this.lblRunStateValue = new System.Windows.Forms.Label();
+            this.lblCameraCap = new System.Windows.Forms.Label();
+            this.lblCameraValue = new System.Windows.Forms.Label();
+            this.lblFlowCap = new System.Windows.Forms.Label();
+            this.lblFlowValue = new System.Windows.Forms.Label();
+            this.lblLastCap = new System.Windows.Forms.Label();
+            this.lblLastValue = new System.Windows.Forms.Label();
+            this.lblConsecutiveNg = new System.Windows.Forms.Label();
 
             this.panelBottom = new System.Windows.Forms.Panel();
+            this.btnFoldLog = new System.Windows.Forms.Button();
             this.listLog = new System.Windows.Forms.ListBox();
 
             this.statusStrip = new System.Windows.Forms.StatusStrip();
@@ -70,13 +93,19 @@ namespace VisionPlatform.UI
             this.toolStrip.SuspendLayout();
             this.panelCenter.SuspendLayout();
             this.panelRight.SuspendLayout();
+            this.panelVerdict.SuspendLayout();
             this.groupStats.SuspendLayout();
             this.tableStats.SuspendLayout();
+            this.panelRunCtrl.SuspendLayout();
+            this.panelRunState.SuspendLayout();
+            this.tableRunState.SuspendLayout();
             this.panelBottom.SuspendLayout();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
             // ---------- toolStrip ----------
+            // 分组：采集组 | 运行组 | 布局组 | 功能组 | 右侧状态位；组间以分隔符区分。
+            // 运行组保留在工具栏，用于与右栏大按钮「同一状态源、行为严格同步」。
             this.toolStrip.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
             this.toolStrip.ForeColor = System.Drawing.Color.Gainsboro;
             this.toolStrip.GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden;
@@ -84,24 +113,24 @@ namespace VisionPlatform.UI
                 this.tsLabelCamera,
                 this.tsComboCameras,
                 this.tsBtnRefresh,
+                this.tsBtnGrabOnce,
+                this.tsBtnSyncGrab,
                 this.tsSep1,
                 this.tsLabelLayout,
                 this.tsComboLayout,
+                this.tsBtnRightPanel,
                 this.tsSep2,
-                this.tsBtnGrabOnce,
-                this.tsBtnSyncGrab,
-                this.tsBtnStartLoop,
-                this.tsBtnPause,
-                this.tsSep3,
                 this.tsBtnCameraMgr,
                 this.tsBtnAlgo,
+                this.tsBtnFlow,
                 this.tsBtnComm,
                 this.tsBtnRecipe,
                 this.tsBtnSettings,
+                this.tsSep3,
                 this.tsLabelStatus});
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
             this.toolStrip.Name = "toolStrip";
-            this.toolStrip.Size = new System.Drawing.Size(1440, 32);
+            this.toolStrip.Size = new System.Drawing.Size(1440, 40);
             this.toolStrip.TabIndex = 0;
 
             this.tsLabelCamera.Name = "tsLabelCamera";
@@ -117,19 +146,6 @@ namespace VisionPlatform.UI
             this.tsBtnRefresh.Text = "刷新";
             this.tsBtnRefresh.Click += new System.EventHandler(this.OnRefreshCameras);
 
-            this.tsSep1.Name = "tsSep1";
-
-            this.tsLabelLayout.Name = "tsLabelLayout";
-            this.tsLabelLayout.Text = "布局:";
-
-            this.tsComboLayout.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.tsComboLayout.Name = "tsComboLayout";
-            this.tsComboLayout.Size = new System.Drawing.Size(90, 32);
-            this.tsComboLayout.ToolTipText = "显示控件布局（行 x 列），切换后每个视图可单独绑定相机";
-            this.tsComboLayout.SelectedIndexChanged += new System.EventHandler(this.OnLayoutChanged);
-
-            this.tsSep2.Name = "tsSep2";
-
             this.tsBtnGrabOnce.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnGrabOnce.Name = "tsBtnGrabOnce";
             this.tsBtnGrabOnce.Text = "单帧采集";
@@ -142,17 +158,24 @@ namespace VisionPlatform.UI
             this.tsBtnSyncGrab.ToolTipText = "对所有已打开相机同时取帧（同步拍摄）";
             this.tsBtnSyncGrab.Click += new System.EventHandler(this.OnSyncGrab);
 
-            this.tsBtnStartLoop.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnStartLoop.Name = "tsBtnStartLoop";
-            this.tsBtnStartLoop.Text = "循环运行";
-            this.tsBtnStartLoop.Click += new System.EventHandler(this.OnStartLoop);
+            this.tsSep1.Name = "tsSep1";
 
-            this.tsBtnPause.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnPause.Name = "tsBtnPause";
-            this.tsBtnPause.Text = "暂停";
-            this.tsBtnPause.Click += new System.EventHandler(this.OnPause);
+            this.tsLabelLayout.Name = "tsLabelLayout";
+            this.tsLabelLayout.Text = "布局:";
 
-            this.tsSep3.Name = "tsSep3";
+            this.tsComboLayout.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.tsComboLayout.Name = "tsComboLayout";
+            this.tsComboLayout.Size = new System.Drawing.Size(90, 32);
+            this.tsComboLayout.ToolTipText = "显示控件布局（行 x 列），切换后每个视图可单独绑定相机";
+            this.tsComboLayout.SelectedIndexChanged += new System.EventHandler(this.OnLayoutChanged);
+
+            this.tsBtnRightPanel.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnRightPanel.Name = "tsBtnRightPanel";
+            this.tsBtnRightPanel.Text = "折叠右栏";
+            this.tsBtnRightPanel.ToolTipText = "折叠 / 展开右侧栏以扩大图像显示区";
+            this.tsBtnRightPanel.Click += new System.EventHandler(this.OnToggleRightPanel);
+
+            this.tsSep2.Name = "tsSep2";
 
             this.tsBtnCameraMgr.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnCameraMgr.Name = "tsBtnCameraMgr";
@@ -161,8 +184,15 @@ namespace VisionPlatform.UI
 
             this.tsBtnAlgo.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnAlgo.Name = "tsBtnAlgo";
-            this.tsBtnAlgo.Text = "算法";
+            this.tsBtnAlgo.Text = "形状匹配调试";
+            this.tsBtnAlgo.ToolTipText = "离线单图形状匹配工作台（载入本地图片 / 取帧调试）";
             this.tsBtnAlgo.Click += new System.EventHandler(this.OnOpenAlgoForm);
+
+            this.tsBtnFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnFlow.Name = "tsBtnFlow";
+            this.tsBtnFlow.Text = "流程编排";
+            this.tsBtnFlow.ToolTipText = "算法流程编排：拖拽节点、连线、绑定相机与视图、运行";
+            this.tsBtnFlow.Click += new System.EventHandler(this.OnOpenFlowForm);
 
             this.tsBtnComm.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnComm.Name = "tsBtnComm";
@@ -177,8 +207,10 @@ namespace VisionPlatform.UI
             this.tsBtnSettings.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnSettings.Name = "tsBtnSettings";
             this.tsBtnSettings.Text = "系统设置";
-            this.tsBtnSettings.ToolTipText = "图片保存路径 / 格式 / 保留天数，以及运行前置条件";
+            this.tsBtnSettings.ToolTipText = "图片保存路径 / 格式 / 保留天数、良率告警下限，以及运行前置条件";
             this.tsBtnSettings.Click += new System.EventHandler(this.OnOpenSettings);
+
+            this.tsSep3.Name = "tsSep3";
 
             this.tsLabelStatus.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
             this.tsLabelStatus.Name = "tsLabelStatus";
@@ -189,10 +221,10 @@ namespace VisionPlatform.UI
             this.panelCenter.BackColor = System.Drawing.Color.FromArgb(24, 24, 30);
             this.panelCenter.Controls.Add(this.tableViews);
             this.panelCenter.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelCenter.Location = new System.Drawing.Point(0, 32);
+            this.panelCenter.Location = new System.Drawing.Point(0, 40);
             this.panelCenter.Name = "panelCenter";
             this.panelCenter.Padding = new System.Windows.Forms.Padding(4);
-            this.panelCenter.Size = new System.Drawing.Size(1196, 640);
+            this.panelCenter.Size = new System.Drawing.Size(1140, 632);
             this.panelCenter.TabIndex = 1;
 
             this.tableViews.ColumnCount = 1;
@@ -202,33 +234,54 @@ namespace VisionPlatform.UI
             this.tableViews.Name = "tableViews";
             this.tableViews.RowCount = 1;
             this.tableViews.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableViews.Size = new System.Drawing.Size(1188, 632);
+            this.tableViews.Size = new System.Drawing.Size(1132, 624);
             this.tableViews.TabIndex = 0;
 
             // ---------- panelRight ----------
-            this.panelRight.BackColor = System.Drawing.Color.FromArgb(42, 42, 50);
-            this.panelRight.Controls.Add(this.btnResetStats);
-            this.panelRight.Controls.Add(this.btnStop);
-            this.panelRight.Controls.Add(this.btnPause);
-            this.panelRight.Controls.Add(this.btnLoop);
+            // 停靠按集合逆序生效：先加的在下方。此处顺序 = 运行状态 / 运行控制 / 统计 / 徽标，
+            // 最终自上而下为：徽标 → 统计 → 运行控制 → 运行状态（Fill，空间不足时自动收缩）。
+            this.panelRight.Controls.Add(this.panelRunState);
+            this.panelRight.Controls.Add(this.panelRunCtrl);
             this.panelRight.Controls.Add(this.groupStats);
+            this.panelRight.Controls.Add(this.panelVerdict);
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Right;
-            this.panelRight.Location = new System.Drawing.Point(1196, 32);
+            this.panelRight.Location = new System.Drawing.Point(1140, 40);
             this.panelRight.Name = "panelRight";
             this.panelRight.Padding = new System.Windows.Forms.Padding(8);
-            this.panelRight.Size = new System.Drawing.Size(244, 640);
+            this.panelRight.Size = new System.Drawing.Size(300, 632);
             this.panelRight.TabIndex = 2;
 
+            // ---------- ① 判定徽标 ----------
+            this.panelVerdict.Controls.Add(this.lblVerdict);
+            this.panelVerdict.Dock = System.Windows.Forms.DockStyle.Top;
+            this.panelVerdict.Location = new System.Drawing.Point(8, 8);
+            this.panelVerdict.Name = "panelVerdict";
+            this.panelVerdict.Padding = new System.Windows.Forms.Padding(0);
+            this.panelVerdict.Size = new System.Drawing.Size(284, 96);
+            this.panelVerdict.TabIndex = 0;
+
+            this.lblVerdict.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblVerdict.Location = new System.Drawing.Point(0, 0);
+            this.lblVerdict.Name = "lblVerdict";
+            this.lblVerdict.Size = new System.Drawing.Size(284, 96);
+            this.lblVerdict.TabIndex = 0;
+            this.lblVerdict.Text = "--";
+            this.lblVerdict.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+
+            // ---------- ② 统计卡片 ----------
+            this.groupStats.Controls.Add(this.tableStats);
             this.groupStats.Dock = System.Windows.Forms.DockStyle.Top;
-            this.groupStats.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.groupStats.Location = new System.Drawing.Point(8, 8);
+            this.groupStats.Location = new System.Drawing.Point(8, 104);
+            this.groupStats.Margin = new System.Windows.Forms.Padding(0, 0, 0, 8);
             this.groupStats.Name = "groupStats";
-            this.groupStats.Size = new System.Drawing.Size(228, 200);
-            this.groupStats.TabIndex = 0;
+            this.groupStats.Padding = new System.Windows.Forms.Padding(3);
+            this.groupStats.Size = new System.Drawing.Size(284, 152);
+            this.groupStats.TabIndex = 1;
             this.groupStats.TabStop = false;
             this.groupStats.Text = "数据统计";
 
             this.tableStats.ColumnCount = 2;
+            this.tableStats.RowCount = 5;
             this.tableStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 45F));
             this.tableStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 55F));
             this.tableStats.Controls.Add(this.lblTotalCap, 0, 0);
@@ -244,131 +297,226 @@ namespace VisionPlatform.UI
             this.tableStats.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableStats.Location = new System.Drawing.Point(3, 18);
             this.tableStats.Name = "tableStats";
-            this.tableStats.RowCount = 5;
-            this.tableStats.Size = new System.Drawing.Size(222, 179);
+            // 良品率行更高（28 pt 大数字单独一行），其余 4 行等分余量
+            this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 17F));
+            this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 17F));
+            this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 17F));
+            this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 32F));
+            this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 17F));
+            this.tableStats.Size = new System.Drawing.Size(278, 131);
             this.tableStats.TabIndex = 0;
 
             this.lblTotalCap.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblTotalCap.ForeColor = System.Drawing.Color.Silver;
             this.lblTotalCap.Text = "总数";
             this.lblTotalCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.lblTotalValue.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblTotalValue.Font = new System.Drawing.Font("Consolas", 11F, System.Drawing.FontStyle.Bold);
-            this.lblTotalValue.ForeColor = System.Drawing.Color.Gainsboro;
             this.lblTotalValue.Text = "0";
             this.lblTotalValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
 
             this.lblOkCap.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblOkCap.ForeColor = System.Drawing.Color.Silver;
             this.lblOkCap.Text = "OK";
             this.lblOkCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.lblOkValue.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblOkValue.Font = new System.Drawing.Font("Consolas", 11F, System.Drawing.FontStyle.Bold);
-            this.lblOkValue.ForeColor = System.Drawing.Color.LimeGreen;
             this.lblOkValue.Text = "0";
             this.lblOkValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
 
             this.lblNgCap.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblNgCap.ForeColor = System.Drawing.Color.Silver;
             this.lblNgCap.Text = "NG";
             this.lblNgCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.lblNgValue.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblNgValue.Font = new System.Drawing.Font("Consolas", 11F, System.Drawing.FontStyle.Bold);
-            this.lblNgValue.ForeColor = System.Drawing.Color.OrangeRed;
             this.lblNgValue.Text = "0";
             this.lblNgValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
 
             this.lblYieldCap.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblYieldCap.ForeColor = System.Drawing.Color.Silver;
-            this.lblYieldCap.Text = "良率";
+            this.lblYieldCap.Text = "良品率";
             this.lblYieldCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.lblYieldValue.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblYieldValue.Font = new System.Drawing.Font("Consolas", 11F, System.Drawing.FontStyle.Bold);
-            this.lblYieldValue.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.lblYieldValue.Text = "--";
             this.lblYieldValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
 
             this.lblCycleCap.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblCycleCap.ForeColor = System.Drawing.Color.Silver;
             this.lblCycleCap.Text = "节拍";
             this.lblCycleCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.lblCycleValue.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblCycleValue.Font = new System.Drawing.Font("Consolas", 11F, System.Drawing.FontStyle.Bold);
-            this.lblCycleValue.ForeColor = System.Drawing.Color.Gainsboro;
             this.lblCycleValue.Text = "--";
             this.lblCycleValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
 
+            // ---------- ③ 运行控制大按钮 ----------
+            // 停靠逆序：先加的在下方 → 自上而下为 启动 / 暂停 / 停止 / 单帧 / 清空
+            this.panelRunCtrl.Controls.Add(this.btnResetStats);
+            this.panelRunCtrl.Controls.Add(this.btnGrabOnce);
+            this.panelRunCtrl.Controls.Add(this.btnStop);
+            this.panelRunCtrl.Controls.Add(this.btnPause);
+            this.panelRunCtrl.Controls.Add(this.btnLoop);
+            this.panelRunCtrl.Dock = System.Windows.Forms.DockStyle.Top;
+            this.panelRunCtrl.Location = new System.Drawing.Point(8, 264);
+            this.panelRunCtrl.Margin = new System.Windows.Forms.Padding(0, 0, 0, 8);
+            this.panelRunCtrl.Name = "panelRunCtrl";
+            this.panelRunCtrl.Padding = new System.Windows.Forms.Padding(0);
+            this.panelRunCtrl.Size = new System.Drawing.Size(284, 286);
+            this.panelRunCtrl.TabIndex = 2;
+
             this.btnLoop.Dock = System.Windows.Forms.DockStyle.Top;
-            this.btnLoop.Height = 34;
-            this.btnLoop.Location = new System.Drawing.Point(8, 208);
+            this.btnLoop.Location = new System.Drawing.Point(0, 0);
+            this.btnLoop.Margin = new System.Windows.Forms.Padding(0, 0, 0, 6);
             this.btnLoop.Name = "btnLoop";
-            this.btnLoop.Size = new System.Drawing.Size(228, 34);
-            this.btnLoop.TabIndex = 1;
-            this.btnLoop.Text = "循环运行";
+            this.btnLoop.Size = new System.Drawing.Size(284, 56);
+            this.btnLoop.TabIndex = 0;
+            this.btnLoop.Text = "启动运行";
             this.btnLoop.Click += new System.EventHandler(this.OnStartLoop);
 
             this.btnPause.Dock = System.Windows.Forms.DockStyle.Top;
-            this.btnPause.Height = 34;
-            this.btnPause.Location = new System.Drawing.Point(8, 242);
+            this.btnPause.Location = new System.Drawing.Point(0, 62);
+            this.btnPause.Margin = new System.Windows.Forms.Padding(0, 0, 0, 6);
             this.btnPause.Name = "btnPause";
-            this.btnPause.Size = new System.Drawing.Size(228, 34);
-            this.btnPause.TabIndex = 2;
-            this.btnPause.Text = "暂停 / 继续";
+            this.btnPause.Size = new System.Drawing.Size(284, 56);
+            this.btnPause.TabIndex = 1;
+            this.btnPause.Text = "暂停";
             this.btnPause.Click += new System.EventHandler(this.OnPause);
 
             this.btnStop.Dock = System.Windows.Forms.DockStyle.Top;
-            this.btnStop.Height = 34;
-            this.btnStop.Location = new System.Drawing.Point(8, 276);
+            this.btnStop.Location = new System.Drawing.Point(0, 124);
+            this.btnStop.Margin = new System.Windows.Forms.Padding(0, 0, 0, 6);
             this.btnStop.Name = "btnStop";
-            this.btnStop.Size = new System.Drawing.Size(228, 34);
-            this.btnStop.TabIndex = 3;
+            this.btnStop.Size = new System.Drawing.Size(284, 56);
+            this.btnStop.TabIndex = 2;
             this.btnStop.Text = "停止";
             this.btnStop.Click += new System.EventHandler(this.OnStop);
 
+            this.btnGrabOnce.Dock = System.Windows.Forms.DockStyle.Top;
+            this.btnGrabOnce.Location = new System.Drawing.Point(0, 186);
+            this.btnGrabOnce.Margin = new System.Windows.Forms.Padding(0, 0, 0, 6);
+            this.btnGrabOnce.Name = "btnGrabOnce";
+            this.btnGrabOnce.Size = new System.Drawing.Size(284, 48);
+            this.btnGrabOnce.TabIndex = 3;
+            this.btnGrabOnce.Text = "单帧采集";
+            this.btnGrabOnce.Click += new System.EventHandler(this.OnGrabOnce);
+
             this.btnResetStats.Dock = System.Windows.Forms.DockStyle.Top;
-            this.btnResetStats.Height = 34;
-            this.btnResetStats.Location = new System.Drawing.Point(8, 310);
+            this.btnResetStats.Location = new System.Drawing.Point(0, 240);
+            this.btnResetStats.Margin = new System.Windows.Forms.Padding(0, 0, 0, 6);
             this.btnResetStats.Name = "btnResetStats";
-            this.btnResetStats.Size = new System.Drawing.Size(228, 34);
+            this.btnResetStats.Size = new System.Drawing.Size(284, 40);
             this.btnResetStats.TabIndex = 4;
             this.btnResetStats.Text = "清空统计";
             this.btnResetStats.Click += new System.EventHandler(this.OnResetStats);
 
-            // ---------- panelBottom ----------
-            this.panelBottom.BackColor = System.Drawing.Color.FromArgb(28, 28, 34);
+            // ---------- ④ 运行状态（Fill：空间不足时自动收缩，不挤压上面三区）----------
+            this.panelRunState.Controls.Add(this.tableRunState);
+            this.panelRunState.Controls.Add(this.lblConsecutiveNg);
+            this.panelRunState.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelRunState.Location = new System.Drawing.Point(8, 558);
+            this.panelRunState.Name = "panelRunState";
+            this.panelRunState.Padding = new System.Windows.Forms.Padding(3);
+            this.panelRunState.Size = new System.Drawing.Size(284, 66);
+            this.panelRunState.TabIndex = 3;
+
+            this.tableRunState.ColumnCount = 2;
+            this.tableRunState.RowCount = 4;
+            this.tableRunState.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 42F));
+            this.tableRunState.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 58F));
+            this.tableRunState.Controls.Add(this.lblRunStateCap, 0, 0);
+            this.tableRunState.Controls.Add(this.lblRunStateValue, 1, 0);
+            this.tableRunState.Controls.Add(this.lblCameraCap, 0, 1);
+            this.tableRunState.Controls.Add(this.lblCameraValue, 1, 1);
+            this.tableRunState.Controls.Add(this.lblFlowCap, 0, 2);
+            this.tableRunState.Controls.Add(this.lblFlowValue, 1, 2);
+            this.tableRunState.Controls.Add(this.lblLastCap, 0, 3);
+            this.tableRunState.Controls.Add(this.lblLastValue, 1, 3);
+            this.tableRunState.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tableRunState.Location = new System.Drawing.Point(3, 3);
+            this.tableRunState.Name = "tableRunState";
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
+            this.tableRunState.Size = new System.Drawing.Size(278, 60);
+            this.tableRunState.TabIndex = 0;
+
+            this.lblRunStateCap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblRunStateCap.Text = "运行状态";
+            this.lblRunStateCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.lblRunStateValue.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblRunStateValue.Text = "--";
+            this.lblRunStateValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+
+            this.lblCameraCap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCameraCap.Text = "相机";
+            this.lblCameraCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.lblCameraValue.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCameraValue.Text = "--";
+            this.lblCameraValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+
+            this.lblFlowCap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowCap.Text = "当前流程";
+            this.lblFlowCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.lblFlowValue.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowValue.Text = "--";
+            this.lblFlowValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+
+            this.lblLastCap.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblLastCap.Text = "最近结论";
+            this.lblLastCap.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.lblLastValue.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblLastValue.Text = "--";
+            this.lblLastValue.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+
+            this.lblConsecutiveNg.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.lblConsecutiveNg.Location = new System.Drawing.Point(3, 35);
+            this.lblConsecutiveNg.Name = "lblConsecutiveNg";
+            this.lblConsecutiveNg.Size = new System.Drawing.Size(278, 28);
+            this.lblConsecutiveNg.TabIndex = 1;
+            this.lblConsecutiveNg.Text = "连续 NG：0";
+            this.lblConsecutiveNg.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.lblConsecutiveNg.Visible = false;
+
+            // ---------- panelBottom（日志区，可折叠）----------
             this.panelBottom.Controls.Add(this.listLog);
+            this.panelBottom.Controls.Add(this.btnFoldLog);
             this.panelBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelBottom.Location = new System.Drawing.Point(0, 672);
             this.panelBottom.Name = "panelBottom";
             this.panelBottom.Padding = new System.Windows.Forms.Padding(6);
-            this.panelBottom.Size = new System.Drawing.Size(1440, 170);
+            this.panelBottom.Size = new System.Drawing.Size(1440, 120);
             this.panelBottom.TabIndex = 3;
 
             this.listLog.BackColor = System.Drawing.Color.FromArgb(24, 24, 30);
             this.listLog.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.listLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.listLog.Font = new System.Drawing.Font("Consolas", 9F);
-            this.listLog.ForeColor = System.Drawing.Color.FromArgb(190, 195, 205);
+            this.listLog.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.listLog.IntegralHeight = false;
-            this.listLog.ItemHeight = 15;
-            this.listLog.Location = new System.Drawing.Point(6, 6);
+            this.listLog.ItemHeight = 16;
+            this.listLog.Location = new System.Drawing.Point(6, 30);
             this.listLog.Name = "listLog";
-            this.listLog.Size = new System.Drawing.Size(1428, 158);
-            this.listLog.TabIndex = 0;
+            this.listLog.Size = new System.Drawing.Size(1428, 84);
+            this.listLog.TabIndex = 1;
+            this.listLog.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.OnLogDrawItem);
+
+            this.btnFoldLog.Dock = System.Windows.Forms.DockStyle.Top;
+            this.btnFoldLog.Location = new System.Drawing.Point(6, 6);
+            this.btnFoldLog.Name = "btnFoldLog";
+            this.btnFoldLog.Size = new System.Drawing.Size(1428, 24);
+            this.btnFoldLog.TabIndex = 0;
+            this.btnFoldLog.Text = "日志  ▼";
+            this.btnFoldLog.Click += new System.EventHandler(this.OnFoldLog);
 
             // ---------- statusStrip ----------
             this.statusStrip.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
             this.statusStrip.ForeColor = System.Drawing.Color.Silver;
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
                 this.statusLabel});
-            this.statusStrip.Location = new System.Drawing.Point(0, 842);
+            this.statusStrip.Location = new System.Drawing.Point(0, 792);
             this.statusStrip.Name = "statusStrip";
-            this.statusStrip.Size = new System.Drawing.Size(1440, 24);
+            this.statusStrip.Size = new System.Drawing.Size(1440, 26);
             this.statusStrip.TabIndex = 4;
 
             this.statusLabel.Name = "statusLabel";
@@ -384,14 +532,14 @@ namespace VisionPlatform.UI
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
-            this.ClientSize = new System.Drawing.Size(1440, 866);
+            this.ClientSize = new System.Drawing.Size(1440, 818);
             this.Controls.Add(this.panelCenter);
             this.Controls.Add(this.panelRight);
             this.Controls.Add(this.panelBottom);
             this.Controls.Add(this.statusStrip);
             this.Controls.Add(this.toolStrip);
             this.ForeColor = System.Drawing.Color.Gainsboro;
-            this.MinimumSize = new System.Drawing.Size(1100, 700);
+            this.MinimumSize = new System.Drawing.Size(1280, 800);
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "VisionPlatform";
@@ -401,8 +549,12 @@ namespace VisionPlatform.UI
             this.toolStrip.PerformLayout();
             this.panelCenter.ResumeLayout(false);
             this.panelRight.ResumeLayout(false);
+            this.panelVerdict.ResumeLayout(false);
             this.groupStats.ResumeLayout(false);
             this.tableStats.ResumeLayout(false);
+            this.panelRunCtrl.ResumeLayout(false);
+            this.panelRunState.ResumeLayout(false);
+            this.tableRunState.ResumeLayout(false);
             this.panelBottom.ResumeLayout(false);
             this.statusStrip.ResumeLayout(false);
             this.statusStrip.PerformLayout();
@@ -416,26 +568,28 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripLabel tsLabelCamera;
         private System.Windows.Forms.ToolStripComboBox tsComboCameras;
         private System.Windows.Forms.ToolStripButton tsBtnRefresh;
+        private System.Windows.Forms.ToolStripButton tsBtnGrabOnce;
+        private System.Windows.Forms.ToolStripButton tsBtnSyncGrab;
         private System.Windows.Forms.ToolStripSeparator tsSep1;
         private System.Windows.Forms.ToolStripLabel tsLabelLayout;
         private System.Windows.Forms.ToolStripComboBox tsComboLayout;
+        private System.Windows.Forms.ToolStripButton tsBtnRightPanel;
         private System.Windows.Forms.ToolStripSeparator tsSep2;
-        private System.Windows.Forms.ToolStripButton tsBtnGrabOnce;
-        private System.Windows.Forms.ToolStripButton tsBtnSyncGrab;
-        private System.Windows.Forms.ToolStripButton tsBtnStartLoop;
-        private System.Windows.Forms.ToolStripButton tsBtnPause;
-        private System.Windows.Forms.ToolStripSeparator tsSep3;
         private System.Windows.Forms.ToolStripButton tsBtnCameraMgr;
         private System.Windows.Forms.ToolStripButton tsBtnAlgo;
+        private System.Windows.Forms.ToolStripButton tsBtnFlow;
         private System.Windows.Forms.ToolStripButton tsBtnComm;
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
         private System.Windows.Forms.ToolStripButton tsBtnSettings;
+        private System.Windows.Forms.ToolStripSeparator tsSep3;
         private System.Windows.Forms.ToolStripLabel tsLabelStatus;
 
         private System.Windows.Forms.Panel panelCenter;
         private System.Windows.Forms.TableLayoutPanel tableViews;
 
         private System.Windows.Forms.Panel panelRight;
+        private System.Windows.Forms.Panel panelVerdict;
+        private System.Windows.Forms.Label lblVerdict;
         private System.Windows.Forms.GroupBox groupStats;
         private System.Windows.Forms.TableLayoutPanel tableStats;
         private System.Windows.Forms.Label lblTotalCap;
@@ -448,12 +602,26 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblYieldValue;
         private System.Windows.Forms.Label lblCycleCap;
         private System.Windows.Forms.Label lblCycleValue;
-        private System.Windows.Forms.Button btnLoop;
-        private System.Windows.Forms.Button btnPause;
-        private System.Windows.Forms.Button btnStop;
-        private System.Windows.Forms.Button btnResetStats;
+        private System.Windows.Forms.Panel panelRunCtrl;
+        private VisionPlatform.UI.UiButton btnLoop;
+        private VisionPlatform.UI.UiButton btnPause;
+        private VisionPlatform.UI.UiButton btnStop;
+        private VisionPlatform.UI.UiButton btnGrabOnce;
+        private VisionPlatform.UI.UiButton btnResetStats;
+        private System.Windows.Forms.Panel panelRunState;
+        private System.Windows.Forms.TableLayoutPanel tableRunState;
+        private System.Windows.Forms.Label lblRunStateCap;
+        private System.Windows.Forms.Label lblRunStateValue;
+        private System.Windows.Forms.Label lblCameraCap;
+        private System.Windows.Forms.Label lblCameraValue;
+        private System.Windows.Forms.Label lblFlowCap;
+        private System.Windows.Forms.Label lblFlowValue;
+        private System.Windows.Forms.Label lblLastCap;
+        private System.Windows.Forms.Label lblLastValue;
+        private System.Windows.Forms.Label lblConsecutiveNg;
 
         private System.Windows.Forms.Panel panelBottom;
+        private System.Windows.Forms.Button btnFoldLog;
         private System.Windows.Forms.ListBox listLog;
 
         private System.Windows.Forms.StatusStrip statusStrip;

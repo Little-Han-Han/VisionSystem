@@ -18,26 +18,35 @@ namespace VisionPlatform.UI
 
             this.panelLeft = new System.Windows.Forms.Panel();
             this.groupClient = new System.Windows.Forms.GroupBox();
+            this.lblHost = new System.Windows.Forms.Label();
             this.txtHost = new System.Windows.Forms.TextBox();
+            this.lblClientPort = new System.Windows.Forms.Label();
             this.numClientPort = new System.Windows.Forms.NumericUpDown();
+            this.lblSend = new System.Windows.Forms.Label();
             this.txtSend = new System.Windows.Forms.TextBox();
-            this.btnClientConnect = new System.Windows.Forms.Button();
-            this.btnClientDisconnect = new System.Windows.Forms.Button();
-            this.btnSend = new System.Windows.Forms.Button();
+            this.btnClientConnect = new VisionPlatform.UI.UiButton();
+            this.btnClientDisconnect = new VisionPlatform.UI.UiButton();
+            this.btnSend = new VisionPlatform.UI.UiButton();
             this.groupServer = new System.Windows.Forms.GroupBox();
+            this.lblServerPort = new System.Windows.Forms.Label();
             this.numServerPort = new System.Windows.Forms.NumericUpDown();
-            this.btnListen = new System.Windows.Forms.Button();
-            this.btnStopListen = new System.Windows.Forms.Button();
-            this.btnBroadcast = new System.Windows.Forms.Button();
+            this.btnListen = new VisionPlatform.UI.UiButton();
+            this.btnStopListen = new VisionPlatform.UI.UiButton();
+            this.btnBroadcast = new VisionPlatform.UI.UiButton();
             this.groupModbus = new System.Windows.Forms.GroupBox();
+            this.lblMbHost = new System.Windows.Forms.Label();
             this.txtMbHost = new System.Windows.Forms.TextBox();
+            this.lblMbPort = new System.Windows.Forms.Label();
             this.numMbPort = new System.Windows.Forms.NumericUpDown();
+            this.lblAddr = new System.Windows.Forms.Label();
             this.numAddr = new System.Windows.Forms.NumericUpDown();
+            this.lblCount = new System.Windows.Forms.Label();
             this.numCount = new System.Windows.Forms.NumericUpDown();
+            this.lblValue = new System.Windows.Forms.Label();
             this.numValue = new System.Windows.Forms.NumericUpDown();
-            this.btnMbConnect = new System.Windows.Forms.Button();
-            this.btnMbRead = new System.Windows.Forms.Button();
-            this.btnMbWrite = new System.Windows.Forms.Button();
+            this.btnMbConnect = new VisionPlatform.UI.UiButton();
+            this.btnMbRead = new VisionPlatform.UI.UiButton();
+            this.btnMbWrite = new VisionPlatform.UI.UiButton();
 
             this.panelRight = new System.Windows.Forms.Panel();
             this.listLog = new System.Windows.Forms.ListBox();
@@ -76,12 +85,37 @@ namespace VisionPlatform.UI
             this.groupClient.TabIndex = 0;
             this.groupClient.TabStop = false;
             this.groupClient.Text = "TCP 客户端";
+            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.groupClient.Controls.Add(this.txtHost);
+            this.groupClient.Controls.Add(this.numClientPort);
+            this.groupClient.Controls.Add(this.txtSend);
+            this.groupClient.Controls.Add(this.btnClientConnect);
+            this.groupClient.Controls.Add(this.btnClientDisconnect);
+            this.groupClient.Controls.Add(this.btnSend);
+            this.groupClient.Controls.Add(this.lblHost);
+            this.groupClient.Controls.Add(this.lblClientPort);
+            this.groupClient.Controls.Add(this.lblSend);
+
+            // 标签统一贴在输入框左侧（x=12），Y 比输入框 +3 以视觉居中；配色交给 UiStyle
+            this.lblHost.AutoSize = true;
+            this.lblHost.Location = new System.Drawing.Point(12, 27);
+            this.lblHost.Name = "lblHost";
+            this.lblHost.Size = new System.Drawing.Size(50, 15);
+            this.lblHost.Text = "主机：";
+            this.lblHost.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.txtHost.Location = new System.Drawing.Point(90, 24);
             this.txtHost.Name = "txtHost";
             this.txtHost.Size = new System.Drawing.Size(180, 21);
             this.txtHost.TabIndex = 0;
             this.txtHost.Text = "127.0.0.1";
+
+            this.lblClientPort.AutoSize = true;
+            this.lblClientPort.Location = new System.Drawing.Point(12, 55);
+            this.lblClientPort.Name = "lblClientPort";
+            this.lblClientPort.Size = new System.Drawing.Size(50, 15);
+            this.lblClientPort.Text = "端口：";
+            this.lblClientPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.numClientPort.Location = new System.Drawing.Point(90, 52);
             this.numClientPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
@@ -90,6 +124,13 @@ namespace VisionPlatform.UI
             this.numClientPort.Size = new System.Drawing.Size(180, 21);
             this.numClientPort.TabIndex = 1;
             this.numClientPort.Value = new decimal(new int[] { 9000, 0, 0, 0 });
+
+            this.lblSend.AutoSize = true;
+            this.lblSend.Location = new System.Drawing.Point(12, 83);
+            this.lblSend.Name = "lblSend";
+            this.lblSend.Size = new System.Drawing.Size(72, 15);
+            this.lblSend.Text = "发送内容：";
+            this.lblSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.txtSend.Location = new System.Drawing.Point(90, 80);
             this.txtSend.Name = "txtSend";
@@ -126,6 +167,19 @@ namespace VisionPlatform.UI
             this.groupServer.TabIndex = 1;
             this.groupServer.TabStop = false;
             this.groupServer.Text = "TCP 服务端";
+            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.groupServer.Controls.Add(this.numServerPort);
+            this.groupServer.Controls.Add(this.btnListen);
+            this.groupServer.Controls.Add(this.btnStopListen);
+            this.groupServer.Controls.Add(this.btnBroadcast);
+            this.groupServer.Controls.Add(this.lblServerPort);
+
+            this.lblServerPort.AutoSize = true;
+            this.lblServerPort.Location = new System.Drawing.Point(12, 29);
+            this.lblServerPort.Name = "lblServerPort";
+            this.lblServerPort.Size = new System.Drawing.Size(72, 15);
+            this.lblServerPort.Text = "监听端口：";
+            this.lblServerPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.numServerPort.Location = new System.Drawing.Point(90, 26);
             this.numServerPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
@@ -164,12 +218,40 @@ namespace VisionPlatform.UI
             this.groupModbus.TabIndex = 2;
             this.groupModbus.TabStop = false;
             this.groupModbus.Text = "Modbus TCP";
+            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.groupModbus.Controls.Add(this.txtMbHost);
+            this.groupModbus.Controls.Add(this.numMbPort);
+            this.groupModbus.Controls.Add(this.numAddr);
+            this.groupModbus.Controls.Add(this.numCount);
+            this.groupModbus.Controls.Add(this.numValue);
+            this.groupModbus.Controls.Add(this.btnMbConnect);
+            this.groupModbus.Controls.Add(this.btnMbRead);
+            this.groupModbus.Controls.Add(this.btnMbWrite);
+            this.groupModbus.Controls.Add(this.lblMbHost);
+            this.groupModbus.Controls.Add(this.lblMbPort);
+            this.groupModbus.Controls.Add(this.lblAddr);
+            this.groupModbus.Controls.Add(this.lblCount);
+            this.groupModbus.Controls.Add(this.lblValue);
+
+            this.lblMbHost.AutoSize = true;
+            this.lblMbHost.Location = new System.Drawing.Point(12, 27);
+            this.lblMbHost.Name = "lblMbHost";
+            this.lblMbHost.Size = new System.Drawing.Size(72, 15);
+            this.lblMbHost.Text = "从站 IP：";
+            this.lblMbHost.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.txtMbHost.Location = new System.Drawing.Point(100, 24);
             this.txtMbHost.Name = "txtMbHost";
             this.txtMbHost.Size = new System.Drawing.Size(170, 21);
             this.txtMbHost.TabIndex = 0;
             this.txtMbHost.Text = "127.0.0.1";
+
+            this.lblMbPort.AutoSize = true;
+            this.lblMbPort.Location = new System.Drawing.Point(12, 55);
+            this.lblMbPort.Name = "lblMbPort";
+            this.lblMbPort.Size = new System.Drawing.Size(50, 15);
+            this.lblMbPort.Text = "端口：";
+            this.lblMbPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.numMbPort.Location = new System.Drawing.Point(100, 52);
             this.numMbPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
@@ -179,11 +261,25 @@ namespace VisionPlatform.UI
             this.numMbPort.TabIndex = 1;
             this.numMbPort.Value = new decimal(new int[] { 502, 0, 0, 0 });
 
+            this.lblAddr.AutoSize = true;
+            this.lblAddr.Location = new System.Drawing.Point(12, 83);
+            this.lblAddr.Name = "lblAddr";
+            this.lblAddr.Size = new System.Drawing.Size(72, 15);
+            this.lblAddr.Text = "起始地址：";
+            this.lblAddr.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
             this.numAddr.Location = new System.Drawing.Point(100, 80);
             this.numAddr.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numAddr.Name = "numAddr";
             this.numAddr.Size = new System.Drawing.Size(170, 21);
             this.numAddr.TabIndex = 2;
+
+            this.lblCount.AutoSize = true;
+            this.lblCount.Location = new System.Drawing.Point(12, 111);
+            this.lblCount.Name = "lblCount";
+            this.lblCount.Size = new System.Drawing.Size(50, 15);
+            this.lblCount.Text = "数量：";
+            this.lblCount.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.numCount.Location = new System.Drawing.Point(100, 108);
             this.numCount.Maximum = new decimal(new int[] { 125, 0, 0, 0 });
@@ -192,6 +288,13 @@ namespace VisionPlatform.UI
             this.numCount.Size = new System.Drawing.Size(170, 21);
             this.numCount.TabIndex = 3;
             this.numCount.Value = new decimal(new int[] { 4, 0, 0, 0 });
+
+            this.lblValue.AutoSize = true;
+            this.lblValue.Location = new System.Drawing.Point(12, 139);
+            this.lblValue.Name = "lblValue";
+            this.lblValue.Size = new System.Drawing.Size(72, 15);
+            this.lblValue.Text = "写入值：";
+            this.lblValue.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.numValue.Location = new System.Drawing.Point(100, 136);
             this.numValue.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
@@ -278,26 +381,35 @@ namespace VisionPlatform.UI
 
         private System.Windows.Forms.Panel panelLeft;
         private System.Windows.Forms.GroupBox groupClient;
+        private System.Windows.Forms.Label lblHost;
         private System.Windows.Forms.TextBox txtHost;
+        private System.Windows.Forms.Label lblClientPort;
         private System.Windows.Forms.NumericUpDown numClientPort;
+        private System.Windows.Forms.Label lblSend;
         private System.Windows.Forms.TextBox txtSend;
-        private System.Windows.Forms.Button btnClientConnect;
-        private System.Windows.Forms.Button btnClientDisconnect;
-        private System.Windows.Forms.Button btnSend;
+        private VisionPlatform.UI.UiButton btnClientConnect;
+        private VisionPlatform.UI.UiButton btnClientDisconnect;
+        private VisionPlatform.UI.UiButton btnSend;
         private System.Windows.Forms.GroupBox groupServer;
+        private System.Windows.Forms.Label lblServerPort;
         private System.Windows.Forms.NumericUpDown numServerPort;
-        private System.Windows.Forms.Button btnListen;
-        private System.Windows.Forms.Button btnStopListen;
-        private System.Windows.Forms.Button btnBroadcast;
+        private VisionPlatform.UI.UiButton btnListen;
+        private VisionPlatform.UI.UiButton btnStopListen;
+        private VisionPlatform.UI.UiButton btnBroadcast;
         private System.Windows.Forms.GroupBox groupModbus;
+        private System.Windows.Forms.Label lblMbHost;
         private System.Windows.Forms.TextBox txtMbHost;
+        private System.Windows.Forms.Label lblMbPort;
         private System.Windows.Forms.NumericUpDown numMbPort;
+        private System.Windows.Forms.Label lblAddr;
         private System.Windows.Forms.NumericUpDown numAddr;
+        private System.Windows.Forms.Label lblCount;
         private System.Windows.Forms.NumericUpDown numCount;
+        private System.Windows.Forms.Label lblValue;
         private System.Windows.Forms.NumericUpDown numValue;
-        private System.Windows.Forms.Button btnMbConnect;
-        private System.Windows.Forms.Button btnMbRead;
-        private System.Windows.Forms.Button btnMbWrite;
+        private VisionPlatform.UI.UiButton btnMbConnect;
+        private VisionPlatform.UI.UiButton btnMbRead;
+        private VisionPlatform.UI.UiButton btnMbWrite;
         private System.Windows.Forms.Panel panelRight;
         private System.Windows.Forms.ListBox listLog;
     }

@@ -18,6 +18,19 @@ namespace VisionPlatform.UI
             InitializeComponent();
             WireEvents();
             Log("就绪。TCP 与 Modbus 协议均为自行实现，无第三方依赖。");
+
+            UiStyle.ApplyForm(this);
+
+            // 语义色：连接/监听=绿，断开/停止监听=红，发送/读取/写入=蓝
+            btnClientConnect.Kind = UiButtonKind.Start;
+            btnListen.Kind = UiButtonKind.Start;
+            btnMbConnect.Kind = UiButtonKind.Start;
+            btnClientDisconnect.Kind = UiButtonKind.Stop;
+            btnStopListen.Kind = UiButtonKind.Stop;
+            btnSend.Kind = UiButtonKind.Grab;
+            btnBroadcast.Kind = UiButtonKind.Grab;
+            btnMbRead.Kind = UiButtonKind.Grab;
+            btnMbWrite.Kind = UiButtonKind.Grab;
         }
 
         private void WireEvents()

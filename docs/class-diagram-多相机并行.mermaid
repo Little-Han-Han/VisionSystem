@@ -1,0 +1,342 @@
+%% 增量架构（第二轮）：多相机 · 多产品 · 流程并行 · 日志与流程名显示
+%% 类图：本轮新增/修改的关键类型与关系（第一轮既有类型只列相关成员）
+
+classDiagram
+    %% ================= 流程模型（修改） =================
+    class FlowDefinition {
+        +string Id
+        +string Name
+        +string CameraId
+        +int ViewIndex
+        +List~FlowNode~ Nodes
+        +List~FlowLink~ Links
+        +string Product
+        +bool Enabled
+        +CreateEmpty(string) FlowDefinition
+        +Clone() FlowDefinition
+    }
+    class FlowSettings {
+        +int CurrentSchemaVersion
+        +int SchemaVersion
+        +string ActiveFlowId
+        +List~FlowDefinition~ Flows
+        +UpgradeToCurrent(FlowSettings) bool
+    }
+    class FlowModule {
+        <<static>>
+        +All List~FlowModuleInfo~
+        +CollectProducts(List~FlowDefinition~) List~string~
+        +FilterByProduct(List~FlowDefinition~, string) List~FlowDefinition~
+        +FindByType(FlowNodeType) FlowModuleInfo
+    }
+
+    %% ================= 并行引擎（新增） =================
+    class FlowRunManager {
+        <<static>>
+        +MaxParallelFlows int
+        +RunningCount int
+        +Snapshot() IList~FlowRunSlot~
+        +Get(string) FlowRunSlot
+        +StartOne(string) OpResult
+        +StopOne(string) OpResult
+        +PauseOne(string) OpResult
+        +StartAll() OpResult
+        +PauseAll() void
+        +StopAll() void
+        +Shutdown() void
+        +event StatusChanged
+        -Dictionary~string,FlowRunSlot~ _slots
+        -object _sync
+    }
+    class FlowRunSlot {
+        +string FlowId
+        +string FlowName
+        +string Product
+        +string CameraId
+        +int ViewIndex
+        +FlowSlotStatus Status
+        +bool? LastVerdict
+        +int LastElapsedMs
+        +string LastSummary
+        +int OkCount
+        +int NgCount
+        +double Fps
+        +string ErrorMessage
+        -FlowRunner _runner
+        -Thread _thread
+        -bool _stop
+        -bool _pause
+        -Loop() void
+        -PublishResult(FlowRunResult) void
+    }
+    class FlowSlotStatus {
+        <<enum>>
+        Idle
+        Starting
+        Running
+        Paused
+        Stopping
+        Faulted
+    }
+
+    %% ================= 相机资源（新增） =================
+    class CameraLease {
+        <<static>>
+        +TryAcquire(string, string, out string) bool
+        +Release(string cameraId, string flowId) void
+        +ReleaseAll(string flowId) void
+        +OwnerOf(string cameraId) string
+        +IsOccupied(string cameraId) bool
+        +Snapshot() IReadOnlyDictionary
+    }
+    class CameraGrabGate {
+        <<static>>
+        +GrabOne(ICamera, int) OpResult~Bitmap~
+        -GateFor(string cameraId) object
+    }
+
+    %% ================= 事件（修改） =================
+    class FlowOutputEventArgs {
+        +int ViewIndex
+        +Bitmap Frame
+        +List~IGeometryShape~ Shapes
+        +bool Passed
+        +string Summary
+        +string CameraName
+        +string FlowId
+        +string FlowName
+        +string Product
+        +List~string~ SummaryLines
+    }
+    class FlowOutputChannel {
+        <<static>>
+        +Publish(FlowOutputEventArgs) bool
+        +event OutputReady
+        -object Sync
+    }
+
+    %% ================= 日志（新增/修改） =================
+    class LogLevel {
+        <<enum>>
+        Info
+        Warn
+        Error
+        ResultOk
+        ResultNg
+    }
+    class LogLevelFilter {
+        <<enum>>
+        All
+        ResultOnly
+        WarnAndError
+    }
+    class LogEntry {
+        +DateTime Time
+        +LogLevel Level
+        +string FlowName
+        +string Message
+        +LevelText string
+        +Format() string
+    }
+    class Logger {
+        <<static>>
+        +Info(string) void
+        +Warn(string) void
+        +Error(string) void
+        +Error(string, Exception) void
+        +Info(string flowName, string) void
+        +Warn(string flowName, string) void
+        +Error(string flowName, string) void
+        +Result(string flowName, bool, string) void
+        +event Logged
+        +event EntryLogged
+    }
+
+    %% ================= 界面（新增/修改） =================
+    class LogPanel {
+        +int MaxLines
+        +Append(LogEntry) void
+        +SetFilter(string, LogLevelFilter) void
+        +Clear() void
+        +ExportToFile(string) bool
+        +event CollapsedChanged
+        -List~LogEntry~ _cache
+        -Queue~LogEntry~ _pending
+        -Timer _pump
+    }
+    class FlowRunListPanel {
+        +Bind(IList~FlowRunSlot~, string product) void
+        +SetFocusFlow(string flowId) void
+        +event StartClicked
+        +event StopClicked
+    }
+    class FlowPreviewPanel {
+        +PreviewMode Mode
+        +bool PauseAutoRefresh
+        +SetProgress(FlowNodeProgress) void
+        +SetDisplayMode(PreviewMode) void
+        +SetVerdict(bool?) void
+        +Clear() void
+        -ImageViewer _viewer
+        -Timer _pump
+        -FlowNodeProgress _pending
+    }
+    class PreviewMode {
+        <<enum>>
+        SelectedNode
+        ChainTail
+        RawImage
+    }
+    class FlowRunController {
+        +RunOnce() void
+        +StepOnce() void
+        +TakePending() FlowNodeProgress
+        +Join(int) bool
+        -Thread _thread
+        -FlowNodeProgress _pending
+    }
+    class FlowNodeStatus {
+        <<enum>>
+        Pending
+        Running
+        Ok
+        Ng
+        Skipped
+    }
+    class FlowCanvasControl {
+        +SetNodeStatus(string, FlowNodeStatus, int) void
+        +HighlightRunning(string) void
+        +ClearStatus() void
+        +AddNode(string, float, float) FlowNode
+    }
+    class FlowForm {
+        -FlowRunner _runner
+        -FlowRunController _ctl
+        -Thread _runThread
+        -bool _closeWhenIdle
+        +OnStep(object, EventArgs) void
+        +OnRunOnce(object, EventArgs) void
+        +OnRunLoop(object, EventArgs) void
+        +OnProductFilterChanged(object, EventArgs) void
+    }
+    class MainForm {
+        -int _focusViewIndex
+        -Dictionary~string,ProductStats~ _statsByProduct
+        -List~Label~ _badges
+        +SetFocusView(int) void
+        +SetVerdict(bool?) void
+        +UpdateStats() void
+        +UpdateStatsByProduct() void
+        +UpdateRunButtons() void
+        +ApplyProductFilter() void
+        +OnFlowOutput(object, FlowOutputEventArgs) void
+    }
+    class ProductStats {
+        +int Total
+        +int Ok
+        +int Ng
+        +YieldPercent double
+    }
+
+    %% ================= 配置（修改） =================
+    class UiSettings {
+        +int LayoutIndex
+        +List~string~ ViewBindings
+        +bool LogCollapsed
+        +string CurrentProduct
+        +int MaxParallelFlows
+    }
+    class SystemSettings {
+        +double YieldAlarmPercent
+        +bool RequireCommBeforeRun
+        +bool AllowCameraShare
+    }
+
+    %% ================= 第一轮既有（相关成员） =================
+    class FlowRunner {
+        +Begin(FlowDefinition, ICamera, bool) FlowRunSession
+        +StepNext(FlowRunSession) FlowNodeProgress
+        +Finish(FlowRunSession) FlowRunResult
+        +Run(FlowDefinition, ICamera) FlowRunResult
+        +Validate(FlowDefinition, out string) bool
+        +NeedsCamera(FlowDefinition) bool
+        +event OutputReady
+    }
+    class FlowRunSession {
+        +FlowDefinition Flow
+        +ICamera Camera
+        +int Cursor
+        +Bitmap Current
+        +Bitmap SourceFrame
+        +FlowRunTransform Transform
+        +bool CaptureFrames
+        +IsDone bool
+        +Dispose() void
+    }
+    class FlowRunTransform {
+        +double DX
+        +double DY
+        +double DAngle
+        +double DScale
+        +bool IsValid
+        +ApplyToRect(Rectangle) Rectangle
+    }
+    class FlowNodeProgress {
+        +string NodeId
+        +string NodeName
+        +int Index
+        +int Total
+        +FlowNodeStatus Status
+        +int ElapsedMs
+        +string Summary
+        +Bitmap Frame
+    }
+
+    %% ================= 关系 =================
+    FlowRunManager "1" *-- "*" FlowRunSlot : 每条流程一个槽
+    FlowRunSlot --> FlowSlotStatus
+    FlowRunSlot --> FlowRunner : 独占 1:1（独立 VisionAlgo）
+    FlowRunSlot --> FlowRunSession : 每周期新建
+    FlowRunSlot ..> CameraLease : TryAcquire / ReleaseAll
+    FlowRunSlot ..> CameraGrabGate : 取帧（不直接调 ICamera）
+    FlowRunSlot ..> FlowOutputChannel : Publish
+    FlowRunSlot ..> Logger : Result 行
+    FlowRunSlot ..> FlowDefinition : 读 Product / Enabled
+
+    CameraGrabGate ..> ICamera : lock 后调用 GrabOne
+    CameraLease ..> ICamera : 按 cameraId 登记（不持有实例）
+
+    FlowRunner ..> FlowOutputEventArgs : 构造（带 FlowId/FlowName/Product）
+    FlowOutputChannel ..> FlowOutputEventArgs : 加锁传递
+    FlowOutputChannel --> MainForm : OutputReady
+    FlowOutputChannel --> FlowForm : OutputReady（按 FlowId 过滤预览）
+
+    FlowRunManager ..> FlowOutputChannel : 状态变化时通知界面
+    FlowSettings --> FlowDefinition
+    FlowModule ..> FlowDefinition : 产品聚合 / 过滤
+    FlowRunManager ..> FlowModule : FilterByProduct（StartAll 作用域）
+
+    Logger ..> LogEntry : 产生
+    Logger --> LogPanel : EntryLogged
+    LogPanel --> LogEntry
+    LogEntry --> LogLevel
+    LogPanel ..> LogLevelFilter
+    MainForm --> LogPanel
+    MainForm --> FlowRunListPanel
+    MainForm --> ProductStats
+    MainForm ..> UiSettings
+    MainForm ..> SystemSettings
+    FlowRunListPanel ..> FlowRunSlot : 展示每行状态
+    FlowRunListPanel ..> FlowRunManager : StartOne / StopOne
+
+    FlowForm --> FlowPreviewPanel
+    FlowForm --> FlowRunController
+    FlowForm --> FlowCanvasControl
+    FlowForm ..> FlowRunManager : 连续运行 = StartOne(当前流程)
+    FlowPreviewPanel ..> FlowRunController : 33ms 拉取 pending
+    FlowPreviewPanel ..> FlowNodeProgress
+    FlowRunController --> FlowRunner : 本地单步/单帧会话
+    FlowRunController ..> CameraGrabGate : 单步取帧（不申请租约）
+    FlowCanvasControl --> FlowNodeStatus
+    FlowRunSession *-- FlowRunTransform
+    FlowRunSession --> FlowNodeProgress

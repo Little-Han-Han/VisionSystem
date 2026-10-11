@@ -5,12 +5,17 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "va_types.h"
 // 形状匹配的参数与结果结构体声明在对外头文件里，内部实现直接复用
 #include "algo/va_shape.h"
+// 相机对外结构体与接口声明在对外头文件里，内部实现直接复用
+#include "algo/va_camera.h"
+// 卡尺的对外结构体（VA_CaliperParam / VA_CaliperPoint）声明在对外头文件里
+#include "algo/va_caliper.h"
 
 namespace va {
 
@@ -34,6 +39,32 @@ struct Context {
 
     Context() : hasTemplate(false) {}
 };
+
+// 相机句柄：与算法 Context 平行、相互独立（见架构设计决策 2）。
+// 生命周期随调用方，va_camera_close 负责释放。
+struct CameraSource {
+    cv::VideoCapture cap;
+    std::mutex       mtx;         // 保护 cap，串行化 grab / close
+    std::string      lastError;
+    int              width;       // 打开后协商到的分辨率
+    int              height;
+    bool             opened;
+
+    CameraSource() : width(0), height(0), opened(false) {}
+};
+
+// ---------------------- 相机 ----------------------
+
+// 探测可用设备数量（探测式枚举，只计数不保留句柄）。
+int   CameraEnum(int* outCount);
+// 打开序号 index 的设备；成功返回句柄，失败返回 NULL。
+void* CameraOpen(int index, const VA_CameraOption* opt);
+// 抓一帧 BGR 到调用方缓冲 dst。
+int   CameraGrab(CameraSource* cam, VA_Image* dst, int timeoutMs);
+// 取打开后协商到的分辨率。
+int   CameraGetSize(CameraSource* cam, int* outW, int* outH);
+// 关闭并释放句柄。
+int   CameraClose(CameraSource* cam);
 
 // ---------------------- 公共工具 ----------------------
 
@@ -79,6 +110,17 @@ int TrainTemplate(Context* ctx, const VA_Image* gray, const int* roi);
 int MatchTemplate(Context* ctx, const VA_Image* gray, VA_MatchResult* out);
 
 int EdgeCount(Context* ctx, const VA_Image* gray, int scanRow, int delta, int* outCount);
+
+// ---------------------- 卡尺 ----------------------
+// 沿路径等分投放投影卡尺找边 → 最小二乘拟合 → 离群剔除一轮 → RMS。
+// 实现见 src/algo/algo_caliper.cpp，导出见 va_line_caliper / va_circle_caliper。
+int LineCaliper(Context* ctx, const VA_Image* gray, const VA_CaliperParam* param,
+                VA_CaliperPoint* out_points, int max_count, int* out_count,
+                VA_Line* out_line, double* out_rms);
+
+int CircleCaliper(Context* ctx, const VA_Image* gray, const VA_CaliperParam* param,
+                  VA_CaliperPoint* out_points, int max_count, int* out_count,
+                  VA_Circle* out_circle, double* out_rms);
 
 // 形状匹配（基于边缘轮廓）
 int CreateShapeModel(Context* ctx, const VA_Image* gray, const int* roi, double contrast);

@@ -45,10 +45,13 @@
     <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Camera\CameraGrabGate.cs" />
     <Compile Include="Camera\CameraInfo.cs" />
+    <Compile Include="Camera\CameraLease.cs" />
     <Compile Include="Camera\CameraManager.cs" />
     <Compile Include="Camera\HikCamera.cs" />
     <Compile Include="Camera\ICamera.cs" />
+    <Compile Include="Camera\LocalCamera.cs" />
     <Compile Include="Camera\SimCamera.cs" />
     <Compile Include="Communication\CommState.cs" />
     <Compile Include="Communication\ModbusTcpClient.cs" />
@@ -58,9 +61,24 @@
     <Compile Include="Core\AppSettings.cs" />
     <Compile Include="Core\ImageStore.cs" />
     <Compile Include="Core\Json.cs" />
+    <Compile Include="Core\LogEntry.cs" />
     <Compile Include="Core\Logger.cs" />
     <Compile Include="Core\OpResult.cs" />
+    <Compile Include="Flow\FlowModels.cs" />
+    <Compile Include="Flow\FlowModule.cs" />
+    <Compile Include="Flow\FlowPortSchema.cs" />
+    <Compile Include="Flow\FlowOrder.cs" />
+    <Compile Include="Flow\FlowValidator.cs" />
+    <Compile Include="Flow\FlowOutputChannel.cs" />
+    <Compile Include="Flow\FlowRunContext.cs" />
+    <Compile Include="Flow\FlowRunController.cs" />
+    <Compile Include="Flow\FlowRunManager.cs" />
+    <Compile Include="Flow\FlowRunner.cs" />
+    <Compile Include="Flow\FlowRunSlot.cs" />
+    <Compile Include="Flow\FlowShapes.cs" />
+    <Compile Include="Flow\NodeParamSchema.cs" />
     <Compile Include="Models\User.cs" />
+    <Compile Include="Native\NativeCamera.cs" />
     <Compile Include="Native\VisionAlgo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -73,12 +91,38 @@
       <DependentUpon>AlgoForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\ModelFeatureLayer.cs" />
+    <Compile Include="UI\NodeParamPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UI\NodeParamPanel.Designer.cs">
+      <DependentUpon>NodeParamPanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="UI\CameraForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\CameraForm.Designer.cs">
       <DependentUpon>CameraForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\FlowCanvasControl.cs" />
+    <Compile Include="UI\FlowPreviewPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UI\FlowForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\FlowForm.Designer.cs">
+      <DependentUpon>FlowForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\UiButton.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="UI\UiToolStripRenderer.cs" />
+    <Compile Include="UI\UiTabControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="UI\UiGrid.cs" />
+    <Compile Include="UI\UiStyle.cs" />
+    <Compile Include="UI\UiTree.cs" />
     <Compile Include="UI\CommForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -97,6 +141,7 @@
     <Compile Include="UI\MainForm.Designer.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\UiTheme.cs" />
     <Compile Include="UI\RecipeForm.cs">
       <SubType>Form</SubType>
     </Compile>

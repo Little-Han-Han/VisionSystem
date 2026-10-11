@@ -1,0 +1,158 @@
+%% 增量架构（第二轮）：多相机 · 多产品 · 流程并行 · 日志与流程名显示
+%% 三条主链路：①启动全部 → N 条流程并行取帧执行 → 结果按 ViewIndex 分发 + 日志
+%%              ②单流程启停 / 相机占用冲突拒绝
+%%              ③关窗时先停全部 + Join 再释放原生上下文
+%% 注：Mermaid 不支持单文件内放多个 sequenceDiagram，三图以注释分隔，
+%%     分别粘贴到支持 Mermaid 的渲染器中查看。
+
+%% ==========================================================
+%% ① 启动全部 → N 条流程并行取帧执行 → 结果分发 + 日志
+%%    FR-PAR-01/02/03/04/05、FR-MC-03/04、FR-UI2-01/02/04
+%% ==========================================================
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant MF as MainForm
+    participant MGR as FlowRunManager
+    participant LS as CameraLease
+    participant SA as FlowRunSlot_A
+    participant SB as FlowRunSlot_B
+    participant GG as CameraGrabGate
+    participant CAM as ICamera
+    participant OC as FlowOutputChannel
+    participant LG as Logger_LogPanel
+    participant V as 视图_ImageViewer
+
+    U->>MF: 点「全部启动」
+    MF->>MGR: StartAll()
+    MGR->>MGR: 取「当前产品」过滤后 Enabled=true 的流程列表
+
+    loop 逐条流程尝试启动
+        MGR->>MGR: 校验 Enabled / 单链拓扑 / 相机已打开
+        MGR->>MGR: 校验 RunningCount < MaxParallelFlows（默认 4，超限拒绝不排队）
+        MGR->>LS: TryAcquire(cameraId, flowId)
+        alt 相机已被占用 或 已达并行上限
+            LS-->>MGR: false + 占用者 flowId
+            MGR->>LG: Warn(flowName, "相机 SIM-0 已被流程『定位检测』占用，请先停止该流程")
+            MGR-->>MF: OpResult.Fail（该条跳过，其余继续启动，不回滚）
+        else 获取租约成功
+            LS-->>MGR: true
+            MGR->>SA: 建槽：new FlowRunner（独立 VisionAlgo）+ 起专属线程
+            MGR-->>MF: OpResult.Ok
+        end
+    end
+    MGR->>MF: StatusChanged
+    MF->>MF: BeginInvoke → FlowRunListPanel 刷新（每流程一行）
+
+    par 槽 A 周期循环（独立线程 / 独立原生上下文）
+        SA->>GG: GrabOne(cameraA, 3000)
+        GG->>CAM: lock(cameraA 的门) → cameraA.GrabOne()
+        CAM-->>GG: Bitmap
+        GG-->>SA: OpResult~Bitmap~（等待 >500ms 则先记 WARN）
+        SA->>SA: _runner.Begin(flow, camera, captureFrames=false)
+        loop 逐节点（单链串行）
+            SA->>SA: _runner.StepNext(session)
+        end
+        SA->>SA: _runner.Finish(session) → FlowRunResult
+        SA->>OC: Publish(args{ViewIndex=1, Frame, Shapes, Passed, Summary, FlowId, FlowName, Product})
+        OC-->>MF: OutputReady → BeginInvoke → 按 ViewIndex 路由
+        OC-->>V: SetImage + 叠加图形 + Shapes.NotifyChanged()
+        MF->>MF: 视图角标 SetViewVerdict(idx, passed)；标题条 `SIM · 定位检测 [运行中]`
+        SA->>LG: Logger.Result("定位检测", passed, summary + "  82ms")
+        LG->>LG: 入批量队列（200ms Timer 统一拉取 → LogPanel 追加 + 分级着色）
+        SA->>SA: session.Dispose()（未交出的帧在此释放）
+        SA->>SA: Sleep 补足 33ms（限帧 ≤30fps）
+    and 槽 B 周期循环（互不干扰）
+        SB->>GG: GrabOne(cameraB, 3000)
+        GG->>CAM: lock(cameraB 的门)（与 A 的锁互不相同，真正并行）
+        CAM-->>SB: Bitmap
+        SB->>SB: 独立会话 Begin → StepNext → Finish
+        SB->>OC: Publish(args{ViewIndex=2, FlowName="外观检测", ...})
+        OC-->>V: 视图 2 独立显示，无串图
+        SB->>LG: Logger.Result("外观检测", passed, ...)
+        SB->>SB: Sleep 补足 33ms
+    end
+
+    Note over SA,SB: 某条流程取帧失败 → 只把自己置 Faulted + 释放租约 + 退线程，其余槽继续运行
+
+%% ==========================================================
+%% ② 单流程启停 / 相机占用冲突拒绝（FR-PAR-07、FR-MC-03、FR-UI2-09）
+%% ==========================================================
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant MF as MainForm
+    participant MGR as FlowRunManager
+    participant LS as CameraLease
+    participant SA as Slot_定位检测
+    participant SB as Slot_外观检测
+    participant LG as Logger
+
+    Note over SA: 流程「定位检测」已占用 SIM-0，运行中（Status=Running）
+
+    U->>MF: 点运行列表「外观检测」行的「启动」
+    MF->>MGR: StartOne(外观检测 Id)
+    MGR->>MGR: Enabled=true？ 单链校验通过？ 相机已打开？
+    MGR->>LS: TryAcquire("SIM-0", 外观检测 Id)
+    LS-->>MGR: false，owner = 定位检测 Id
+    MGR->>LG: Warn("外观检测", "相机 SIM-0 已被流程『定位检测』占用，请先停止该流程")
+    MGR-->>MF: OpResult.Fail("相机 SIM-0 已被流程『定位检测』占用，请先停止该流程")
+    MF->>MF: BeginInvoke → 该行显示失败原因（纯文本，不弹模态框）
+
+    U->>MF: 点「定位检测」行的「停止」
+    MF->>MGR: StopOne(定位检测 Id)
+    MGR->>SA: _stop = true
+    SA->>SA: 当前周期跑完 → 退出线程循环
+    SA->>LS: ReleaseAll(定位检测 Id)
+    SA->>SA: _runner.Dispose()（Join 已完成 → 安全释放原生 VisionAlgo 上下文）
+    MGR-->>MF: OpResult.Ok
+    MF->>MF: 状态栏 `并行 2/4`；该行状态变「已停」；其余行不变
+
+    U->>MF: 再点「外观检测」行的「启动」
+    MF->>MGR: StartOne(外观检测 Id)
+    MGR->>LS: TryAcquire("SIM-0", 外观检测 Id)
+    LS-->>MGR: true（SIM-0 已空闲）
+    MGR->>SB: 建新槽（新 FlowRunner → 新 VisionAlgo）+ 起线程
+    MGR-->>MF: OpResult.Ok
+
+%% ==========================================================
+%% ③ 关窗：先停全部 + Join 再释放原生上下文（C10 / 共享知识 30）
+%% ==========================================================
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant MF as MainForm
+    participant MGR as FlowRunManager
+    participant S as 各_FlowRunSlot
+    participant LS as CameraLease
+    participant CM as CameraManager
+    participant FF as FlowForm
+
+    U->>MF: 关闭主窗体
+    MF->>MF: OnFormClosing：_closing=true；loopTimer.Stop()
+    MF->>MGR: StopAll()
+
+    loop 每个运行中的槽（并行下发停止信号）
+        MGR->>S: _stop = true
+        S->>S: 当前周期收尾 → 退出线程循环
+        S->>LS: ReleaseAll(flowId)
+    end
+
+    MGR->>MGR: JoinAll(3000)
+
+    alt 全部线程已退出
+        MGR->>S: _runner.Dispose()（逐槽释放独立 VisionAlgo）
+        MGR->>LS: 释放全部租约（保险）
+        MGR-->>MF: Shutdown 完成
+        MF->>MF: 退订 FlowOutputChannel / Logger.EntryLogged
+        MF->>CM: CloseAll()（最后关相机，避免与取帧并发）
+        MF-->>U: 窗体关闭（≤3 s）
+    else 仍有槽在 3 s 内未退出
+        MGR-->>MF: 返回未完成列表
+        MF->>MF: e.Cancel = true；状态栏「正在结束 N 条流程…」
+        MF->>MF: 1 s 后重试 StopAll+Join（最多 3 次；仍失败则强制 Close）
+        Note over MF,S: 绝不在线程未 Join 时 Dispose —— 并行下漏一条就访问违例崩溃
+    end
+
+    MF->>FF: 若 FlowForm 仍打开 → 其 OnFormClosing 自行 Join 本地单步线程
+    FF->>FF: Join 超时 → _closeWhenIdle=true + e.Cancel → 收尾后自动关窗

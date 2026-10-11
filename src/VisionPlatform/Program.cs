@@ -25,6 +25,14 @@ namespace VisionPlatform
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // 全局异常兜底：把 UI 线程 / 非 UI 线程的未处理异常落到日志，方便定位
+            // （例如用户报告「画 ROI 报错」却看不到具体堆栈时，能从日志拿到精确异常）。
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) =>
+                Logger.Error("UI 线程未处理异常：" + e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                Logger.Error("未处理异常：" + (e.ExceptionObject != null ? e.ExceptionObject.ToString() : "(null)"));
+
             AppPaths.Ensure();
             ConfigStore.Load();
             Logger.Info("===== VisionPlatform 启动 =====");

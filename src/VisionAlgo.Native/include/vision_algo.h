@@ -12,6 +12,8 @@
  *    algo/va_match.h         模板训练与匹配（灰度归一化相关，仅平移）
  *    algo/va_shape.h         基于边缘轮廓的形状匹配（角度 / 缩放 / 金字塔 / ROI）
  *    algo/va_measure.h       清晰度与边缘计数
+ *    algo/va_caliper.h       直线 / 圆卡尺（投影找边 + 拟合 + 离群剔除）
+ *    algo/va_camera.h        本机摄像头（枚举 / 打开 / 抓帧 / 关闭）
  *
  *  设计约定（C# 侧 P/Invoke 依赖这些约定，改动需同步）：
  *   1. 全部 extern "C" 导出，无名称修饰
@@ -33,5 +35,7 @@
 #include "algo/va_match.h"
 #include "algo/va_shape.h"
 #include "algo/va_measure.h"
+#include "algo/va_caliper.h"
+#include "algo/va_camera.h"
 
 #endif /* VISION_ALGO_H */

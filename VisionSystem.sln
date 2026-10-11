@@ -11,6 +11,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionPlatform", "src\Visio
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionSystem.Demo", "src\VisionSystem.Demo\VisionSystem.Demo.csproj", "{3F2A1B4C-1002-4A7E-9D21-6E8B5C4A2002}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmokeParallel", "src\SmokeParallel\SmokeParallel.csproj", "{3F2A1B4C-9002-4A7E-9D21-6E8B5C4A9002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmokeUi", "src\SmokeUi\SmokeUi.csproj", "{3F2A1B4C-9004-4A7E-9D21-6E8B5C4A9004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmokeAlgo", "src\SmokeAlgo\SmokeAlgo.csproj", "{3F2A1B4C-9005-4A7E-9D21-6E8B5C4A9005}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{3F2A1B4C-7001-4A7E-9D21-6E8B5C4A7001}"
 	ProjectSection(SolutionItems) = preProject
 		.gitattributes = .gitattributes
@@ -41,6 +47,18 @@ Global
 		{3F2A1B4C-1002-4A7E-9D21-6E8B5C4A2002}.Debug|x64.Build.0 = Debug|Any CPU
 		{3F2A1B4C-1002-4A7E-9D21-6E8B5C4A2002}.Release|x64.ActiveCfg = Release|Any CPU
 		{3F2A1B4C-1002-4A7E-9D21-6E8B5C4A2002}.Release|x64.Build.0 = Release|Any CPU
+		{3F2A1B4C-9002-4A7E-9D21-6E8B5C4A9002}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3F2A1B4C-9002-4A7E-9D21-6E8B5C4A9002}.Debug|x64.Build.0 = Debug|Any CPU
+		{3F2A1B4C-9002-4A7E-9D21-6E8B5C4A9002}.Release|x64.ActiveCfg = Release|Any CPU
+		{3F2A1B4C-9002-4A7E-9D21-6E8B5C4A9002}.Release|x64.Build.0 = Release|Any CPU
+		{3F2A1B4C-9004-4A7E-9D21-6E8B5C4A9004}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3F2A1B4C-9004-4A7E-9D21-6E8B5C4A9004}.Debug|x64.Build.0 = Debug|Any CPU
+		{3F2A1B4C-9004-4A7E-9D21-6E8B5C4A9004}.Release|x64.ActiveCfg = Release|Any CPU
+		{3F2A1B4C-9004-4A7E-9D21-6E8B5C4A9004}.Release|x64.Build.0 = Release|Any CPU
+		{3F2A1B4C-9005-4A7E-9D21-6E8B5C4A9005}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3F2A1B4C-9005-4A7E-9D21-6E8B5C4A9005}.Debug|x64.Build.0 = Debug|Any CPU
+		{3F2A1B4C-9005-4A7E-9D21-6E8B5C4A9005}.Release|x64.ActiveCfg = Release|Any CPU
+		{3F2A1B4C-9005-4A7E-9D21-6E8B5C4A9005}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

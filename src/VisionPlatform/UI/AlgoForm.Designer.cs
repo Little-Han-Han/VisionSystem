@@ -23,22 +23,22 @@ namespace VisionPlatform.UI
             this.gridResults = new System.Windows.Forms.DataGridView();
 
             // ---------- 图像来源 ----------
-            this.btnOpenImage = new System.Windows.Forms.Button();
-            this.btnGrab = new System.Windows.Forms.Button();
+            this.btnOpenImage = new VisionPlatform.UI.UiButton();
+            this.btnGrab = new VisionPlatform.UI.UiButton();
 
             // ---------- 模板区域 ----------
             this.numTplX = MakeNum(0, 65535, 0, 0);
             this.numTplY = MakeNum(0, 65535, 0, 0);
             this.numTplW = MakeNum(0, 65535, 0, 0);
             this.numTplH = MakeNum(0, 65535, 0, 0);
-            this.btnPickTemplate = new System.Windows.Forms.Button();
-            this.btnTemplateFull = new System.Windows.Forms.Button();
+            this.btnPickTemplate = new VisionPlatform.UI.UiButton();
+            this.btnTemplateFull = new VisionPlatform.UI.UiButton();
 
             // ---------- 模型训练 ----------
             this.numContrast = MakeNum(5, 200, 30, 0);
             this.numMaxFeatures = MakeNum(50, 8000, 1500, 0);
             this.numMinFeatureDist = MakeNum(1, 20, 2, 1);
-            this.btnTrain = new System.Windows.Forms.Button();
+            this.btnTrain = new VisionPlatform.UI.UiButton();
             this.lblModelInfo = new System.Windows.Forms.Label();
             this.chkShowFeatures = new System.Windows.Forms.CheckBox();
 
@@ -62,13 +62,13 @@ namespace VisionPlatform.UI
             this.numSrchY = MakeNum(0, 65535, 0, 0);
             this.numSrchW = MakeNum(0, 65535, 0, 0);
             this.numSrchH = MakeNum(0, 65535, 0, 0);
-            this.btnPickSearch = new System.Windows.Forms.Button();
-            this.btnSearchFull = new System.Windows.Forms.Button();
+            this.btnPickSearch = new VisionPlatform.UI.UiButton();
+            this.btnSearchFull = new VisionPlatform.UI.UiButton();
 
             // ---------- 执行 ----------
-            this.btnMatch = new System.Windows.Forms.Button();
-            this.btnClearModel = new System.Windows.Forms.Button();
-            this.btnFit = new System.Windows.Forms.Button();
+            this.btnMatch = new VisionPlatform.UI.UiButton();
+            this.btnClearModel = new VisionPlatform.UI.UiButton();
+            this.btnFit = new VisionPlatform.UI.UiButton();
 
             this.panelLeft.SuspendLayout();
             this.tableParams.SuspendLayout();
@@ -215,6 +215,11 @@ namespace VisionPlatform.UI
             this.panelRight.Padding = new System.Windows.Forms.Padding(4);
             this.panelRight.Size = new System.Drawing.Size(700, 620);
             this.panelRight.TabIndex = 1;
+            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件。
+            // 停靠按集合逆序生效，故先加 Top 的判定条、再加 Bottom 的结果表；
+            // ImageViewer 由 AlgoForm 构造函数 Add 后 SetChildIndex(0)，最后停靠并填满余量。
+            this.panelRight.Controls.Add(this.lblVerdict);
+            this.panelRight.Controls.Add(this.gridResults);
 
             this.lblVerdict.Dock = System.Windows.Forms.DockStyle.Top;
             this.lblVerdict.Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold);
@@ -334,20 +339,20 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblVerdict;
         private System.Windows.Forms.DataGridView gridResults;
 
-        private System.Windows.Forms.Button btnOpenImage;
-        private System.Windows.Forms.Button btnGrab;
+        private VisionPlatform.UI.UiButton btnOpenImage;
+        private VisionPlatform.UI.UiButton btnGrab;
 
         private System.Windows.Forms.NumericUpDown numTplX;
         private System.Windows.Forms.NumericUpDown numTplY;
         private System.Windows.Forms.NumericUpDown numTplW;
         private System.Windows.Forms.NumericUpDown numTplH;
-        private System.Windows.Forms.Button btnPickTemplate;
-        private System.Windows.Forms.Button btnTemplateFull;
+        private VisionPlatform.UI.UiButton btnPickTemplate;
+        private VisionPlatform.UI.UiButton btnTemplateFull;
 
         private System.Windows.Forms.NumericUpDown numContrast;
         private System.Windows.Forms.NumericUpDown numMaxFeatures;
         private System.Windows.Forms.NumericUpDown numMinFeatureDist;
-        private System.Windows.Forms.Button btnTrain;
+        private VisionPlatform.UI.UiButton btnTrain;
         private System.Windows.Forms.Label lblModelInfo;
         private System.Windows.Forms.CheckBox chkShowFeatures;
 
@@ -369,11 +374,11 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.NumericUpDown numSrchY;
         private System.Windows.Forms.NumericUpDown numSrchW;
         private System.Windows.Forms.NumericUpDown numSrchH;
-        private System.Windows.Forms.Button btnPickSearch;
-        private System.Windows.Forms.Button btnSearchFull;
+        private VisionPlatform.UI.UiButton btnPickSearch;
+        private VisionPlatform.UI.UiButton btnSearchFull;
 
-        private System.Windows.Forms.Button btnMatch;
-        private System.Windows.Forms.Button btnClearModel;
-        private System.Windows.Forms.Button btnFit;
+        private VisionPlatform.UI.UiButton btnMatch;
+        private VisionPlatform.UI.UiButton btnClearModel;
+        private VisionPlatform.UI.UiButton btnFit;
     }
 }

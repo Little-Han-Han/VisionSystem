@@ -48,6 +48,12 @@
     <ClInclude Include="include\algo\va_measure.h">
       <Filter>include\algo</Filter>
     </ClInclude>
+    <ClInclude Include="include\algo\va_camera.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_caliper.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
   </ItemGroup>
 
   <!-- 源文件夹 -->
@@ -71,6 +77,12 @@
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_measure.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_camera.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_caliper.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
   </ItemGroup>
