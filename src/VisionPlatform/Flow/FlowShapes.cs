@@ -184,15 +184,16 @@ namespace VisionPlatform.Flow
             return r;
         }
 
-        /// <summary>Blob 标记：以等效半径画圆（面积等效）。</summary>
-        public static CircleShape BlobMarker(double cx, double cy, double area)
+        /// <summary>Blob 标记：以最小外接矩形（轴对齐）绘制，替代原先的面积等效圆。</summary>
+        public static RectangleShape BlobRect(double cx, double cy, double width, double height)
         {
-            float r = (float)Math.Max(3.0, Math.Sqrt(Math.Max(0.0, area) / Math.PI));
-            var c = new CircleShape(new PointF((float)cx, (float)cy), r);
-            c.StrokeColor = ColorBlob;
-            c.LineWidth = NormalLine;
-            c.IsEditable = false;
-            return c;
+            float w = (float)Math.Max(1.0, width);
+            float h = (float)Math.Max(1.0, height);
+            var r = new RectangleShape((float)(cx - w / 2.0), (float)(cy - h / 2.0), w, h);
+            r.StrokeColor = ColorBlob;
+            r.LineWidth = NormalLine;
+            r.IsEditable = false;
+            return r;
         }
 
         /// <summary>基准十字（位置修正用；臂长为图像像素，随缩放移动）。</summary>

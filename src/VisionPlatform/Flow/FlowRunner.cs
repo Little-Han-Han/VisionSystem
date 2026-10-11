@@ -933,7 +933,7 @@ namespace VisionPlatform.Flow
                 {
                     double cx = b.Cx + usedRoi.X;
                     double cy = b.Cy + usedRoi.Y;
-                    p.Shapes.Add(FlowShapes.BlobMarker(cx, cy, b.Area));
+                    p.Shapes.Add(FlowShapes.BlobRect(cx, cy, b.Width, b.Height));
                 }
 
                 if (!usedRoi.IsEmpty)
