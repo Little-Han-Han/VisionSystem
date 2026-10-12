@@ -144,10 +144,13 @@ namespace VisionPlatform.Native
             }
         }
 
-        /// <summary>取最近错误文本；无句柄或失败时返回空串。</summary>
+        /// <summary>
+        /// 取最近错误文本。<paramref name="cam"/> 可为 <see cref="IntPtr.Zero"/>：
+        /// C 端在句柄为空时返回最近一次「枚举 / 打开」的原因，用于 Open 失败（拿不到句柄）
+        /// 或枚举为 0 时取具体理由的场景；仍取不到时返回空串。
+        /// </summary>
         public static string LastError(IntPtr cam)
         {
-            if (cam == IntPtr.Zero) return string.Empty;
             try
             {
                 byte[] buffer = new byte[512];

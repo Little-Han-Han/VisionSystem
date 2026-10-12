@@ -250,10 +250,12 @@ int VA_CALL va_camera_close(void* handle)
 
 int VA_CALL va_camera_get_last_error(void* handle, char* buffer, int size)
 {
-    if (handle == 0 || buffer == 0 || size <= 0) return 0;
+    if (buffer == 0 || size <= 0) return 0;
 
-    va::CameraSource* cam = static_cast<va::CameraSource*>(handle);
-    const std::string& s = cam->lastError;
+    // handle 为空时返回最近一次「枚举 / 打开」的原因（CameraEnum / CameraOpen 写入），
+    // 供上层在 Open 失败（无句柄）或枚举为 0 时取到具体理由；有句柄时行为不变。
+    std::string s = (handle == 0) ? va::CameraReason()
+                                  : static_cast<va::CameraSource*>(handle)->lastError;
 
     int n = (int)s.size();
     if (n > size - 1) n = size - 1;

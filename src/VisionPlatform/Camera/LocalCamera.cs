@@ -30,6 +30,21 @@ namespace VisionPlatform.Camera
         // 采集线程最小帧间隔（毫秒）：给 UI 一个约 30fps 的上限，避免消息队列积压
         private int _minFrameIntervalMs = 33;
 
+        // ---- C3 无响应看门狗 ----
+        // 原生 va_camera_grab 内部是阻塞 read（RC1，真正的超时/看门狗修复 C4 延后），
+        // 相机被占用或掉线时采集线程可能永久卡在取帧里，failStreak 路径根本走不到。
+        // 用一个独立定时器监控「距上次成功帧」的间隔，超过阈值即经既有 ErrorOccurred
+        // 通道告知 UI，避免界面一直停在「采集中…」却毫无反馈。
+        private const int NoResponseMs = 3000;            // 无响应判定阈值（毫秒）
+        private System.Threading.Timer _watchdog;         // StartGrab 建，StopGrab / 采集线程退出时销
+        private volatile int _lastFrameTicks;             // 最近一次成功帧的 Environment.TickCount
+        private volatile bool _noResponseReported;        // 本次采集是否已上报过「无响应」（避免重复刷屏）
+
+        // ---- C2 枚举原因 ----
+        // 最近一次枚举的 USB 相机原因：枚举为 0 时由 Enumerate 记录，供界面展示，
+        // 不再让用户面对「只剩模拟相机」却不知为何。
+        private static string _lastEnumReason = "";
+
         /// <summary>以设备序号创建一个本机摄像头（尚未打开）。</summary>
         public LocalCamera(int index)
         {
@@ -48,6 +63,9 @@ namespace VisionPlatform.Camera
         public bool IsOpen { get { return _opened; } }
         public bool IsGrabbing { get { return _grabbing; } }
 
+        /// <summary>最近一次 <see cref="Enumerate"/> 的原生原因（枚举为 0 时非空，供界面展示）。</summary>
+        public static string LastEnumReason { get { return _lastEnumReason; } }
+
         public event EventHandler<Bitmap> FrameReceived;
         public event EventHandler<string> ErrorOccurred;
 
@@ -57,6 +75,9 @@ namespace VisionPlatform.Camera
             var list = new List<CameraInfo>();
 
             int count = CameraNative.Enum();
+            // 一台都没枚举到时，取原生给出的原因（被占用 / 无设备 / 驱动），供界面展示（C2）。
+            _lastEnumReason = count <= 0 ? CameraNative.LastError(IntPtr.Zero) : "";
+
             for (int i = 0; i < count; i++)
             {
                 list.Add(new CameraInfo
@@ -80,9 +101,14 @@ namespace VisionPlatform.Camera
                 IntPtr h = CameraNative.Open(_index);
                 if (h == IntPtr.Zero)
                 {
-                    Logger.Warn("打开本机摄像头失败，序号 " + _index);
-                    return OpResult.Fail(
-                        "打开本机摄像头失败：设备不存在、被其他程序占用或驱动不可用（序号 " + _index + "）。");
+                    // 取原生打开失败原因（无句柄，经 va_camera_get_last_error(NULL,...) 兜底），
+                    // 一并告知用户，别再静默返回一句笼统失败（C2）。
+                    string reason = CameraNative.LastError(IntPtr.Zero);
+                    Logger.Warn("打开本机摄像头失败，序号 " + _index +
+                                (string.IsNullOrEmpty(reason) ? "" : ("：" + reason)));
+                    string msg = "打开本机摄像头失败：设备不存在、被其他程序占用或驱动不可用（序号 " + _index + "）。";
+                    if (!string.IsNullOrEmpty(reason)) msg += " 详情：" + reason;
+                    return OpResult.Fail(msg);
                 }
 
                 int w, hh;
@@ -166,6 +192,13 @@ namespace VisionPlatform.Camera
 
                 _stopFlag = false;
                 _grabbing = true;
+
+                // C3：重置无响应看门狗基准（幂等清理可能残留的旧定时器后再建新的）。
+                _lastFrameTicks = Environment.TickCount;
+                _noResponseReported = false;
+                DisposeWatchdog();
+                _watchdog = new System.Threading.Timer(WatchdogTick, null, NoResponseMs, 1000);
+
                 _thread = new Thread(GrabLoop);
                 _thread.IsBackground = true;
                 _thread.Name = "LocalCameraGrab";
@@ -179,11 +212,14 @@ namespace VisionPlatform.Camera
             Thread t;
             lock (_sync)
             {
-                if (!_grabbing && _thread == null) return OpResult.Ok();
+                if (!_grabbing && _thread == null) { DisposeWatchdog(); return OpResult.Ok(); }
                 _grabbing = false;
                 _stopFlag = true;
                 t = _thread;                 // 不在此清空：由 GrabLoop 退出时清空，Close 才能判活
             }
+
+            // C3：无论采集线程能否在 1s 内退出，都先停掉无响应看门狗，避免其继续上报。
+            DisposeWatchdog();
 
             if (t != null && !t.Join(1000))
             {
@@ -220,7 +256,7 @@ namespace VisionPlatform.Camera
                 img.width = w;
                 img.height = hh;
                 img.channels = 3;              // BGR
-                img.stride = data.Stride;      // Format24bppRgb 的 Stride 为 4 字节对齐，必须传给 C++
+                img.stride = data.Stride;      // Format24bppRgb 的 Stride 为 4 字节对齐，必须传给 C++ 
 
                 int rc = CameraNative.Grab(h, ref img, timeoutMs);
                 if (rc != VaResult.OK)
@@ -324,6 +360,8 @@ namespace VisionPlatform.Camera
                     else
                     {
                         failStreak = 0;
+                        _lastFrameTicks = Environment.TickCount;   // C3：拿到帧，刷新无响应基准
+                        _noResponseReported = false;
 
                         EventHandler<Bitmap> handler = FrameReceived;
                         if (handler != null) handler(this, frame);
@@ -350,14 +388,47 @@ namespace VisionPlatform.Camera
                 }
             }
 
+            bool mine;
             lock (_sync)
             {
                 // 仅当 _thread 仍指向本线程时才清空：避免误清 StopGrab 超时后新启动的采集线程
-                if (ReferenceEquals(_thread, Thread.CurrentThread))
+                mine = ReferenceEquals(_thread, Thread.CurrentThread);
+                if (mine)
                 {
                     _thread = null;
                     _grabbing = false;
                 }
+            }
+            if (mine) DisposeWatchdog();   // C3：本采集循环结束，停掉无响应看门狗
+        }
+
+        /// <summary>
+        /// C3 无响应看门狗回调：距上次成功帧超过 <see cref="NoResponseMs"/> 即经
+        /// <see cref="ErrorOccurred"/> 上报一次「相机无响应」。采集已停止则不作动作。
+        /// 注意：这里只负责把状态告知 UI，不尝试去中断卡在原生阻塞读里的采集线程（C4 延后）。
+        /// </summary>
+        private void WatchdogTick(object state)
+        {
+            if (!_grabbing) return;
+
+            int elapsed = Environment.TickCount - _lastFrameTicks;
+            if (elapsed >= NoResponseMs && !_noResponseReported)
+            {
+                _noResponseReported = true;
+                RaiseError("相机无响应（可能被其他程序占用或掉线）");
+                Logger.Error("本机摄像头 " + Info.Id + " 超过 " + NoResponseMs +
+                             "ms 无帧（采集线程可能阻塞在取帧，见 C4）");
+            }
+        }
+
+        /// <summary>安全释放无响应看门狗（幂等，可重复调用）。</summary>
+        private void DisposeWatchdog()
+        {
+            System.Threading.Timer t = Interlocked.Exchange(ref _watchdog, null);
+            if (t != null)
+            {
+                try { t.Dispose(); }
+                catch (Exception) { }
             }
         }
 

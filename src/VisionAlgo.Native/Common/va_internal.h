@@ -66,6 +66,12 @@ int   CameraGetSize(CameraSource* cam, int* outW, int* outH);
 // 关闭并释放句柄。
 int   CameraClose(CameraSource* cam);
 
+// 取/设最近一次本机摄像头「枚举 / 打开」的原因文本。
+// 供 va_camera_get_last_error 在句柄为空（枚举为 0 / Open 失败）时兜底返回，
+// 这样无需改动任何导出函数签名即可把原因透传给上层（C2）。
+void        SetCameraReason(const std::string& reason);
+std::string CameraReason();
+
 // ---------------------- 公共工具 ----------------------
 
 // 用调用方内存构造 cv::Mat（不拷贝）。失败时填充 err

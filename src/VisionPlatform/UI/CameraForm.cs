@@ -59,14 +59,32 @@ namespace VisionPlatform.UI
             listCameras.Items.Clear();
 
             List<CameraInfo> infos = CameraManager.Instance.Enumerate();
+
+            bool hasUsb = false;
             foreach (CameraInfo info in infos)
+            {
                 listCameras.Items.Add(info);
+                if (info != null && !string.IsNullOrEmpty(info.Vendor) &&
+                    info.Vendor.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
+                    hasUsb = true;
+            }
 
             if (listCameras.Items.Count > 0 && listCameras.SelectedIndex < 0)
                 listCameras.SelectedIndex = 0;
 
             listCameras.EndUpdate();
             UpdateButtons();
+
+            // C2：一台 USB 相机都没枚举到时，把原生给出的原因展示出来，
+            //     不再让用户面对「只剩模拟相机」却不知为何（占用 / 未连接 / 驱动）。
+            if (!hasUsb && _camera == null)
+            {
+                string reason = LocalCamera.LastEnumReason;
+                lblStatus.Text = string.IsNullOrEmpty(reason)
+                    ? "未检测到 USB 相机：可能被其他程序（视频会议 / 监控 / 相机应用）占用，或驱动不可用。"
+                    : ("未检测到 USB 相机：" + reason);
+            }
+
             Logger.Info("相机列表已刷新：" + infos.Count + " 个");
         }
 

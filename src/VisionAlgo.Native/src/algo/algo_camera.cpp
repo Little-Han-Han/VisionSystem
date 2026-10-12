@@ -8,29 +8,53 @@
 
 namespace va {
 
-// 尝试用指定后端打开 index 并确认能读到一帧；失败时释放并返回 false。
+// ---------------------- 枚举 / 打开原因（进程级，供无句柄时取文本）--------------------
+// 仅在本编译单元内可见；对外经 va_camera_get_last_error(handle=NULL,...) 暴露，
+// 不改动任何导出函数签名 / ABI。
+static std::mutex  g_reasonMtx;
+static std::string g_reason;
+
+void SetCameraReason(const std::string& reason)
+{
+    std::lock_guard<std::mutex> lk(g_reasonMtx);
+    g_reason = reason;
+}
+
+std::string CameraReason()
+{
+    std::lock_guard<std::mutex> lk(g_reasonMtx);
+    return g_reason;
+}
+
+// 探测打开结果分类：用于枚举阶段区分「打不开」与「打开了但读不到帧（被占用特征）」。
+enum ProbeResult { ProbeOk = 0, ProbeOpenFailed = 1, ProbeNoFrame = 2 };
+
+// 慢热 / 短暂被占用的相机可能要连续读多帧才出图；探测期多读几帧再下结论，
+// 避免把「刚上电、正在预热」或「瞬间被占用」的相机误判为不存在（RC2 假阴性）。
+static const int kProbeWarmupReads = 10;
+
+// 尝试用指定后端打开 index 并确认能读到一帧；按结果分类返回。
 // outW/outH 回填探测到的真实帧分辨率（比打开后查询属性更可靠）。
-static bool ProbeOpen(cv::VideoCapture& cap, int index, int backend,
-                      int* outW = 0, int* outH = 0)
+static ProbeResult ProbeOpen(cv::VideoCapture& cap, int index, int backend,
+                             int* outW = 0, int* outH = 0)
 {
     try {
-        if (!cap.open(index, backend)) return false;
-        if (!cap.isOpened()) return false;
+        if (!cap.open(index, backend)) return ProbeOpenFailed;
+        if (!cap.isOpened()) return ProbeOpenFailed;
 
-        // 部分后端打开后需要丢弃 1~2 帧才拿到稳定图像
         cv::Mat probe;
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < kProbeWarmupReads; ++i) {
             if (cap.read(probe) && !probe.empty()) {
                 if (outW) *outW = probe.cols;
                 if (outH) *outH = probe.rows;
-                return true;
+                return ProbeOk;
             }
         }
         cap.release();
-        return false;
+        return ProbeNoFrame;
     } catch (...) {
         try { cap.release(); } catch (...) {}
-        return false;
+        return ProbeOpenFailed;
     }
 }
 
@@ -40,24 +64,38 @@ int CameraEnum(int* outCount)
     *outCount = 0;
 
     int count = 0;
-    const int kMaxProbe = 8;   // 探测上限，避免无限循环
+    bool anyOpenedNoFrame = false;   // 是否有「能打开但读不到帧」的序号（被占用特征）
+    const int kMaxProbe = 8;         // 探测上限，避免无限循环
 
     try {
         for (int i = 0; i < kMaxProbe; ++i) {
-            bool found = false;
             cv::VideoCapture cap;
 
             // 与 CameraOpen 的「自动」顺序一致：MSMF 优先，失败回退 DShow。
             // 仅用 DShow 探测会漏掉 MSMF-only 的现代 UVC/USB 摄像头（Win10/11 常见）。
-            if (ProbeOpen(cap, i, cv::CAP_MSMF))             found = true;
-            else { cap.release(); if (ProbeOpen(cap, i, cv::CAP_DSHOW)) found = true; }
+            ProbeResult r = ProbeOpen(cap, i, cv::CAP_MSMF);
+            if (r != ProbeOk) {
+                cap.release();
+                r = ProbeOpen(cap, i, cv::CAP_DSHOW);
+            }
 
-            if (found) { cap.release(); ++count; }
+            if (r == ProbeOk) { cap.release(); ++count; }
+            else if (r == ProbeNoFrame) anyOpenedNoFrame = true;
             // 不在首个失败时中断：某些系统 index 0 是失效/被占用设备，
             // 中断会掩盖 index 1+ 的真实摄像头。
         }
     } catch (...) {
         // 枚举异常按已探测到的数量返回
+    }
+
+    // 记录可读原因：一台都没枚举到时，区分「被占用（能打开却读不到帧）」与「无设备 / 驱动」，
+    // 供上层在无句柄时经 va_camera_get_last_error(NULL, ...) 取用（C2）。
+    if (count == 0) {
+        SetCameraReason(anyOpenedNoFrame
+            ? "some devices opened but returned no frame (possibly occupied by another app)"
+            : "no device could be opened (USB camera not connected or driver unavailable)");
+    } else {
+        SetCameraReason("");   // 有设备：清空旧原因，避免残留干扰
     }
 
     *outCount = count;
@@ -75,23 +113,26 @@ void* CameraOpen(int index, const VA_CameraOption* opt)
     int backend = opt ? opt->backend : 0;
 
     try {
-        bool ok = false;
+        ProbeResult pr = ProbeOpenFailed;
         int pw = 0, ph = 0;   // 探测帧真实分辨率（比属性查询更可靠）
 
         if (backend == 2) {            // 仅 MSMF
-            ok = ProbeOpen(cam->cap, index, cv::CAP_MSMF, &pw, &ph);
+            pr = ProbeOpen(cam->cap, index, cv::CAP_MSMF, &pw, &ph);
         } else if (backend == 1) {     // 仅 DShow
-            ok = ProbeOpen(cam->cap, index, cv::CAP_DSHOW, &pw, &ph);
+            pr = ProbeOpen(cam->cap, index, cv::CAP_DSHOW, &pw, &ph);
         } else {                       // 自动：MSMF 优先，失败回退 DShow
-            ok = ProbeOpen(cam->cap, index, cv::CAP_MSMF, &pw, &ph);
-            if (!ok) {
+            pr = ProbeOpen(cam->cap, index, cv::CAP_MSMF, &pw, &ph);
+            if (pr != ProbeOk) {
                 cam->cap.release();
-                ok = ProbeOpen(cam->cap, index, cv::CAP_DSHOW, &pw, &ph);
+                pr = ProbeOpen(cam->cap, index, cv::CAP_DSHOW, &pw, &ph);
             }
         }
 
-        if (!ok || !cam->cap.isOpened()) {
-            cam->lastError = "cannot open camera device (index may not exist or is occupied)";
+        if (pr != ProbeOk || !cam->cap.isOpened()) {
+            cam->lastError = (pr == ProbeNoFrame)
+                ? "camera opened but no frame within warmup reads (possibly occupied by another app)"
+                : "cannot open camera device (index may not exist, driver unavailable, or occupied)";
+            SetCameraReason(cam->lastError);   // Open 失败时无句柄，供上层取原因
             delete cam;
             return 0;
         }
