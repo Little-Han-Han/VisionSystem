@@ -72,13 +72,14 @@ namespace VisionPlatform.UI
             this.panelLeft.Location = new System.Drawing.Point(0, 0);
             this.panelLeft.Name = "panelLeft";
             this.panelLeft.Padding = new System.Windows.Forms.Padding(6);
-            this.panelLeft.Size = new System.Drawing.Size(160, 720);
+            this.panelLeft.Size = new System.Drawing.Size(200, 720);
             this.panelLeft.TabIndex = 0;
 
+            this.lblModules.AutoSize = false;
             this.lblModules.Dock = System.Windows.Forms.DockStyle.Top;
             this.lblModules.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.lblModules.Name = "lblModules";
-            this.lblModules.Size = new System.Drawing.Size(148, 26);
+            this.lblModules.Size = new System.Drawing.Size(188, 26);
             this.lblModules.Text = "工具箱（拖拽到画布）";
             this.lblModules.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
@@ -311,7 +312,7 @@ namespace VisionPlatform.UI
 
             // ---------- 画布 / 预览（SplitContainer，上画布下预览）----------
             this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitMain.Location = new System.Drawing.Point(160, 0);
+            this.splitMain.Location = new System.Drawing.Point(200, 0);
             this.splitMain.Name = "splitMain";
             this.splitMain.Orientation = System.Windows.Forms.Orientation.Horizontal;
             this.splitMain.SplitterDistance = 340;      // 初始约 60%（随窗口按比例由 FixedPanel 决定）
