@@ -518,7 +518,22 @@ namespace VisionPlatform.Flow
                     // 于是分工是：校验期由 FlowValidator 的 W005 提前提示用户（不是拦他），
                     // 运行期这里跳过本次修正、不判 NG，让流程继续跑。
                     p.Status = FlowNodeStatus.Skipped;
-                    p.Summary = "位置修正：上游无可用定位结果，本次跳过修正（未判 NG）";
+
+                    // 归因提示：若链上存在匹配类节点却排在本节点【之后】执行，则点名该节点并
+                    // 建议把本节点移到其下游；否则维持原始「上游无可用定位结果」文案。
+                    // （SmokeAlgo T11 断言「上游无可用定位结果」子串，其链路无匹配节点，走 else 分支；
+                    //   两个分支都 return true、都置 Skipped，遵循 P0-3「不判 NG」的裁决。）
+                    FlowNode lateMatch = FindMatchNodeAfter(s, node);
+                    if (lateMatch != null)
+                    {
+                        string mn = string.IsNullOrEmpty(lateMatch.Name) ? lateMatch.Id : lateMatch.Name;
+                        p.Summary = "位置修正：匹配节点「" + mn
+                            + "」排在本节点之后执行，取不到位姿；请将本节点移到其下游（画布右侧）";
+                    }
+                    else
+                    {
+                        p.Summary = "位置修正：上游无可用定位结果，本次跳过修正（未判 NG）";
+                    }
                     return true;
                 }
 
@@ -589,6 +604,45 @@ namespace VisionPlatform.Flow
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 在拓扑有序执行链 <see cref="FlowRunSession.Chain"/> 中，查找排在 <paramref name="node"/>
+        /// <strong>之后</strong>执行的第一个匹配类节点（形状匹配 / 模板匹配）；找不到返回 null。
+        /// </summary>
+        /// <remarks>
+        /// 用途：Auto 位置修正因 <c>!s.HasPose</c> 跳过时给出「可归因」的提示 ——
+        /// 此时若还存在匹配节点，只可能是它排在了本节点之后（尚未产出位姿），
+        /// 据此引导用户把位置修正节点移到匹配节点下游。
+        /// </remarks>
+        private static FlowNode FindMatchNodeAfter(FlowRunSession s, FlowNode node)
+        {
+            if (s == null || s.Chain == null || node == null) return null;
+
+            int start = -1;
+            for (int i = 0; i < s.Chain.Count; i++)
+            {
+                FlowNode c = s.Chain[i];
+                if (c == null) continue;
+                if (ReferenceEquals(c, node)
+                    || string.Equals(c.Id, node.Id, StringComparison.Ordinal))
+                {
+                    start = i;
+                    break;
+                }
+            }
+            if (start < 0) return null;
+
+            for (int i = start + 1; i < s.Chain.Count; i++)
+            {
+                FlowNodeType t;
+                if (s.Chain[i] != null && s.Chain[i].TryGetType(out t)
+                    && (t == FlowNodeType.ShapeMatch || t == FlowNodeType.TemplateMatch))
+                {
+                    return s.Chain[i];
+                }
+            }
+            return null;
         }
 
         // ---------------------- 形状匹配 ----------------------
@@ -878,8 +932,10 @@ namespace VisionPlatform.Flow
                     input = work;
                 }
 
-                // 可选 ROI：限制分析区域。用户输入为图像坐标，减去 ROI 裁剪偏移换算到工作帧，
-                // 再夹到图像范围内；ROI 无效（宽高<=0 或完全在图外）则退化为整帧分析。
+                // 可选 ROI：限制分析区域。用户输入为图像坐标，与匹配节点同款顺序换算 ——
+                // 先减去 ROI 裁剪偏移得到工作帧坐标，再应用位置修正变换（FR-ALG-09：让 Blob
+                // 搜索区跟随工件修正后的位姿），最后夹到图像范围内；
+                // ROI 无效（宽高<=0 或完全在图外）则退化为整帧分析。
                 Bitmap analyzeOn = input;
                 Rectangle usedRoi = Rectangle.Empty;
 
@@ -890,12 +946,16 @@ namespace VisionPlatform.Flow
 
                 if (roiW > 0 && roiH > 0)
                 {
-                    int rx = (int)Math.Round(roiX - s.OffsetX);
-                    int ry = (int)Math.Round(roiY - s.OffsetY);
-                    rx = Math.Max(0, Math.Min(rx, input.Width - 1));
-                    ry = Math.Max(0, Math.Min(ry, input.Height - 1));
-                    int rw = Math.Max(0, Math.Min(roiW, input.Width - rx));
-                    int rh = Math.Max(0, Math.Min(roiH, input.Height - ry));
+                    // 用户坐标 → 工作帧坐标（减裁剪偏移）→ 位置修正变换（与 ApplyRoi 一致）；
+                    // 无上游定位时 Transform 未写入，ApplyToRect 原样返回，行为与改造前完全一致。
+                    int wx = (int)Math.Round(roiX - s.OffsetX);
+                    int wy = (int)Math.Round(roiY - s.OffsetY);
+                    var userRect = s.Transform.ApplyToRect(new Rectangle(wx, wy, roiW, roiH));
+
+                    int rx = Math.Max(0, Math.Min(userRect.X, input.Width - 1));
+                    int ry = Math.Max(0, Math.Min(userRect.Y, input.Height - 1));
+                    int rw = Math.Max(0, Math.Min(userRect.Width, input.Width - rx));
+                    int rh = Math.Max(0, Math.Min(userRect.Height, input.Height - ry));
                     if (rw > 0 && rh > 0)
                     {
                         var rect = new Rectangle(rx, ry, rw, rh);

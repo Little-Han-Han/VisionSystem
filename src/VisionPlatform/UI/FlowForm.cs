@@ -1259,9 +1259,25 @@ namespace VisionPlatform.UI
             sb.AppendLine("相机：" + (camErr == null ? "正常（已打开）" : camErr));
             sb.AppendLine("视图：" + (viewErr == null ? "正常" : ("越界，运行时会跳过显示（视图 " + f.ViewIndex + "）")));
 
+            // A3：把 FlowValidator 的 Warning 级也一并展示（如 W005「位置修正上游无匹配节点」），
+            //     让「校验能过、但运行不生效」的问题在点运行时之前就暴露。Error 级判定不变：
+            //     无警告时图标逻辑与改造前逐字一致。
+            List<FlowIssue> warnings = FlowValidator.Validate(f).Warnings;
+            if (warnings.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("警告（不阻断运行，但对应节点可能不生效）：");
+                foreach (FlowIssue w in warnings)
+                {
+                    if (w == null) continue;
+                    sb.AppendLine("  · " + w.Message);
+                }
+            }
+
             MessageBox.Show(this, sb.ToString(), "流程校验",
                 MessageBoxButtons.OK,
-                (chainOk && camErr == null) ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                (chainOk && camErr == null && warnings.Count == 0)
+                    ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
 
             SetStatus(chainOk ? "校验通过" : ("校验未通过：" + chainErr));
         }

@@ -326,6 +326,7 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Int("TemplateY", "Y", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateW", "宽", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateH", "高", 0, 100000, "0"));
+            t.Fields.Add(Note("0 = 整图；工件会移动时必须框选模板区域，否则匹配会漂移失败。"));
 
             t.Fields.Add(Group("训练"));
             t.Fields.Add(Dbl("Contrast", "对比度", 0, 255, 1, 1m, "30"));
@@ -363,6 +364,7 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Int("TemplateY", "Y", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateW", "宽", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateH", "高", 0, 100000, "0"));
+            t.Fields.Add(Note("0 = 整图；工件会移动时必须框选模板区域，否则匹配会漂移失败。"));
 
             t.Fields.Add(Group("搜索 ROI（宽或高为 0 = 整图）"));
             t.Fields.Add(Int("SearchX", "X", 0, 100000, "0"));
