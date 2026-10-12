@@ -87,6 +87,16 @@ namespace VisionPlatform.UI
         private CommForm _commForm;
         private RecipeForm _recipeForm;
 
+        // ---- 连续实时预览（主界面 live preview）----
+        // 复用 CameraForm / LocalCamera 的成熟链路：StartGrab → FrameReceived → 覆盖式合帧 →
+        // 单次 BeginInvoke 上 UI 线程 → 主视图 ImageViewer。与循环运行(loopTimer)通过
+        // 「live 开启时跳过 loopTimer 取帧」协调，避免同一相机被双重取帧。
+        private bool _liveRunning;               // 连续实时预览是否进行中
+        private ICamera _liveCamera;             // 当前实时预览绑定的相机（退订 + StopGrab 用）
+        private Bitmap _pendingLiveFrame;        // 覆盖式：后台线程只保留「最新一帧」
+        private int _pendingLivePosted;          // 0=无待显示帧；1=已投递一帧待处理
+        private bool _liveViewerFitted;          // 首个实时帧做一次 FitToWindow
+
         /// <summary>当前布局的视图总数（供流程编排页在运行前校验视图绑定是否越界）。</summary>
         public static int ActiveViewCount { get; private set; }
 
@@ -436,6 +446,18 @@ namespace VisionPlatform.UI
 
         private void OnCameraSelectionChanged(object sender, EventArgs e)
         {
+            // 切相机收尾：若正在实时预览，而所选相机已不是预览那台，则停掉旧预览
+            // （退订 FrameReceived + StopGrab），避免残留处理器 / 句柄错配。
+            if (_liveRunning)
+            {
+                CameraInfo sel = SelectedCameraInfo;
+                if (_liveCamera == null || _liveCamera.Info == null || sel == null ||
+                    !string.Equals(_liveCamera.Info.Id, sel.Id, StringComparison.Ordinal))
+                {
+                    StopLive();
+                }
+            }
+
             UpdateStatus();
         }
 
@@ -486,6 +508,147 @@ namespace VisionPlatform.UI
 
             RefreshBindCombos();
         }
+
+        #region 连续实时预览
+
+        /// <summary>连续实时预览开关：运行中则停止，否则启动。</summary>
+        private void OnToggleLive(object sender, EventArgs e)
+        {
+            if (_liveRunning) StopLive();
+            else StartLive();
+        }
+
+        /// <summary>
+        /// 启动连续实时预览：打开并绑定所选相机 → 订阅 FrameReceived → StartGrab。
+        /// 先订阅再 StartGrab，避免丢起始帧；StartGrab 失败则退订并明确告知（复用 C2 口径）。
+        /// 仅 UI 线程调用，<c>_liveRunning</c> 前置判断保证幂等。
+        /// </summary>
+        private void StartLive()
+        {
+            if (_liveRunning) return;   // 幂等：已在预览则不重复启动
+
+            CameraInfo info = SelectedCameraInfo;
+            if (info == null) { MessageBox.Show(this, "请先选择相机。"); return; }
+
+            var r = CameraManager.Instance.Open(info.Id);
+            if (!r.Success) { MessageBox.Show(this, r.Message); return; }
+
+            ICamera cam = r.Value;
+            cam.FrameReceived += OnLiveFrame;   // 先订阅，避免丢起始帧
+
+            var sr = cam.StartGrab();
+            if (!sr.Success)
+            {
+                cam.FrameReceived -= OnLiveFrame;
+                MessageBox.Show(this, "启动连续采集失败：" + sr.Message, "连续预览",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            _liveCamera = cam;
+            _pendingLiveFrame = null;
+            _pendingLivePosted = 0;
+            _liveViewerFitted = false;
+            _liveRunning = true;
+
+            // 主视图先清掉历史叠加图形，给一个干净的实时画面；标题预置为相机名
+            if (_views.Count > 0 && _views[0] != null) _views[0].ClearShapes();
+            if (_captions.Count > 0 && _captions[0] != null)
+                _captions[0].Text = "  " + (cam.Info != null ? cam.Info.Name : info.Name) + " · " + ActiveFlowName;
+
+            RefreshBindCombos();
+            UpdateLiveButton();
+            UpdateStatus();
+            Logger.Info("开始连续实时预览：" + cam.Info.Id);
+        }
+
+        /// <summary>
+        /// 停止连续实时预览：先退订 FrameReceived 再 StopGrab（与关窗 / 切相机同一收尾顺序），
+        /// 并丢弃可能残留的待显示帧。StopGrab 内部 Join 有 1s 上限，不会卡死 UI。
+        /// </summary>
+        private void StopLive()
+        {
+            ICamera cam = _liveCamera;
+            _liveCamera = null;
+            _liveRunning = false;
+
+            if (cam != null)
+            {
+                try { cam.FrameReceived -= OnLiveFrame; }
+                catch (Exception) { }
+                try { cam.StopGrab(); }
+                catch (Exception) { }
+            }
+
+            Bitmap pending = System.Threading.Interlocked.Exchange(ref _pendingLiveFrame, null);
+            if (pending != null) pending.Dispose();
+
+            UpdateLiveButton();
+            UpdateStatus();
+            Logger.Info("停止连续实时预览");
+        }
+
+        /// <summary>
+        /// 实时帧回调（镜像 <see cref="CameraForm.OnFrame"/>）：覆盖式合帧 + 单次 BeginInvoke 上
+        /// UI 线程，渲染进主视图 <see cref="_views"/>[0]；首个实时帧做一次 FitToWindow。
+        /// 每帧只保留最新一帧，绝不「来一帧投递一次 BeginInvoke」，避免渲染跟不上时消息队列积压。
+        /// </summary>
+        private void OnLiveFrame(object sender, Bitmap frame)
+        {
+            if (IsDisposed || !IsHandleCreated)
+            {
+                if (frame != null) frame.Dispose();
+                return;
+            }
+
+            // 只保留最新一帧：新帧替换旧帧，被替换掉的待显示帧立即释放
+            Bitmap old = System.Threading.Interlocked.Exchange(ref _pendingLiveFrame, frame);
+            if (old != null) old.Dispose();
+
+            // 队列里已有一帧待处理：丢弃本帧的投递（它已作为「最新帧」留在 _pendingLiveFrame）
+            if (System.Threading.Interlocked.Exchange(ref _pendingLivePosted, 1) == 1) return;
+
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    Bitmap bmp = System.Threading.Interlocked.Exchange(ref _pendingLiveFrame, null);
+                    System.Threading.Interlocked.Exchange(ref _pendingLivePosted, 0);
+
+                    if (bmp == null) return;
+                    if (IsDisposed || !IsHandleCreated) { bmp.Dispose(); return; }
+                    if (_views.Count == 0 || _views[0] == null) { bmp.Dispose(); return; }
+
+                    try
+                    {
+                        _views[0].SetImage(bmp, false);
+                        if (!_liveViewerFitted) { _views[0].FitToWindow(); _liveViewerFitted = true; }
+                    }
+                    catch (Exception ex)
+                    {
+                        bmp.Dispose();
+                        Logger.Warn("显示实时帧失败：" + ex.Message);
+                    }
+                });
+            }
+            catch (Exception)
+            {
+                // 窗口已销毁：清空投递状态并释放待显示帧
+                System.Threading.Interlocked.Exchange(ref _pendingLivePosted, 0);
+                Bitmap bmp = System.Threading.Interlocked.Exchange(ref _pendingLiveFrame, null);
+                if (bmp != null) bmp.Dispose();
+            }
+        }
+
+        /// <summary>同步连续预览开关按钮文字（运行中显示「停止预览」，否则「连续预览」）。</summary>
+        private void UpdateLiveButton()
+        {
+            if (tsBtnLive == null) return;
+            tsBtnLive.Text = _liveRunning ? "停止预览" : "连续预览";
+            tsBtnLive.Enabled = true;
+        }
+
+        #endregion
 
         private void OnSyncGrab(object sender, EventArgs e)
         {
@@ -800,6 +963,10 @@ namespace VisionPlatform.UI
         {
             if (!_running || _paused) return;
 
+            // 连续实时预览进行中：GrabLoop 已在持续喂帧，loopTimer 的按拍取帧属冗余，
+            // 直接跳过以免同一相机被双重取帧（与 CameraGrabGate 串行化口径一致，避免抢占原生句柄）。
+            if (_liveRunning) return;
+
             try
             {
                 string reason;
@@ -977,6 +1144,9 @@ namespace VisionPlatform.UI
             // 工具栏不再重复放「启动 / 暂停」（用户要求：运行控制只在右栏），
             // 这里只同步工具栏保留的「单帧采集」可用态。
             tsBtnGrabOnce.Enabled = stopped || paused;
+
+            // 连续预览开关：文字随运行态切换（连续预览 / 停止预览）
+            UpdateLiveButton();
         }
 
         /// <summary>
@@ -1352,6 +1522,8 @@ namespace VisionPlatform.UI
 
             _closing = true;
             loopTimer.Stop();
+            // 连续实时预览收尾：退订 FrameReceived + StopGrab，早于 CloseAll，避免关窗后残留处理器
+            StopLive();
             // 退出前确保视图绑定与布局被持久化
             SyncViewBindingsToConfig();
             ConfigStore.Save();

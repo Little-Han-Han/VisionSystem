@@ -30,6 +30,7 @@ namespace VisionPlatform.UI
             this.tsComboCameras = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnRefresh = new System.Windows.Forms.ToolStripButton();
             this.tsBtnGrabOnce = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnLive = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSyncGrab = new System.Windows.Forms.ToolStripButton();
             this.tsSep1 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelLayout = new System.Windows.Forms.ToolStripLabel();
@@ -114,6 +115,7 @@ namespace VisionPlatform.UI
                 this.tsComboCameras,
                 this.tsBtnRefresh,
                 this.tsBtnGrabOnce,
+                this.tsBtnLive,
                 this.tsBtnSyncGrab,
                 this.tsSep1,
                 this.tsLabelLayout,
@@ -151,6 +153,12 @@ namespace VisionPlatform.UI
             this.tsBtnGrabOnce.Text = "单帧采集";
             this.tsBtnGrabOnce.ToolTipText = "对当前相机采集一帧并检测";
             this.tsBtnGrabOnce.Click += new System.EventHandler(this.OnGrabOnce);
+
+            this.tsBtnLive.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnLive.Name = "tsBtnLive";
+            this.tsBtnLive.Text = "连续预览";
+            this.tsBtnLive.ToolTipText = "连续实时预览当前相机（再点一次停止）";
+            this.tsBtnLive.Click += new System.EventHandler(this.OnToggleLive);
 
             this.tsBtnSyncGrab.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnSyncGrab.Name = "tsBtnSyncGrab";
@@ -569,6 +577,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripComboBox tsComboCameras;
         private System.Windows.Forms.ToolStripButton tsBtnRefresh;
         private System.Windows.Forms.ToolStripButton tsBtnGrabOnce;
+        private System.Windows.Forms.ToolStripButton tsBtnLive;
         private System.Windows.Forms.ToolStripButton tsBtnSyncGrab;
         private System.Windows.Forms.ToolStripSeparator tsSep1;
         private System.Windows.Forms.ToolStripLabel tsLabelLayout;
