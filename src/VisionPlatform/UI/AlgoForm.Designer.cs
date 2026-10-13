@@ -22,53 +22,10 @@ namespace VisionPlatform.UI
             this.lblVerdict = new System.Windows.Forms.Label();
             this.gridResults = new System.Windows.Forms.DataGridView();
 
-            // ---------- 图像来源 ----------
-            this.btnOpenImage = new VisionPlatform.UI.UiButton();
-            this.btnGrab = new VisionPlatform.UI.UiButton();
-
-            // ---------- 模板区域 ----------
-            this.numTplX = MakeNum(0, 65535, 0, 0);
-            this.numTplY = MakeNum(0, 65535, 0, 0);
-            this.numTplW = MakeNum(0, 65535, 0, 0);
-            this.numTplH = MakeNum(0, 65535, 0, 0);
-            this.btnPickTemplate = new VisionPlatform.UI.UiButton();
-            this.btnTemplateFull = new VisionPlatform.UI.UiButton();
-
-            // ---------- 模型训练 ----------
-            this.numContrast = MakeNum(5, 200, 30, 0);
-            this.numMaxFeatures = MakeNum(50, 8000, 1500, 0);
-            this.numMinFeatureDist = MakeNum(1, 20, 2, 1);
-            this.btnTrain = new VisionPlatform.UI.UiButton();
-            this.lblModelInfo = new System.Windows.Forms.Label();
-            this.chkShowFeatures = new System.Windows.Forms.CheckBox();
-
-            // ---------- 搜索参数 ----------
-            this.numAngleStart = MakeNum(-360, 360, -10, 1);
-            this.numAngleEnd = MakeNum(-360, 360, 10, 1);
-            this.numAngleStep = MakeNum(0.1m, 45, 1, 1);
-            this.numScaleMin = MakeNum(0.1m, 10, 1, 2);
-            this.numScaleMax = MakeNum(0.1m, 10, 1, 2);
-            this.numScaleStep = MakeNum(0, 2, 0, 2);
-            this.numPyramid = MakeNum(1, 8, 4, 0);
-            this.numMinScore = MakeNum(0, 1, 0.7m, 2);
-            this.numMaxMatches = MakeNum(1, 100, 1, 0);
-            this.numOverlap = MakeNum(0, 2, 0.5m, 2);
-            this.numGreediness = MakeNum(0, 1, 0.9m, 2);
-            this.chkSubpixel = new System.Windows.Forms.CheckBox();
-            this.lblPoseHint = new System.Windows.Forms.Label();
-
-            // ---------- 搜索区域 ----------
-            this.numSrchX = MakeNum(0, 65535, 0, 0);
-            this.numSrchY = MakeNum(0, 65535, 0, 0);
-            this.numSrchW = MakeNum(0, 65535, 0, 0);
-            this.numSrchH = MakeNum(0, 65535, 0, 0);
-            this.btnPickSearch = new VisionPlatform.UI.UiButton();
-            this.btnSearchFull = new VisionPlatform.UI.UiButton();
-
-            // ---------- 执行 ----------
-            this.btnMatch = new VisionPlatform.UI.UiButton();
-            this.btnClearModel = new VisionPlatform.UI.UiButton();
-            this.btnFit = new VisionPlatform.UI.UiButton();
+            // 说明：以下参数控件（NumericUpDown / UiButton / Label / CheckBox）的创建、
+            // tableParams 行定义与按行填充、以及它们的事件接线，均含方法调用 / 循环 / 算术，
+            // VS WinForms 设计器无法解析，已全部移入 BuildParamTable()（由构造函数在
+            // InitializeComponent() 之后调用），以此保证本窗体能在设计器中正常打开。
 
             this.panelLeft.SuspendLayout();
             this.tableParams.SuspendLayout();
@@ -93,119 +50,11 @@ namespace VisionPlatform.UI
             this.tableParams.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableParams.Location = new System.Drawing.Point(8, 8);
             this.tableParams.Name = "tableParams";
-            this.tableParams.RowCount = kParamRows;
-            this.tableParams.Size = new System.Drawing.Size(324, kParamRows * kRowHeight);
             this.tableParams.TabIndex = 0;
+            // 说明：RowCount / RowStyles 及各参数控件的按行填充已移入 BuildParamTable()（构造函数调用）。
 
-            for (int i = 0; i < kParamRows; i++)
-                this.tableParams.RowStyles.Add(new System.Windows.Forms.RowStyle(
-                    System.Windows.Forms.SizeType.Absolute, (float)kRowHeight));
-
-            int r = 0;
-
-            // ---------- 图像来源 ----------
-            AddSection("图像来源", r++);
-            AddFull(this.btnOpenImage, r++);
-            AddFull(this.btnGrab, r++);
-
-            // ---------- 模板区域 ----------
-            AddSection("模板区域（训练用）", r++);
-            AddRow("X", this.numTplX, r++);
-            AddRow("Y", this.numTplY, r++);
-            AddRow("宽度", this.numTplW, r++);
-            AddRow("高度", this.numTplH, r++);
-            AddFull(this.btnPickTemplate, r++);
-            AddFull(this.btnTemplateFull, r++);
-
-            // ---------- 模型训练 ----------
-            AddSection("模型训练", r++);
-            AddRow("边缘对比度", this.numContrast, r++);
-            AddRow("最多特征点数", this.numMaxFeatures, r++);
-            AddRow("特征点最小间距", this.numMinFeatureDist, r++);
-            AddFull(this.btnTrain, r++);
-            AddFull(this.lblModelInfo, r++);
-            AddFull(this.chkShowFeatures, r++);
-
-            // ---------- 搜索参数 ----------
-            AddSection("搜索参数", r++);
-            AddRow("起始角度(°)", this.numAngleStart, r++);
-            AddRow("结束角度(°)", this.numAngleEnd, r++);
-            AddRow("角度步长(°)", this.numAngleStep, r++);
-            AddRow("最小缩放", this.numScaleMin, r++);
-            AddRow("最大缩放", this.numScaleMax, r++);
-            AddRow("缩放步长(0=不缩放)", this.numScaleStep, r++);
-            AddRow("金字塔层数", this.numPyramid, r++);
-            AddRow("最小得分", this.numMinScore, r++);
-            AddRow("最多目标数", this.numMaxMatches, r++);
-            AddRow("重叠抑制阈值", this.numOverlap, r++);
-            AddRow("贪婪系数(大=快)", this.numGreediness, r++);
-            AddFull(this.chkSubpixel, r++);
-            AddFull(this.lblPoseHint, r++);
-
-            // ---------- 搜索区域 ----------
-            AddSection("搜索区域（限制中心）", r++);
-            AddRow("X", this.numSrchX, r++);
-            AddRow("Y", this.numSrchY, r++);
-            AddRow("宽度(0=整图)", this.numSrchW, r++);
-            AddRow("高度(0=整图)", this.numSrchH, r++);
-            AddFull(this.btnPickSearch, r++);
-            AddFull(this.btnSearchFull, r++);
-
-            // ---------- 执行 ----------
-            AddSection("执行", r++);
-            AddFull(this.btnMatch, r++);
-            AddFull(this.btnClearModel, r++);
-            AddFull(this.btnFit, r++);
-
-            // ---------- 控件属性 ----------
-            this.btnOpenImage.Text = "打开本地图片";
-            this.btnOpenImage.Click += new System.EventHandler(this.OnOpenImage);
-
-            this.btnGrab.Text = "从相机取帧";
-            this.btnGrab.Click += new System.EventHandler(this.OnGrab);
-
-            this.btnPickTemplate.Text = "在图上框选模板";
-            this.btnPickTemplate.Click += new System.EventHandler(this.OnPickTemplate);
-
-            this.btnTemplateFull.Text = "使用整图作为模板";
-            this.btnTemplateFull.Click += new System.EventHandler(this.OnTemplateFull);
-
-            this.btnTrain.Text = "训练形状模型";
-            this.btnTrain.Click += new System.EventHandler(this.OnTrain);
-
-            this.lblModelInfo.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblModelInfo.ForeColor = System.Drawing.Color.Gold;
-            this.lblModelInfo.Text = "尚未训练模型";
-            this.lblModelInfo.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-
-            this.chkShowFeatures.Text = "显示模板特征点（橙色图层）";
-            this.chkShowFeatures.Checked = true;
-            this.chkShowFeatures.CheckedChanged += new System.EventHandler(this.OnToggleFeatures);
-
-            this.chkSubpixel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkSubpixel.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkSubpixel.Text = "亚像素精化（更慢更准）";
-            this.chkSubpixel.Checked = true;
-
-            this.lblPoseHint.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblPoseHint.ForeColor = System.Drawing.Color.Gray;
-            this.lblPoseHint.Text = "";
-            this.lblPoseHint.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-
-            this.btnPickSearch.Text = "在图上框选搜索区域";
-            this.btnPickSearch.Click += new System.EventHandler(this.OnPickSearch);
-
-            this.btnSearchFull.Text = "搜索整图";
-            this.btnSearchFull.Click += new System.EventHandler(this.OnSearchFull);
-
-            this.btnMatch.Text = "执行匹配";
-            this.btnMatch.Click += new System.EventHandler(this.OnMatch);
-
-            this.btnClearModel.Text = "清除模型";
-            this.btnClearModel.Click += new System.EventHandler(this.OnClearModel);
-
-            this.btnFit.Text = "适应窗口";
-            this.btnFit.Click += new System.EventHandler(this.OnFit);
+            // 说明：以下「按行填充参数表 + 动态控件属性 / 事件接线」已移入 BuildParamTable()
+            // （构造函数在 InitializeComponent() 之后调用）——含方法调用 / 循环 / 算术，设计器无法解析。
 
             // ---------- panelRight ----------
             this.panelRight.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);

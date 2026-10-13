@@ -75,38 +75,37 @@ namespace VisionPlatform.UI
             this.panelButtons.TabIndex = 1;
             this.panelButtons.WrapContents = false;
 
-            int w = 240;
             this.btnRefresh.Location = new System.Drawing.Point(3, 3);
             this.btnRefresh.Name = "btnRefresh";
-            this.btnRefresh.Size = new System.Drawing.Size(w, 30);
+            this.btnRefresh.Size = new System.Drawing.Size(240, 30);
             this.btnRefresh.TabIndex = 0;
             this.btnRefresh.Text = "刷新列表";
             this.btnRefresh.Click += new System.EventHandler(this.OnRefresh);
 
             this.btnNew.Location = new System.Drawing.Point(3, 39);
             this.btnNew.Name = "btnNew";
-            this.btnNew.Size = new System.Drawing.Size(w, 30);
+            this.btnNew.Size = new System.Drawing.Size(240, 30);
             this.btnNew.TabIndex = 1;
             this.btnNew.Text = "新建";
             this.btnNew.Click += new System.EventHandler(this.OnNew);
 
             this.btnLoad.Location = new System.Drawing.Point(3, 75);
             this.btnLoad.Name = "btnLoad";
-            this.btnLoad.Size = new System.Drawing.Size(w, 30);
+            this.btnLoad.Size = new System.Drawing.Size(240, 30);
             this.btnLoad.TabIndex = 2;
             this.btnLoad.Text = "加载选中";
             this.btnLoad.Click += new System.EventHandler(this.OnLoad);
 
             this.btnSave.Location = new System.Drawing.Point(3, 111);
             this.btnSave.Name = "btnSave";
-            this.btnSave.Size = new System.Drawing.Size(w, 30);
+            this.btnSave.Size = new System.Drawing.Size(240, 30);
             this.btnSave.TabIndex = 3;
             this.btnSave.Text = "保存";
             this.btnSave.Click += new System.EventHandler(this.OnSave);
 
             this.btnDelete.Location = new System.Drawing.Point(3, 147);
             this.btnDelete.Name = "btnDelete";
-            this.btnDelete.Size = new System.Drawing.Size(w, 30);
+            this.btnDelete.Size = new System.Drawing.Size(240, 30);
             this.btnDelete.TabIndex = 4;
             this.btnDelete.Text = "删除选中";
             this.btnDelete.Click += new System.EventHandler(this.OnDelete);
@@ -138,8 +137,10 @@ namespace VisionPlatform.UI
             this.tableEdit.RowCount = 4;
             this.tableEdit.Size = new System.Drawing.Size(662, 140);
             this.tableEdit.TabIndex = 0;
-            for (int i = 0; i < 4; i++)
-                this.tableEdit.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 34F));
+            this.tableEdit.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 34F));
+            this.tableEdit.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 34F));
+            this.tableEdit.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 34F));
+            this.tableEdit.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 34F));
 
             this.lblName.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblName.ForeColor = System.Drawing.Color.Silver;
