@@ -33,6 +33,12 @@ enum ProbeResult { ProbeOk = 0, ProbeOpenFailed = 1, ProbeNoFrame = 2 };
 // 避免把「刚上电、正在预热」或「瞬间被占用」的相机误判为不存在（RC2 假阴性）。
 static const int kProbeWarmupReads = 10;
 
+// 判为「可用后端」前需【连续】读到的帧数。有的后端（典型 MSMF）能打开、也能读一两帧，
+// 但随后 read 持续失败——只读一帧就判 OK 会让「自动」选到这个不稳后端，直到连续取帧才
+// 暴露 "read frame failed or timed out"。要求连续稳定读数，可在打开阶段就筛掉它，
+// 让自动模式回退到 DShow（RC：usb 相机连续取帧超时的根因）。
+static const int kProbeStableReads = 3;
+
 // 尝试用指定后端打开 index 并确认能读到一帧；按结果分类返回。
 // outW/outH 回填探测到的真实帧分辨率（比打开后查询属性更可靠）。
 static ProbeResult ProbeOpen(cv::VideoCapture& cap, int index, int backend,
@@ -43,11 +49,14 @@ static ProbeResult ProbeOpen(cv::VideoCapture& cap, int index, int backend,
         if (!cap.isOpened()) return ProbeOpenFailed;
 
         cv::Mat probe;
+        int streak = 0;   // 连续成功读数；中途一旦读失败即清零，避免不稳后端混过
         for (int i = 0; i < kProbeWarmupReads; ++i) {
             if (cap.read(probe) && !probe.empty()) {
                 if (outW) *outW = probe.cols;
                 if (outH) *outH = probe.rows;
-                return ProbeOk;
+                if (++streak >= kProbeStableReads) return ProbeOk;
+            } else {
+                streak = 0;
             }
         }
         cap.release();
