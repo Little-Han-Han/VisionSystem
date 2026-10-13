@@ -9,18 +9,8 @@ using VisionSystem.Controls.Geometry;
 
 namespace VisionPlatform.UI
 {
-    /// <summary>预览显示模式（FR-ALG-24）。</summary>
-    public enum FlowPreviewMode
-    {
-        /// <summary>只显示当前选中节点的输出（默认）。</summary>
-        SelectedNode,
-
-        /// <summary>显示链尾（整链）结果。</summary>
-        ChainEnd,
-
-        /// <summary>显示未经任何处理的相机原图。</summary>
-        Original
-    }
+    // FlowPreviewMode 枚举已移到本文件末尾——VS 要求「可设计类必须是文件中的第一个类型」，
+    // 它原先排在 FlowPreviewPanel 之前会导致设计器无法打开本控件。
 
     /// <summary>
     /// 流程预览区：顶条（显示模式下拉 / 载入图片 / 节点名 / 第 n/m / 耗时 / 暂停自动刷新）+
@@ -36,6 +26,7 @@ namespace VisionPlatform.UI
     public sealed partial class FlowPreviewPanel : UserControl
     {
         /// <summary>拉取周期（ms）：预览由定时器拉取，绝不用 BeginInvoke 逐帧推送。</summary>
+        /// <remarks>InitializeComponent 中 pullTimer.Interval 用字面量 33（设计器不解析 const 标识符），改此值需同步。</remarks>
         private const int PullIntervalMs = 33;
 
         /// <summary>ROI 最小边长（图像像素）：小于此值视为误操作。</summary>
@@ -187,7 +178,7 @@ namespace VisionPlatform.UI
             lblSummary.BringToFront();
 
             // ---------- 拉取定时器 ----------
-            pullTimer.Interval = PullIntervalMs;
+            pullTimer.Interval = 33;   // 与 private const PullIntervalMs 同值；设计器只解析字面量，故此处写 33
             pullTimer.Tick += OnPullTick;
             pullTimer.Start();
 
@@ -840,5 +831,18 @@ namespace VisionPlatform.UI
             try { pullTimer.Stop(); }
             catch (Exception) { }
         }
+    }
+
+    /// <summary>预览显示模式（FR-ALG-24）。</summary>
+    public enum FlowPreviewMode
+    {
+        /// <summary>只显示当前选中节点的输出（默认）。</summary>
+        SelectedNode,
+
+        /// <summary>显示链尾（整链）结果。</summary>
+        ChainEnd,
+
+        /// <summary>显示未经任何处理的相机原图。</summary>
+        Original
     }
 }

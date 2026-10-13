@@ -113,6 +113,8 @@
     <Compile Include="UI\FlowForm.Designer.cs">
       <DependentUpon>FlowForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\FlowDrawSpec.cs" />
+    <Compile Include="UI\FlowCanvasTypes.cs" />
     <Compile Include="UI\UiButton.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -169,6 +171,11 @@
       <Project>{3F2A1B4C-1001-4A7E-9D21-6E8B5C4A2001}</Project>
       <Name>VisionSystem.Controls</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="UI\RecipeForm.resx">
+      <DependentUpon>RecipeForm.cs</DependentUpon>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
