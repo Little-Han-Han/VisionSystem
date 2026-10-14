@@ -4,7 +4,9 @@
 #include "va_internal.h"
 #include "va_error.h"
 
+#include <chrono>
 #include <new>
+#include <thread>
 
 namespace va {
 
@@ -186,7 +188,16 @@ int CameraGrab(CameraSource* cam, VA_Image* dst, int timeoutMs)
 
     try {
         cv::Mat frame;
-        if (!cam->cap.read(frame) || frame.empty()) {
+        // 慢热 / 偶发掉帧的相机单次 read 可能失败：重试至多 3 次总尝试，每次间隔 ~30ms，
+        // 给取像留出宽限（成功即返回，重试开销只落在失败路径上）。仍失败才判超时。
+        bool got = false;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (attempt > 0) {
+                try { std::this_thread::sleep_for(std::chrono::milliseconds(30)); } catch (...) {}
+            }
+            if (cam->cap.read(frame) && !frame.empty()) { got = true; break; }
+        }
+        if (!got) {
             cam->lastError = "read frame failed or timed out";
             return VA_ERR_TIMEOUT;
         }

@@ -347,7 +347,9 @@ namespace VisionPlatform.Camera
                         frame = null;
                         failStreak++;
 
-                        fatal = (rc == VaResult.ErrCamera) || (failStreak >= 5);
+                        // 断路阈值 5 → 15（用户要求「延长取像时间」）：给慢热 / 偶发掉帧的相机留出
+                        // 更长宽限；ErrCamera（设备级错误）仍立即停，不让真故障拖着跑。
+                        fatal = (rc == VaResult.ErrCamera) || (failStreak >= 15);
                         if (fatal)
                         {
                             string detail = CameraNative.LastError(h);
@@ -355,6 +357,12 @@ namespace VisionPlatform.Camera
                                         : ("取帧失败：" + VaResult.ToString(rc))) +
                                        (string.IsNullOrEmpty(detail) ? "" : " (" + detail + ")"));
                             Logger.Error("本机摄像头采集停止：" + Info.Id + " " + detail);
+                        }
+                        else
+                        {
+                            // 失败退避 ~100ms 再重试：原先失败后立即重试，瞬时连败几乎必然触发断路。
+                            try { Thread.Sleep(100); }
+                            catch (Exception) { }
                         }
                     }
                     else
