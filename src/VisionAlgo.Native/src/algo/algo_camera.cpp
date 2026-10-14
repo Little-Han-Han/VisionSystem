@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <new>
+#include <set>
 #include <thread>
 
 namespace va {
@@ -26,6 +27,32 @@ std::string CameraReason()
 {
     std::lock_guard<std::mutex> lk(g_reasonMtx);
     return g_reason;
+}
+
+// ------------------ 本进程已打开相机序号注册表 --------------------
+// 枚举是探测式的（对每个序号重新 open + read）。若某序号已被本进程打开，再探测就等于
+// 用第二个采集客户端去抢同一台相机——实测会把已打开句柄的视频流抢断，导致其 read 从此
+// 全部失败（真实故障：相机打开成功后，主界面刷新相机列表触发枚举 → 原句柄「连续取帧超时」）。
+// 因此：枚举遇到已打开序号直接计为存在、绝不再探测；同序号也不允许重复打开。
+static std::mutex  g_openMtx;
+static std::set<int> g_openIndices;
+
+static bool IsIndexOpenByUs(int index)
+{
+    std::lock_guard<std::mutex> lk(g_openMtx);
+    return g_openIndices.count(index) != 0;
+}
+
+static void RegisterOpenIndex(int index)
+{
+    std::lock_guard<std::mutex> lk(g_openMtx);
+    g_openIndices.insert(index);
+}
+
+static void UnregisterOpenIndex(int index)
+{
+    std::lock_guard<std::mutex> lk(g_openMtx);
+    g_openIndices.erase(index);
 }
 
 // 探测打开结果分类：用于枚举阶段区分「打不开」与「打开了但读不到帧（被占用特征）」。
@@ -118,6 +145,10 @@ int CameraEnum(int* outCount)
         for (int i = 0; i < kMaxProbe; ++i) {
             cv::VideoCapture cap;
 
+            // 已被本进程打开的序号：设备必然存在，直接计为可用、绝不再探测
+            //（探测 = 第二个采集客户端，会抢断已打开句柄的视频流，见上方注册表注释）。
+            if (IsIndexOpenByUs(i)) { ++count; continue; }
+
             // 与 CameraOpen 的「自动」顺序一致：MSMF 优先，失败回退 DShow。
             // 仅用 DShow 探测会漏掉 MSMF-only 的现代 UVC/USB 摄像头（Win10/11 常见）。
             ProbeResult r = ProbeOpen(cap, i, cv::CAP_MSMF);
@@ -159,6 +190,14 @@ void* CameraOpen(int index, const VA_CameraOption* opt)
     int fps     = opt ? opt->fps     : 0;
     int backend = opt ? opt->backend : 0;
 
+    // 同序号重复打开 = 第二个采集客户端，会抢断第一个句柄的视频流，直接拒绝并说明原因。
+    if (IsIndexOpenByUs(index)) {
+        cam->lastError = "camera index already opened by this application";
+        SetCameraReason(cam->lastError);
+        delete cam;
+        return 0;
+    }
+
     try {
         ProbeResult pr = ProbeOpenFailed;
         int pw = 0, ph = 0;   // 探测帧真实分辨率（比属性查询更可靠）
@@ -199,6 +238,8 @@ void* CameraOpen(int index, const VA_CameraOption* opt)
 
         cam->opened = true;
         cam->lastError.clear();
+        cam->index = index;
+        RegisterOpenIndex(index);   // 关闭时注销；期间枚举将跳过本序号、同序号重复打开被拒绝
         return cam;
     } catch (const std::exception& e) {
         cam->lastError = e.what();
@@ -304,6 +345,7 @@ int CameraClose(CameraSource* cam)
     } catch (...) {
     }
 
+    UnregisterOpenIndex(cam->index);   // 期间枚举不再跳过本序号，同序号可重新打开
     delete cam;
     return VA_OK;
 }

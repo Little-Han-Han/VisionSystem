@@ -46,11 +46,12 @@ struct CameraSource {
     cv::VideoCapture cap;
     std::mutex       mtx;         // 保护 cap，串行化 grab / close
     std::string      lastError;
+    int              index;       // 本句柄对应的设备序号（关闭时用于注销「已打开注册表」）
     int              width;       // 打开后协商到的分辨率
     int              height;
     bool             opened;
 
-    CameraSource() : width(0), height(0), opened(false) {}
+    CameraSource() : index(-1), width(0), height(0), opened(false) {}
 };
 
 // ---------------------- 相机 ----------------------
