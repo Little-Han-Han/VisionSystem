@@ -121,7 +121,7 @@ namespace VisionPlatform.UI
         {
             treeModules.BeginUpdate();
             treeModules.Nodes.Clear();
-
+            Font font = new Font(treeModules.Font, FontStyle.Bold);
             foreach (FlowModuleCategory cat in FlowModule.GroupByCategory())
             {
                 var root = new TreeNode(cat.DisplayName);
@@ -135,8 +135,9 @@ namespace VisionPlatform.UI
                     leaf.ForeColor = UiTheme.ColorTextPrimary;
                     root.Nodes.Add(leaf);
                 }
-
+                root.NodeFont = font;
                 treeModules.Nodes.Add(root);
+                
                 root.Expand();                         // 12 项不多，默认全展开
             }
 

@@ -41,7 +41,9 @@ namespace VisionPlatform.UI
             tree.ForeColor = UiTheme.ColorTextPrimary;   // #DCE0E8
             tree.LineColor = UiTheme.ColorDivider;       // #46464E，层级连线
             tree.BorderStyle = BorderStyle.None;         // 边框交给外层容器，避免双线
-            tree.Font = UiTheme.FontBody;
+            // 字体比正文大一号（10pt，正文 FontBody 为 9pt）：解决树节点文字偏小、显得拥挤的问题。
+            // 显式写死字体名 + 字号，保证工具箱 / 端子两棵树观感一致。
+            tree.Font = new Font("Microsoft YaHei UI", 10F);
 
             // 交互：整行选中（点空白处也能选中）、失焦后仍保持高亮
             tree.FullRowSelect = true;
@@ -56,8 +58,9 @@ namespace VisionPlatform.UI
 
             // ★ OwnerDrawText：只接管文本与背景，+/- 与连线仍由系统画
             tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
-            // ★ ItemHeight 只在 owner-draw 模式下生效，必须与 DrawMode 同时设置
-            tree.ItemHeight = 20;
+            // ★ ItemHeight 只在 owner-draw 模式下生效，必须与 DrawMode 同时设置；
+            //   20 → 24：行高随 10pt 字体同步加高，避免加高后的文字在行内被垂直裁掉。
+            tree.ItemHeight = 24;
 
             // 幂等：先减后加，重复 Apply 不会叠加事件处理器
             tree.DrawNode -= OnDrawNode;
