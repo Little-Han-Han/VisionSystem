@@ -41,25 +41,61 @@ static const int kProbeWarmupReads = 10;
 // 让自动模式回退到 DShow（RC：usb 相机连续取帧超时的根因）。
 static const int kProbeStableReads = 3;
 
-// 尝试用指定后端打开 index 并确认能读到一帧；按结果分类返回。
+// 【格式/分辨率回退梯】1080p USB 相机最典型的故障模式：打开成功、cap.read() 却永远失败——
+// 默认协商的 YUY2 原始格式在 1920×1080 下带宽超出 USB2 上限，视频流根本起不来；
+// MSMF 与 DShow 都会这样（与后端无关），换库也绕不开。标准解法是强制 MJPG 压缩格式或降分辨率。
+struct ProbeAttempt {
+    bool fourccMjpg;   // 是否强制 MJPG 压缩
+    int  width;        // 期望宽；0 = 不设
+    int  height;       // 期望高；0 = 不设
+};
+static const int kProbeAttemptCount = 4;
+
+// 每档重开一次采集再应用设置：保证 FOURCC / 分辨率在首帧读之前生效
+//（对已经开始读的流 set 这些属性，行为因后端而异，不可靠）。
+static bool ApplyProbeAttempt(cv::VideoCapture& cap, int index, int backend,
+                              const ProbeAttempt& a)
+{
+    cap.release();
+    if (!cap.open(index, backend)) return false;
+    if (!cap.isOpened()) return false;
+
+    if (a.fourccMjpg)
+        cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+    if (a.width  > 0) cap.set(cv::CAP_PROP_FRAME_WIDTH,  (double)a.width);
+    if (a.height > 0) cap.set(cv::CAP_PROP_FRAME_HEIGHT, (double)a.height);
+    return true;
+}
+
+// 尝试用指定后端打开 index 并确认能【连续】读到帧；按结果分类返回。
 // outW/outH 回填探测到的真实帧分辨率（比打开后查询属性更可靠）。
+// 成功时采集保持打开、格式保持生效（调用方直接继续用，不再改动）。
 static ProbeResult ProbeOpen(cv::VideoCapture& cap, int index, int backend,
                              int* outW = 0, int* outH = 0)
 {
-    try {
-        if (!cap.open(index, backend)) return ProbeOpenFailed;
-        if (!cap.isOpened()) return ProbeOpenFailed;
+    const ProbeAttempt attempts[kProbeAttemptCount] = {
+        { false,    0,    0 },   // 1) 设备默认格式/分辨率
+        { true,     0,    0 },   // 2) 强制 MJPG（解决 YUY2@高分辨率超 USB2 带宽）
+        { true,  1280,  720 },   // 3) MJPG + 720p
+        { true,   640,  480 },   // 4) MJPG + 480p
+    };
 
-        cv::Mat probe;
-        int streak = 0;   // 连续成功读数；中途一旦读失败即清零，避免不稳后端混过
-        for (int i = 0; i < kProbeWarmupReads; ++i) {
-            if (cap.read(probe) && !probe.empty()) {
-                if (outW) *outW = probe.cols;
-                if (outH) *outH = probe.rows;
-                if (++streak >= kProbeStableReads) return ProbeOk;
-            } else {
-                streak = 0;
+    try {
+        for (int a = 0; a < kProbeAttemptCount; ++a) {
+            if (!ApplyProbeAttempt(cap, index, backend, attempts[a])) continue;
+
+            cv::Mat probe;
+            int streak = 0;   // 连续成功读数；中途一旦读失败即清零，避免不稳后端混过
+            for (int i = 0; i < kProbeWarmupReads; ++i) {
+                if (cap.read(probe) && !probe.empty()) {
+                    if (outW) *outW = probe.cols;
+                    if (outH) *outH = probe.rows;
+                    if (++streak >= kProbeStableReads) return ProbeOk;
+                } else {
+                    streak = 0;
+                }
             }
+            // 本档读不稳 → 换下一档（重开时 release 在 ApplyProbeAttempt 内完成）
         }
         cap.release();
         return ProbeNoFrame;
@@ -101,11 +137,11 @@ int CameraEnum(int* outCount)
 
     // 记录可读原因：一台都没枚举到时，区分「被占用（能打开却读不到帧）」与「无设备 / 驱动」，
     // 供上层在无句柄时经 va_camera_get_last_error(NULL, ...) 取用（C2）。
-    if (count == 0) {
-        SetCameraReason(anyOpenedNoFrame
-            ? "some devices opened but returned no frame (possibly occupied by another app)"
-            : "no device could be opened (USB camera not connected or driver unavailable)");
-    } else {
+        if (count == 0) {
+            SetCameraReason(anyOpenedNoFrame
+                ? "some devices opened but no stable frame even after MJPG/resolution fallbacks (possibly occupied by another app, or USB bandwidth/format limit)"
+                : "no device could be opened (USB camera not connected or driver unavailable)");
+        } else {
         SetCameraReason("");   // 有设备：清空旧原因，避免残留干扰
     }
 
@@ -141,13 +177,16 @@ void* CameraOpen(int index, const VA_CameraOption* opt)
 
         if (pr != ProbeOk || !cam->cap.isOpened()) {
             cam->lastError = (pr == ProbeNoFrame)
-                ? "camera opened but no frame within warmup reads (possibly occupied by another app)"
+                ? "camera opened but no stable frame even after MJPG/resolution fallbacks (possibly occupied by another app, or USB bandwidth/format limit)"
                 : "cannot open camera device (index may not exist, driver unavailable, or occupied)";
             SetCameraReason(cam->lastError);   // Open 失败时无句柄，供上层取原因
             delete cam;
             return 0;
         }
 
+        // 注意：探测（ProbeOpen）已协商出「能连续出帧」的格式/分辨率（可能经过了 MJPG/降分辨率
+        // 回退档），此处若再改宽高可能破坏已协商好的流。当前托管层不传分辨率（全 0 跳过）；
+        // 将来若要支持指定分辨率，应往 ProbeOpen 的回退梯里加档，而不是在这里事后 set。
         if (width  > 0) cam->cap.set(cv::CAP_PROP_FRAME_WIDTH,  (double)width);
         if (height > 0) cam->cap.set(cv::CAP_PROP_FRAME_HEIGHT, (double)height);
         if (fps    > 0) cam->cap.set(cv::CAP_PROP_FPS,          (double)fps);
