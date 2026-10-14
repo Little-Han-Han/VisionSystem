@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Communication;
@@ -97,6 +98,13 @@ namespace VisionPlatform.UI
         private int _pendingLivePosted;          // 0=无待显示帧；1=已投递一帧待处理
         private bool _liveViewerFitted;          // 首个实时帧做一次 FitToWindow
 
+        // ---- 主界面流程下拉运行（选流程 → 选本地图片 → 运行，结果经既有通道显示到主视图）----
+        // 与流程编排页(FlowForm) / 并行槽(FlowRunManager) 各自持有独立的 FlowRunner，互不干扰。
+        private FlowRunner _flowRunner;          // 流程执行器；算法库不可用时为 null（下拉框降级禁用）
+        private FlowRunController _flowCtrl;     // 本窗体自有的运行编排器
+        private bool _loadingFlowCombo;          // 回填下拉框期间抑制 SelectedIndexChanged 触发运行
+        private string _lastImageDir;            // 上次选图的目录（FileDialog InitialDirectory 记忆）
+
         /// <summary>当前布局的视图总数（供流程编排页在运行前校验视图绑定是否越界）。</summary>
         public static int ActiveViewCount { get; private set; }
 
@@ -126,6 +134,10 @@ namespace VisionPlatform.UI
             CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
             ConfigStore.Changed += OnConfigChanged;
             FlowOutputChannel.OutputReady += OnFlowOutput;
+
+            // 主界面流程下拉：初始化自有执行器/控制器并回填流程列表（算法库不可用时降级禁用）
+            InitFlowRunner();
+            RefreshFlowCombo();
 
             _initializing = false;
 
@@ -479,6 +491,9 @@ namespace VisionPlatform.UI
         {
             if (_closing) return;
             UpdateStatus();
+            // 流程编排页是无模态窗体：它增删/保存流程后经 ConfigStore.Changed 到这里，
+            // 主界面流程下拉框同步刷新（按 Id 保留原选中项，_loadingFlowCombo 抑制误触发运行）。
+            RefreshFlowCombo();
         }
 
         private CameraInfo SelectedCameraInfo
@@ -1008,7 +1023,11 @@ namespace VisionPlatform.UI
 
         private void OnOpenCameraForm(object sender, EventArgs e) { ShowChild(ref _cameraForm); }
         private void OnOpenAlgoForm(object sender, EventArgs e) { ShowChild(ref _algoForm); }
-        private void OnOpenFlowForm(object sender, EventArgs e) { ShowChild(ref _flowForm); }
+        private void OnOpenFlowForm(object sender, EventArgs e)
+        {
+            ShowChild(ref _flowForm);
+            RefreshFlowCombo();   // 流程编排页可能新建/删除了流程，回来即刷新（无模态，双保险）
+        }
         private void OnOpenCommForm(object sender, EventArgs e) { ShowChild(ref _commForm); }
         private void OnOpenRecipeForm(object sender, EventArgs e) { ShowChild(ref _recipeForm); }
 
@@ -1490,6 +1509,201 @@ namespace VisionPlatform.UI
 
         #endregion
 
+        #region 流程下拉运行（选流程 → 选本地图片 → 运行，结果显示在主视图）
+
+        /// <summary>
+        /// 初始化本窗体自有的流程执行器与运行控制器（镜像 FlowForm 构造函数的降级策略）：
+        /// 算法库不可用时置 null，流程下拉框禁用并提示，不影响其它功能。
+        /// </summary>
+        private void InitFlowRunner()
+        {
+            try
+            {
+                _flowRunner = new FlowRunner();
+                _flowCtrl = new FlowRunController(_flowRunner);
+                _flowCtrl.OutputReady += OnFlowRunnerOutput;
+                _flowCtrl.Completed += OnFlowRunCompleted;
+            }
+            catch (Exception ex)
+            {
+                _flowRunner = null;
+                _flowCtrl = null;
+                Logger.Error("流程执行器初始化失败（算法库不可用？）：" + ex.Message);
+            }
+
+            if (_flowCtrl == null && tsComboFlow != null)
+            {
+                tsComboFlow.Enabled = false;
+                tsComboFlow.ToolTipText = "算法库不可用";
+            }
+        }
+
+        /// <summary>
+        /// 回填流程下拉框（<see cref="ConfigStore"/>.Current.Flows）：保留原选中项（按 Id）。
+        /// <see cref="_loadingFlowCombo"/> 期间抑制 SelectedIndexChanged 触发运行。
+        /// </summary>
+        private void RefreshFlowCombo()
+        {
+            if (tsComboFlow == null) return;
+
+            _loadingFlowCombo = true;
+            try
+            {
+                FlowDefinition previous = tsComboFlow.SelectedItem as FlowDefinition;
+                string previousId = (previous != null) ? previous.Id : null;
+
+                tsComboFlow.Items.Clear();
+
+                FlowSettings fs = ConfigStore.Current.Flows;
+                if (fs != null && fs.Flows != null)
+                {
+                    foreach (FlowDefinition f in fs.Flows)
+                        if (f != null) tsComboFlow.Items.Add(f);
+                }
+
+                if (!string.IsNullOrEmpty(previousId))
+                {
+                    for (int i = 0; i < tsComboFlow.Items.Count; i++)
+                    {
+                        FlowDefinition f = tsComboFlow.Items[i] as FlowDefinition;
+                        if (f != null && string.Equals(f.Id, previousId, StringComparison.Ordinal))
+                        {
+                            tsComboFlow.SelectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                _loadingFlowCombo = false;
+            }
+        }
+
+        /// <summary>下拉框选中流程即触发：选一张本地图片并运行该流程（回填期间抑制）。</summary>
+        private void OnFlowComboSelected(object sender, EventArgs e)
+        {
+            if (_loadingFlowCombo) return;
+            RunSelectedFlow();
+        }
+
+        /// <summary>
+        /// 运行下拉框当前选中的流程：选一张本地图片 → 把克隆里<strong>所有</strong>图像源节点
+        /// 改为该图片（保证无需相机）→ 校验 → 经本窗体自有的 FlowRunController 以 camera=null 运行；
+        /// 结果经 FlowOutputChannel 既有链路显示到主视图并驱动 OK/NG 徽标。
+        /// </summary>
+        private void RunSelectedFlow()
+        {
+            if (_flowRunner == null) { MessageBox.Show(this, "算法库不可用，无法运行流程。"); return; }
+            if (_flowCtrl == null || _flowCtrl.IsBusy) return;
+
+            FlowDefinition selected = tsComboFlow.SelectedItem as FlowDefinition;
+            if (selected == null) return;
+
+            // 坑④：绝不改 ConfigStore 里的原定义——直接改会把 FlowForm 里配置的图片路径持久化覆盖，
+            // 且可能与并行运行的流程并发改参数。统一跑克隆。
+            FlowDefinition clone = selected.Clone();
+
+            string imagePath;
+            using (OpenFileDialog dlg = new OpenFileDialog())
+            {
+                dlg.Title = "选择要检测的本地图片";
+                dlg.Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp|所有文件|*.*";
+                dlg.CheckFileExists = true;
+                if (!string.IsNullOrEmpty(_lastImageDir) && Directory.Exists(_lastImageDir))
+                    dlg.InitialDirectory = _lastImageDir;
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                imagePath = dlg.FileName;
+                _lastImageDir = Path.GetDirectoryName(imagePath);
+            }
+
+            // 把克隆里所有图像源节点都指到这张图（写回键与 FlowForm.OnPreviewImageLoaded 一致）
+            int imageSources = 0;
+            if (clone.Nodes != null)
+            {
+                foreach (FlowNode node in clone.Nodes)
+                {
+                    if (!IsImageSourceNode(node)) continue;
+                    node.Set("Source", "File");
+                    node.Set("FilePath", imagePath);
+                    imageSources++;
+                }
+            }
+
+            if (imageSources == 0)
+            {
+                MessageBox.Show(this, "该流程没有图像源节点，无法用本地图片运行。", "无法运行",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 双保险：所有图像源已是 File 时 NeedsCamera 必为 false；仍为 true 说明存在别的取图路径
+            if (FlowRunner.NeedsCamera(clone))
+            {
+                MessageBox.Show(this, "该流程仍需相机（存在未改为本地图片的图像源）。", "无法运行",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string err;
+            if (!FlowRunner.Validate(clone, out err))
+            {
+                MessageBox.Show(this, "无法运行：" + err, "流程校验", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 坑⑦：OnFlowOutput 只显示 ViewIndex∈[1, 视图数] 的结果，越界直接跳过（帧被丢弃）。
+            // 流程自身绑定在范围内则尊重，越界回落到第一个视图。
+            if (clone.ViewIndex < 1 || clone.ViewIndex > _views.Count) clone.ViewIndex = 1;
+
+            tsComboFlow.Enabled = false;   // 运行期间禁选，OnFlowRunCompleted 里恢复
+            Logger.Info("主界面下拉运行流程：" + selected.Name + "（本地图片 " + Path.GetFileName(imagePath) + "）");
+            _flowCtrl.RunOnce(clone, null);   // 图像源全部为 File → NeedsCamera=false，camera=null 合法
+        }
+
+        /// <summary>节点是「图像源」时返回 true（与 FlowForm.IsImageSource 同一口径）。</summary>
+        private static bool IsImageSourceNode(FlowNode node)
+        {
+            if (node == null) return false;
+
+            FlowNodeType type;
+            return node.TryGetType(out type) && type == FlowNodeType.ImageSource;
+        }
+
+        /// <summary>
+        /// 本窗体流程控制器的结果回传：与 FlowForm.OnRunnerOutput 同款桥接——
+        /// 转发给 FlowOutputChannel（MainForm.OnFlowOutput 消费帧并显示）；
+        /// 无订阅者时由发布方自行释放，避免帧泄漏。
+        /// </summary>
+        private void OnFlowRunnerOutput(object sender, FlowOutputEventArgs e)
+        {
+            if (e == null) return;
+
+            if (!FlowOutputChannel.Publish(e) && e.Frame != null)
+                e.Frame.Dispose();
+        }
+
+        /// <summary>
+        /// 流程运行彻底结束（含单帧 RunOnce——控制器在工作线程 finally 里统一触发）：
+        /// 切回 UI 线程恢复流程下拉框可选。
+        /// </summary>
+        private void OnFlowRunCompleted(object sender, EventArgs e)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (!IsDisposed && tsComboFlow != null) tsComboFlow.Enabled = true;
+                });
+            }
+            catch (Exception) { }
+        }
+
+        #endregion
+
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             // 【关窗铁律】StopAll → JoinAll → Dispose 各槽 Runner → CameraManager.CloseAll()（共享知识 30）。
@@ -1524,6 +1738,22 @@ namespace VisionPlatform.UI
             loopTimer.Stop();
             // 连续实时预览收尾：退订 FrameReceived + StopGrab，早于 CloseAll，避免关窗后残留处理器
             StopLive();
+
+            // 本窗体自有的流程控制器收尾：先停 → Join → Dispose，再释放算法上下文；
+            // 必须早于 CameraManager.CloseAll()（关窗铁律：先停流程线程，再关相机）。
+            if (_flowCtrl != null)
+            {
+                try { _flowCtrl.StopLoop(); } catch (Exception) { }
+                try { _flowCtrl.Join(2000); } catch (Exception) { }
+                try { _flowCtrl.Dispose(); } catch (Exception) { }
+                _flowCtrl = null;
+            }
+            if (_flowRunner != null)
+            {
+                try { _flowRunner.Dispose(); } catch (Exception) { }
+                _flowRunner = null;
+            }
+
             // 退出前确保视图绑定与布局被持久化
             SyncViewBindingsToConfig();
             ConfigStore.Save();

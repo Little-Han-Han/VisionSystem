@@ -37,6 +37,8 @@ namespace VisionPlatform.UI
             this.tsComboLayout = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnRightPanel = new System.Windows.Forms.ToolStripButton();
             this.tsSep2 = new System.Windows.Forms.ToolStripSeparator();
+            this.tsLabelFlow = new System.Windows.Forms.ToolStripLabel();
+            this.tsComboFlow = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnCameraMgr = new System.Windows.Forms.ToolStripButton();
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
             this.tsBtnFlow = new System.Windows.Forms.ToolStripButton();
@@ -122,6 +124,8 @@ namespace VisionPlatform.UI
                 this.tsComboLayout,
                 this.tsBtnRightPanel,
                 this.tsSep2,
+                this.tsLabelFlow,
+                this.tsComboFlow,
                 this.tsBtnCameraMgr,
                 this.tsBtnAlgo,
                 this.tsBtnFlow,
@@ -184,6 +188,15 @@ namespace VisionPlatform.UI
             this.tsBtnRightPanel.Click += new System.EventHandler(this.OnToggleRightPanel);
 
             this.tsSep2.Name = "tsSep2";
+
+            this.tsLabelFlow.Name = "tsLabelFlow";
+            this.tsLabelFlow.Text = "流程:";
+
+            this.tsComboFlow.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.tsComboFlow.Name = "tsComboFlow";
+            this.tsComboFlow.Size = new System.Drawing.Size(160, 32);
+            this.tsComboFlow.ToolTipText = "选择流程后：选一张本地图片运行该流程，结果显示在主视图";
+            this.tsComboFlow.SelectedIndexChanged += new System.EventHandler(this.OnFlowComboSelected);
 
             this.tsBtnCameraMgr.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnCameraMgr.Name = "tsBtnCameraMgr";
@@ -582,6 +595,8 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripSeparator tsSep1;
         private System.Windows.Forms.ToolStripLabel tsLabelLayout;
         private System.Windows.Forms.ToolStripComboBox tsComboLayout;
+        private System.Windows.Forms.ToolStripLabel tsLabelFlow;
+        private System.Windows.Forms.ToolStripComboBox tsComboFlow;
         private System.Windows.Forms.ToolStripButton tsBtnRightPanel;
         private System.Windows.Forms.ToolStripSeparator tsSep2;
         private System.Windows.Forms.ToolStripButton tsBtnCameraMgr;
