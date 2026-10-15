@@ -103,7 +103,9 @@
     <Compile Include="UI\CameraForm.Designer.cs">
       <DependentUpon>CameraForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="UI\FlowCanvasControl.cs" />
+    <Compile Include="UI\FlowCanvasControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="UI\FlowPreviewPanel.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -173,6 +175,12 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="UI\FlowForm.resx">
+      <DependentUpon>FlowForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UI\FlowPreviewPanel.resx">
+      <DependentUpon>FlowPreviewPanel.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="UI\RecipeForm.resx">
       <DependentUpon>RecipeForm.cs</DependentUpon>
     </EmbeddedResource>

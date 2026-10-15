@@ -54,6 +54,7 @@ namespace VisionPlatform.UI
         private Label lblEmpty;
         private Label lblVerdict;
         private Label lblSummary;
+        private System.ComponentModel.IContainer components;
         private Timer pullTimer;
 
         public FlowPreviewPanel()
@@ -67,126 +68,167 @@ namespace VisionPlatform.UI
         /// <summary>构建控件树（纯代码，不使用设计器序列化）。</summary>
         private void InitializeComponent()
         {
-            panelTop = new Panel();
-            cmbMode = new ComboBox();
-            lblInfo = new Label();
-            chkPauseAuto = new CheckBox();
-            btnDrawRoi = new UiButton();
-            btnLoadImage = new UiButton();
-            panelView = new Panel();
-            viewer = new ImageViewer();
-            lblEmpty = new Label();
-            lblVerdict = new Label();
-            lblSummary = new Label();
-            pullTimer = new Timer();
+            this.components = new System.ComponentModel.Container();
+            this.panelTop = new System.Windows.Forms.Panel();
+            this.lblInfo = new System.Windows.Forms.Label();
+            this.chkPauseAuto = new System.Windows.Forms.CheckBox();
+            this.btnDrawRoi = new VisionPlatform.UI.UiButton();
+            this.btnLoadImage = new VisionPlatform.UI.UiButton();
+            this.cmbMode = new System.Windows.Forms.ComboBox();
+            this.panelView = new System.Windows.Forms.Panel();
+            this.viewer = new VisionSystem.Controls.ImageViewer();
+            this.lblEmpty = new System.Windows.Forms.Label();
+            this.lblVerdict = new System.Windows.Forms.Label();
+            this.lblSummary = new System.Windows.Forms.Label();
+            this.pullTimer = new System.Windows.Forms.Timer(this.components);
+            this.panelTop.SuspendLayout();
+            this.panelView.SuspendLayout();
+            this.SuspendLayout();
+            // 
+            // panelTop
+            // 
+            this.panelTop.Controls.Add(this.lblInfo);
+            this.panelTop.Controls.Add(this.chkPauseAuto);
+            this.panelTop.Controls.Add(this.btnDrawRoi);
+            this.panelTop.Controls.Add(this.btnLoadImage);
+            this.panelTop.Controls.Add(this.cmbMode);
+            this.panelTop.Dock = System.Windows.Forms.DockStyle.Top;
+            this.panelTop.Location = new System.Drawing.Point(0, 0);
+            this.panelTop.Name = "panelTop";
+            this.panelTop.Padding = new System.Windows.Forms.Padding(4, 2, 4, 2);
+            this.panelTop.Size = new System.Drawing.Size(640, 28);
+            this.panelTop.TabIndex = 3;
+            // 
+            // lblInfo
+            // 
+            this.lblInfo.AutoEllipsis = true;
+            this.lblInfo.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblInfo.Location = new System.Drawing.Point(112, 2);
+            this.lblInfo.Name = "lblInfo";
+            this.lblInfo.Size = new System.Drawing.Size(232, 24);
+            this.lblInfo.TabIndex = 0;
+            this.lblInfo.Text = "未运行";
+            this.lblInfo.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // chkPauseAuto
+            // 
+            this.chkPauseAuto.Dock = System.Windows.Forms.DockStyle.Right;
+            this.chkPauseAuto.Location = new System.Drawing.Point(344, 2);
+            this.chkPauseAuto.Name = "chkPauseAuto";
+            this.chkPauseAuto.Size = new System.Drawing.Size(116, 24);
+            this.chkPauseAuto.TabIndex = 1;
+            this.chkPauseAuto.Text = "暂停自动刷新";
+            // 
+            // btnDrawRoi
+            // 
+            this.btnDrawRoi.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnDrawRoi.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnDrawRoi.Dock = System.Windows.Forms.DockStyle.Right;
+            this.btnDrawRoi.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnDrawRoi.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.btnDrawRoi.ForeColor = System.Drawing.Color.White;
+            this.btnDrawRoi.Kind = VisionPlatform.UI.UiButtonKind.Grab;
+            this.btnDrawRoi.Location = new System.Drawing.Point(460, 2);
+            this.btnDrawRoi.Name = "btnDrawRoi";
+            this.btnDrawRoi.Size = new System.Drawing.Size(88, 24);
+            this.btnDrawRoi.TabIndex = 2;
+            this.btnDrawRoi.Text = "画 ROI";
+            this.btnDrawRoi.UseVisualStyleBackColor = false;
+            // 
+            // btnLoadImage
+            // 
+            this.btnLoadImage.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnLoadImage.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnLoadImage.Dock = System.Windows.Forms.DockStyle.Right;
+            this.btnLoadImage.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnLoadImage.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.btnLoadImage.ForeColor = System.Drawing.Color.White;
+            this.btnLoadImage.Kind = VisionPlatform.UI.UiButtonKind.Grab;
+            this.btnLoadImage.Location = new System.Drawing.Point(548, 2);
+            this.btnLoadImage.Name = "btnLoadImage";
+            this.btnLoadImage.Size = new System.Drawing.Size(88, 24);
+            this.btnLoadImage.TabIndex = 3;
+            this.btnLoadImage.Text = "载入图片";
+            this.btnLoadImage.UseVisualStyleBackColor = false;
+            // 
+            // cmbMode
+            // 
+            this.cmbMode.Dock = System.Windows.Forms.DockStyle.Left;
+            this.cmbMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbMode.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.cmbMode.Items.AddRange(new object[] {
+            "选中节点",
+            "链尾结果",
+            "原始图像"});
+            this.cmbMode.Location = new System.Drawing.Point(4, 2);
+            this.cmbMode.Name = "cmbMode";
+            this.cmbMode.Size = new System.Drawing.Size(108, 20);
+            this.cmbMode.TabIndex = 4;
+            // 
+            // panelView
+            // 
+            this.panelView.Controls.Add(this.viewer);
+            this.panelView.Controls.Add(this.lblEmpty);
+            this.panelView.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelView.Location = new System.Drawing.Point(0, 28);
+            this.panelView.Name = "panelView";
+            this.panelView.Size = new System.Drawing.Size(640, 292);
+            this.panelView.TabIndex = 2;
+            // 
+            // viewer
+            // 
+            this.viewer.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(32)))), ((int)(((byte)(32)))), ((int)(((byte)(36)))));
+            this.viewer.Cursor = System.Windows.Forms.Cursors.Default;
+            this.viewer.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.viewer.Location = new System.Drawing.Point(0, 0);
+            this.viewer.Name = "viewer";
+            this.viewer.NewShapeColor = System.Drawing.Color.Lime;
+            this.viewer.Size = new System.Drawing.Size(640, 292);
+            this.viewer.TabIndex = 0;
+            // 
+            // lblEmpty
+            // 
+            this.lblEmpty.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblEmpty.Location = new System.Drawing.Point(0, 0);
+            this.lblEmpty.Name = "lblEmpty";
+            this.lblEmpty.Size = new System.Drawing.Size(640, 292);
+            this.lblEmpty.TabIndex = 1;
+            this.lblEmpty.Text = "运行流程后可在此查看各节点处理结果";
+            this.lblEmpty.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
+            // lblVerdict
+            // 
+            this.lblVerdict.Location = new System.Drawing.Point(8, 36);
+            this.lblVerdict.Name = "lblVerdict";
+            this.lblVerdict.Size = new System.Drawing.Size(96, 32);
+            this.lblVerdict.TabIndex = 1;
+            this.lblVerdict.Visible = false;
+            // 
+            // lblSummary
+            // 
+            this.lblSummary.Location = new System.Drawing.Point(112, 40);
+            this.lblSummary.Name = "lblSummary";
+            this.lblSummary.Size = new System.Drawing.Size(560, 22);
+            this.lblSummary.TabIndex = 0;
+            this.lblSummary.Visible = false;
+            // 
+            // pullTimer
+            // 
+            this.pullTimer.Enabled = true;
+            this.pullTimer.Interval = 33;
+            // 
+            // FlowPreviewPanel
+            // 
+            this.Controls.Add(this.lblSummary);
+            this.Controls.Add(this.lblVerdict);
+            this.Controls.Add(this.panelView);
+            this.Controls.Add(this.panelTop);
+            this.Name = "FlowPreviewPanel";
+            this.Size = new System.Drawing.Size(640, 320);
+            this.panelTop.ResumeLayout(false);
+            this.panelView.ResumeLayout(false);
+            this.ResumeLayout(false);
 
-            SuspendLayout();
-            panelView.SuspendLayout();
-
-            // ---------- 顶条 ----------
-            // 上下留 2 px 内边距：让与顶条同高的按钮不顶满整条，观感接近普通工具栏按钮
-            panelTop.Dock = DockStyle.Top;
-            panelTop.Height = 28;
-            panelTop.Padding = new Padding(4, 2, 4, 2);
-            panelTop.Name = "panelTop";
-
-            cmbMode.Dock = DockStyle.Left;
-            cmbMode.Width = 108;
-            cmbMode.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbMode.FlatStyle = FlatStyle.Flat;
-            cmbMode.Name = "cmbMode";
-            cmbMode.Items.Add("选中节点");
-            cmbMode.Items.Add("链尾结果");
-            cmbMode.Items.Add("原始图像");
-            cmbMode.SelectedIndex = 0;
-            cmbMode.SelectedIndexChanged += OnModeChanged;
-
-            chkPauseAuto.Dock = DockStyle.Right;
-            chkPauseAuto.Width = 116;
-            chkPauseAuto.Text = "暂停自动刷新";
-            chkPauseAuto.TextAlign = ContentAlignment.MiddleLeft;
-            chkPauseAuto.Name = "chkPauseAuto";
-            chkPauseAuto.CheckedChanged += OnPauseAutoChanged;
-
-            // 【UiButton 是自绘控件】语义色必须在构造函数里给定：UiStyle 会跳过自绘控件，
-            // 运行时再设 Kind 就只剩下默认中性色。
-            btnDrawRoi.Dock = DockStyle.Right;
-            btnDrawRoi.Width = 88;
-            btnDrawRoi.Name = "btnDrawRoi";
-            btnDrawRoi.Text = "画 ROI";
-            btnDrawRoi.Kind = UiButtonKind.Grab;
-            btnDrawRoi.Click += OnDrawRoiClick;
-
-            btnLoadImage.Dock = DockStyle.Right;
-            btnLoadImage.Width = 88;
-            btnLoadImage.Name = "btnLoadImage";
-            btnLoadImage.Text = "载入图片";
-            btnLoadImage.Kind = UiButtonKind.Grab;
-            btnLoadImage.Click += OnLoadImageClick;
-
-            lblInfo.Dock = DockStyle.Fill;
-            lblInfo.TextAlign = ContentAlignment.MiddleLeft;
-            lblInfo.Name = "lblInfo";
-            lblInfo.Text = "未运行";
-            // 预览区分栏变窄时节点信息不允许凭空消失：截断处显示省略号
-            lblInfo.AutoEllipsis = true;
-
-            // 停靠按集合逆序生效：Fill 先加 → 暂停复选 → 画 ROI → 载入图片（最右）→ 模式下拉（最左）
-            panelTop.Controls.Add(lblInfo);
-            panelTop.Controls.Add(chkPauseAuto);
-            panelTop.Controls.Add(btnDrawRoi);
-            panelTop.Controls.Add(btnLoadImage);
-            panelTop.Controls.Add(cmbMode);
-
-            // ---------- 图像区 ----------
-            panelView.Dock = DockStyle.Fill;
-            panelView.Name = "panelView";
-
-            viewer.Dock = DockStyle.Fill;
-            viewer.Name = "viewer";
-            viewer.ShowHud = true;
-            // 拖框画 ROI：图形先被控件加入 Shapes 再触发事件，事件里接管渲染
-            viewer.ShapeCreated += OnViewerShapeCreated;
-            // Esc 取消拖框（控件自身只取消当前拖拽，不退出我们的取框状态）
-            viewer.KeyDown += OnViewerKeyDown;
-
-            lblEmpty.Dock = DockStyle.Fill;
-            lblEmpty.Name = "lblEmpty";
-            lblEmpty.TextAlign = ContentAlignment.MiddleCenter;
-            lblEmpty.Text = "运行流程后可在此查看各节点处理结果";
-
-            panelView.Controls.Add(viewer);
-            panelView.Controls.Add(lblEmpty);
-            lblEmpty.BringToFront();
-
-            // ---------- 左上角结论覆盖（纯文本，色弱兜底）----------
-            lblVerdict.Name = "lblVerdict";
-            lblVerdict.Size = new Size(96, 32);
-            lblVerdict.Location = new Point(8, 36);
-            lblVerdict.Visible = false;
-
-            lblSummary.Name = "lblSummary";
-            lblSummary.Size = new Size(560, 22);
-            lblSummary.Location = new Point(112, 40);
-            lblSummary.Visible = false;
-
-            Controls.Add(lblSummary);
-            Controls.Add(lblVerdict);
-            Controls.Add(panelView);
-            Controls.Add(panelTop);
-            lblVerdict.BringToFront();
-            lblSummary.BringToFront();
-
-            // ---------- 拉取定时器 ----------
-            pullTimer.Interval = 33;   // 与 private const PullIntervalMs 同值；设计器只解析字面量，故此处写 33
-            pullTimer.Tick += OnPullTick;
-            pullTimer.Start();
-
-            Name = "flowPreview";
-            Size = new Size(640, 320);
-
-            panelView.ResumeLayout(false);
-            ResumeLayout(false);
         }
 
         /// <summary>运行时套用主题（构建代码只写结构，颜色 / 字体单点来自 UiTheme）。</summary>
