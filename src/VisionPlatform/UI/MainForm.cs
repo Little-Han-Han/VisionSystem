@@ -813,6 +813,12 @@ namespace VisionPlatform.UI
             _views[viewIndex].SetImage(frame, true);
         }
 
+        /// <summary>对当前帧跑配方检测并驱动徽标 / 统计 / 状态栏。</summary>
+        /// <remarks>
+        /// 帧所有权归视图：调用前 ShowFrame 已把 frame 交给 ImageViewer（OwnsImage=true），
+        /// 此处绝不 Dispose——否则已显示位图被释放，下一次绘制在 DrawImage 抛『参数无效』。
+        /// 帧由视图在换图 / 销毁时释放。
+        /// </remarks>
         private void RunInspection(Bitmap frame, int viewIndex, string tag)
         {
             VisionAlgo algo = AppContext.Algo;
@@ -820,45 +826,41 @@ namespace VisionPlatform.UI
 
             if (algo == null || recipe == null)
             {
-                // 没有配方或算法库时只显示图像，不做判定
-                using (frame) { }
+                // 没有配方或算法库时只显示图像，不做判定（帧已归视图，不在此释放）
                 return;
             }
 
             if (_engine == null) _engine = new InspectionEngine(algo);
 
-            using (frame)
+            var result = _engine.Run(frame, recipe.Inspection);
+            if (!result.Success) return;
+
+            ShowResultOnView(viewIndex, result.Value);
+
+            _statTotal++;
+            if (result.Value.Passed) _statOk++; else _statNg++;
+            _lastElapsedMs = result.Value.ElapsedMs;
+            _lastSummary = result.Value.Summary ?? "";
+
+            // 徽标 / 视图角标 / 统计 / 状态栏共用一次判定结果
+            SetVerdict(result.Value.Passed);
+            SetViewVerdict(viewIndex, result.Value.Passed);
+            UpdateStats();
+            UpdateStatus();
+
+            // 按系统设置自动保存图像
+            SystemSettings s = ConfigStore.Current.System;
+            if (s.AutoSaveEnabled && (!s.SaveNgOnly || !result.Value.Passed))
             {
-                var result = _engine.Run(frame, recipe.Inspection);
-                if (!result.Success) return;
-
-                ShowResultOnView(viewIndex, result.Value);
-
-                _statTotal++;
-                if (result.Value.Passed) _statOk++; else _statNg++;
-                _lastElapsedMs = result.Value.ElapsedMs;
-                _lastSummary = result.Value.Summary ?? "";
-
-                // 徽标 / 视图角标 / 统计 / 状态栏共用一次判定结果
-                SetVerdict(result.Value.Passed);
-                SetViewVerdict(viewIndex, result.Value.Passed);
-                UpdateStats();
-                UpdateStatus();
-
-                // 按系统设置自动保存图像
-                SystemSettings s = ConfigStore.Current.System;
-                if (s.AutoSaveEnabled && (!s.SaveNgOnly || !result.Value.Passed))
-                {
-                    string path = ImageStore.Save(frame, tag, result.Value.Passed);
-                    if (path != null) Logger.Info("图像已保存：" + path);
-                }
-
-                Logger.Info(string.Format("视图{0} 检测 {1}：{2}（{3} ms）",
-                    viewIndex + 1,
-                    result.Value.Passed ? "OK" : "NG",
-                    result.Value.Summary,
-                    result.Value.ElapsedMs));
+                string path = ImageStore.Save(frame, tag, result.Value.Passed);
+                if (path != null) Logger.Info("图像已保存：" + path);
             }
+
+            Logger.Info(string.Format("视图{0} 检测 {1}：{2}（{3} ms）",
+                viewIndex + 1,
+                result.Value.Passed ? "OK" : "NG",
+                result.Value.Summary,
+                result.Value.ElapsedMs));
         }
 
         private void ShowResultOnView(int viewIndex, InspectionResult result)
