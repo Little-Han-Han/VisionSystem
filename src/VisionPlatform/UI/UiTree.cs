@@ -59,8 +59,10 @@ namespace VisionPlatform.UI
             // ★ OwnerDrawText：只接管文本与背景，+/- 与连线仍由系统画
             tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
             // ★ ItemHeight 只在 owner-draw 模式下生效，必须与 DrawMode 同时设置；
-            //   20 → 24：行高随 10pt 字体同步加高，避免加高后的文字在行内被垂直裁掉。
-            tree.ItemHeight = 24;
+            //   固定像素值不随 DPI 缩放，而 10pt 字体的高会随 DPI 变大 —— 125%/150% 缩放下
+            //   文字比行高 -> 节点垂直被裁（「节点显示不全」）。改用 Font.Height（屏幕像素，
+            //   自适应 DPI）+ 8 padding，任何缩放比下行高都包得住文字。
+            tree.ItemHeight = tree.Font.Height + 8;
 
             // 幂等：先减后加，重复 Apply 不会叠加事件处理器
             tree.DrawNode -= OnDrawNode;
