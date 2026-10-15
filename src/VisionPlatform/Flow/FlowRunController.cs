@@ -266,12 +266,14 @@ namespace VisionPlatform.Flow
         /// 取到后<strong>调用方拥有 <see cref="FlowProgressSnapshot.Frame"/></strong>，替换显示时须释放旧帧。
         /// </summary>
         /// <param name="selectedNodeMode">
-        /// true =「选中节点」模式：从节点专用槽取（null 时调用方保持当前显示不变）；
+        /// true =「选中节点」模式：有选中节点时从节点专用槽取（null 时调用方保持当前显示不变）；
+        /// 未选中任何节点则回落既有 _pending 槽——直接显示最后一次运行的最终结果
+        ///（用户「点运行看结果」的最自然预期；此模式下 PushNode 会丢弃节点快照，仅链尾入槽）。
         /// false = 链尾等模式：从既有 _pending 槽取（链尾快照仍在其中，模式切换即可回看最后一次运行）。
         /// </param>
         public FlowProgressSnapshot TryTakePending(bool selectedNodeMode)
         {
-            if (selectedNodeMode)
+            if (selectedNodeMode && _selectedNodeId != "")
                 return Interlocked.Exchange(ref _nodeSlot, null);
 
             return Interlocked.Exchange(ref _pending, null);
