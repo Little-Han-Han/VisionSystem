@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using VisionPlatform.Core;
 using VisionPlatform.Flow;
 using VisionSystem.Controls;
 using VisionSystem.Controls.Geometry;
@@ -56,6 +57,7 @@ namespace VisionPlatform.UI
         private Label lblSummary;
         private System.ComponentModel.IContainer components;
         private Timer pullTimer;
+        private int _diagTick;   // [预览诊断][临时] 拉取入口节流计数——定位后随诊断日志一起移除
 
         public FlowPreviewPanel()
         {
@@ -572,6 +574,10 @@ namespace VisionPlatform.UI
             FlowRunController ctl = _controller;
             if (ctl == null) return;
 
+            // [预览诊断][临时] 每 ~3 秒记录一次拉取入口状态（定位「被挡住不拉帧」）——定位后移除
+            if (++_diagTick % 90 == 0)
+                Logger.Info("[预览诊断] tick roiPicking=" + _roiPicking + " mode=" + Mode + " paused=" + _paused);
+
             // 拖框期间不拉帧：否则定时器会用运行帧覆盖用户正在画的 ROI
             if (_roiPicking) return;
 
@@ -587,6 +593,11 @@ namespace VisionPlatform.UI
             // 其它模式从既有 _pending 槽取（链尾快照仍在，切模式即可回看最后一次运行）。
             FlowProgressSnapshot snap = ctl.TryTakePending(Mode == FlowPreviewMode.SelectedNode);
             if (snap == null) return;
+
+            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+            Logger.Info("[预览诊断] Pull mode=" + Mode + " sel='" + _selectedNodeId +
+                        "' node=" + snap.NodeId + " chainEnd=" + snap.IsChainEnd +
+                        " hasFrame=" + (snap.Frame != null));
 
             if (_paused)
             {
@@ -604,6 +615,8 @@ namespace VisionPlatform.UI
 
             if (!string.IsNullOrEmpty(snap.ErrorMessage))
             {
+                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+                Logger.Info("[预览诊断] Apply ERROR " + snap.ErrorMessage);
                 lblInfo.Text = snap.ErrorMessage;
                 snap.ReleaseFrame();
                 return;
@@ -625,6 +638,8 @@ namespace VisionPlatform.UI
             {
                 if (!string.IsNullOrEmpty(_selectedNodeId) && snap.NodeId != _selectedNodeId)
                 {
+                    // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+                    Logger.Info("[预览诊断] Apply FILTERED-SEL node=" + snap.NodeId + " sel='" + _selectedNodeId + "'");
                     snap.ReleaseFrame();
                     return;
                 }
@@ -632,9 +647,15 @@ namespace VisionPlatform.UI
 
             if (mode == FlowPreviewMode.ChainEnd && !snap.IsChainEnd)
             {
+                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+                Logger.Info("[预览诊断] Apply FILTERED-CHAIN node=" + snap.NodeId);
                 snap.ReleaseFrame();
                 return;
             }
+
+            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+            Logger.Info("[预览诊断] Apply SHOW node=" + snap.NodeId + " frame=" + (snap.Frame != null) +
+                        " shapes=" + (snap.Shapes != null ? snap.Shapes.Count : 0));
 
             _hasRun = true;
             lblEmpty.Visible = false;

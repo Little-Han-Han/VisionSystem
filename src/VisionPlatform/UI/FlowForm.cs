@@ -124,7 +124,9 @@ namespace VisionPlatform.UI
         {
             treeModules.BeginUpdate();
             treeModules.Nodes.Clear();
-            Font font = new Font(treeModules.Font, FontStyle.Bold);
+            Font font = new Font("Microsoft YaHei UI", 9F);
+            Font leaffont = new Font("Microsoft YaHei UI", 9F);
+            int maxWidth;
             foreach (FlowModuleCategory cat in FlowModule.GroupByCategory())
             {
                 var root = new TreeNode(cat.DisplayName);
@@ -136,14 +138,17 @@ namespace VisionPlatform.UI
                     var leaf = new TreeNode(m.DisplayName);
                     leaf.Tag = m;
                     leaf.ForeColor = UiTheme.ColorTextPrimary;
+                    leaf.NodeFont = leaffont;
                     root.Nodes.Add(leaf);
+                   
                 }
                 root.NodeFont = font;
                 treeModules.Nodes.Add(root);
                 
+
                 root.Expand();                         // 12 项不多，默认全展开
             }
-
+            
             treeModules.EndUpdate();
         }
 
@@ -1276,6 +1281,10 @@ namespace VisionPlatform.UI
         {
             if (_running || _looping) return;
 
+            // 运行与「画 ROI」互斥：处于画框状态时预览拉帧被 _roiPicking 挡住，运行结果
+            // 永远不会显示（实测故障）。启动运行前先退出画框状态（未画完的框作废）。
+            flowPreview.CancelRoiPick();
+
             ICamera cam;
             FlowDefinition f = PrepareRun(out cam);
             if (f == null) return;
@@ -1285,6 +1294,10 @@ namespace VisionPlatform.UI
             canvas.ClearNodeStatus();
             SetRunButtons(true, false);
             SetStatus("运行中…");
+
+            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+            Logger.Info("[预览诊断] OnRun flow=" + f.Name + " cam=" + (cam != null ? cam.Info.Id : "null") +
+                        " 节点数=" + f.Nodes.Count + " sel='" + (_selectedNode != null ? _selectedNode.Id : "") + "'");
 
             _controller.RunOnce(f, cam);
         }
@@ -1296,6 +1309,9 @@ namespace VisionPlatform.UI
         private void OnRunNode(object sender, EventArgs e)
         {
             if (_running || _looping) return;
+
+            // 同 OnRun：运行前退出画 ROI 状态，避免预览拉帧被挡
+            flowPreview.CancelRoiPick();
 
             ICamera cam;
             FlowDefinition f = PrepareRun(out cam);
@@ -1320,6 +1336,9 @@ namespace VisionPlatform.UI
         {
             if (_running || _looping) return;
 
+            // 同 OnRun：单步前退出画 ROI 状态，避免预览拉帧被挡
+            flowPreview.CancelRoiPick();
+
             ICamera cam;
             FlowDefinition f = PrepareRun(out cam);
             if (f == null) return;
@@ -1336,6 +1355,9 @@ namespace VisionPlatform.UI
         {
             if (_looping) { StopLoop(); return; }
             if (_running) return;
+
+            // 同 OnRun：连续运行前退出画 ROI 状态，避免预览拉帧被挡
+            flowPreview.CancelRoiPick();
 
             ICamera cam;
             FlowDefinition f = PrepareRun(out cam);
