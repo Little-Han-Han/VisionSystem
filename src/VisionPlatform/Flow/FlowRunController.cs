@@ -140,6 +140,14 @@ namespace VisionPlatform.Flow
         private FlowProgressSnapshot _pending;
         private Bitmap _original;          // 「原始图像」显示模式的相机原图（覆盖式，旧图即时释放）
 
+        // 「选中节点」模式专用槽：单帧链 ~9ms 就在后台线程跑完，而预览每 33ms 才拉一次；
+        // 唯一的 _pending 槽被每个节点快照逐一覆盖（旧快照立即释放）→ UI 拉取时只剩链尾快照，
+        // 选中非末节点时被 Apply 的节点过滤丢弃 → 永远无图。为此给选中节点单开 _nodeSlot：
+        // PublishNode 命中选中节点时写入（旧快照立即释放），其它节点快照直接丢弃——
+        // 内存峰值仍是 2 个快照，与旧实现同水位，无逐节点累积。
+        private volatile string _selectedNodeId = "";
+        private FlowProgressSnapshot _nodeSlot;
+
         // 连续运行统计
         private int _cycles;
         private long _totalCycleMs;
@@ -257,8 +265,15 @@ namespace VisionPlatform.Flow
         /// 取走待显示的快照（覆盖式：取到即清空槽位）。返回 null 表示无新快照。
         /// 取到后<strong>调用方拥有 <see cref="FlowProgressSnapshot.Frame"/></strong>，替换显示时须释放旧帧。
         /// </summary>
-        public FlowProgressSnapshot TryTakePending()
+        /// <param name="selectedNodeMode">
+        /// true =「选中节点」模式：从节点专用槽取（null 时调用方保持当前显示不变）；
+        /// false = 链尾等模式：从既有 _pending 槽取（链尾快照仍在其中，模式切换即可回看最后一次运行）。
+        /// </param>
+        public FlowProgressSnapshot TryTakePending(bool selectedNodeMode)
         {
+            if (selectedNodeMode)
+                return Interlocked.Exchange(ref _nodeSlot, null);
+
             return Interlocked.Exchange(ref _pending, null);
         }
 
@@ -268,11 +283,28 @@ namespace VisionPlatform.Flow
             return Interlocked.Exchange(ref _original, null);
         }
 
-        /// <summary>释放尚未被取走的挂起帧（关窗 / 停止时调用，避免残留）。</summary>
+        /// <summary>
+        /// 设置「选中节点」模式的当前节点 Id（预览区「选中节点」模式据此过滤）。
+        /// 选中变化时立即清空节点专用槽——旧选中节点的快照已不是想要的内容。
+        /// </summary>
+        public void SetSelectedNode(string nodeId)
+        {
+            if (nodeId == null) nodeId = "";
+            if (string.Equals(nodeId, _selectedNodeId, StringComparison.Ordinal)) return;
+
+            _selectedNodeId = nodeId;
+            FlowProgressSnapshot old = Interlocked.Exchange(ref _nodeSlot, null);
+            if (old != null) old.ReleaseFrame();
+        }
+
+        /// <summary>释放尚未被取走的挂起帧（关窗 / 停止时调用，避免残留）。两个快照槽都清。</summary>
         public void DropPending()
         {
             FlowProgressSnapshot p = Interlocked.Exchange(ref _pending, null);
             if (p != null) p.ReleaseFrame();
+
+            FlowProgressSnapshot n = Interlocked.Exchange(ref _nodeSlot, null);
+            if (n != null) n.ReleaseFrame();
 
             Bitmap b = Interlocked.Exchange(ref _original, null);
             if (b != null)
@@ -590,7 +622,7 @@ namespace VisionPlatform.Flow
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);
 
             SnapOffsetInfo(snap, s);
-            Push(snap);
+            PushNode(snap);
         }
 
         private void PublishChainEnd(FlowRunSession s, FlowRunResult res, Bitmap previewFrame, double fps, double avgMs)
@@ -647,6 +679,40 @@ namespace VisionPlatform.Flow
             if (s == null) return;
             snap.OffsetX = s.OffsetX;
             snap.OffsetY = s.OffsetY;
+        }
+
+        /// <summary>
+        /// 节点级快照投递：「选中节点」模式下选中节点的那份写入 <see cref="_nodeSlot"/>
+        /// （旧快照立即释放），其余节点快照不占槽——单帧链 ~9ms 跑完而预览 33ms 才拉一次，
+        /// 唯一的 _pending 槽会被逐节点覆盖到只剩链尾，选中非末节点将永远无图（应用实测确诊）。
+        /// <strong>节点级进度事件照常逐节点广播</strong>：画布节点状态高亮与冒烟统计都依赖
+        /// <see cref="ProgressReady"/>；订阅者只读状态字段、不得囤积快照帧——未保留的快照
+        /// 在广播返回后立即释放其帧，内存峰值仍是 2 个快照，与旧实现同水位。
+        /// </summary>
+        private void PushNode(FlowProgressSnapshot snap)
+        {
+            if (snap == null) return;
+
+            bool keep;
+            if (_selectedNodeId != "" && snap.NodeId == _selectedNodeId)
+            {
+                FlowProgressSnapshot old = Interlocked.Exchange(ref _nodeSlot, snap);
+                if (old != null) old.ReleaseFrame();
+                keep = true;
+            }
+            else
+            {
+                keep = false;   // 无槽可去（未选中 / 非选中节点）：广播完进度立即释放帧
+            }
+
+            EventHandler<FlowProgressEventArgs> h = ProgressReady;
+            if (h != null)
+            {
+                try { h(this, new FlowProgressEventArgs(snap)); }
+                catch (Exception ex) { Logger.Warn("进度通知失败：" + ex.Message); }
+            }
+
+            if (!keep) snap.ReleaseFrame();
         }
 
         /// <summary>覆盖式投递：被顶掉的旧快照立即释放其帧（共享知识 17.2）。</summary>

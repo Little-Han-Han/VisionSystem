@@ -164,6 +164,7 @@ namespace VisionPlatform.UI
             this.cmbMode.Name = "cmbMode";
             this.cmbMode.Size = new System.Drawing.Size(108, 20);
             this.cmbMode.TabIndex = 4;
+            this.cmbMode.SelectedIndex = 0;   // 默认「选中节点」：显式初始化，不再依赖 Mode getter 的 default 分支
             // 
             // panelView
             // 
@@ -582,7 +583,9 @@ namespace VisionPlatform.UI
                 else raw.Dispose();
             }
 
-            FlowProgressSnapshot snap = ctl.TryTakePending();
+            // 「选中节点」模式从节点专用槽取（选中节点的快照不会再被链尾覆盖掉）；
+            // 其它模式从既有 _pending 槽取（链尾快照仍在，切模式即可回看最后一次运行）。
+            FlowProgressSnapshot snap = ctl.TryTakePending(Mode == FlowPreviewMode.SelectedNode);
             if (snap == null) return;
 
             if (_paused)

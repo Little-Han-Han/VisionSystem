@@ -333,6 +333,7 @@ namespace VisionPlatform.UI
             nodeParamPanel.SetNode(null);
             RefreshPortTree(null);          // 换流程：端子树回到「未选中节点」
             flowPreview.SetSelectedNodeId("");
+            _controller?.SetSelectedNode("");   // 同步清空控制器的「选中节点」专用槽
             flowPreview.Reset();
             RefreshCameraBindings();
             PruneRoiHistory();
@@ -454,6 +455,7 @@ namespace VisionPlatform.UI
 
             // 预览「选中节点」模式据此过滤该节点自身的输出
             flowPreview.SetSelectedNodeId(e != null && e.Node != null ? e.Node.Id : "");
+            _controller?.SetSelectedNode(e != null && e.Node != null ? e.Node.Id : "");   // 控制器侧专用槽同步切换
 
             RefreshPortTree(_selectedNode);
             UpdateRoiButton();

@@ -436,6 +436,15 @@ namespace VisionPlatform.Flow
                 s.OffsetX = cropped ? roiX : 0.0;
                 s.OffsetY = cropped ? roiY : 0.0;
 
+                // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+                // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
+                if (s.Current != null)
+                {
+                    if (p.Frame != null) p.Frame.Dispose();
+                    try { p.Frame = (Bitmap)s.Current.Clone(); }
+                    catch (Exception) { p.Frame = null; }
+                }
+
                 p.Summary = string.Format(CultureInfo.InvariantCulture, "取图 {0}x{1}",
                                           work.Width, work.Height);
                 return true;
@@ -473,6 +482,16 @@ namespace VisionPlatform.Flow
             }
 
             s.ReplaceFrame(pr.Value);
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
             p.Summary = "预处理完成";
             return true;
         }
@@ -656,6 +675,15 @@ namespace VisionPlatform.Flow
                 return true;
             }
 
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
             var train = new ShapeTrainParam
             {
                 Contrast = node.GetDouble("Contrast", 30),
@@ -766,6 +794,15 @@ namespace VisionPlatform.Flow
                 p.Status = FlowNodeStatus.Skipped;
                 p.Summary = "模板匹配：无输入帧";
                 return true;
+            }
+
+            // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
+            // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
             }
 
             double minScore = node.GetDouble("MinScore", 0.8);
