@@ -76,7 +76,6 @@ namespace VisionPlatform.UI
             this.treeModules.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
             this.treeModules.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.treeModules.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.treeModules.Font = new System.Drawing.Font("宋体", 8F);
             this.treeModules.ForeColor = System.Drawing.Color.Gainsboro;
             this.treeModules.Location = new System.Drawing.Point(6, 32);
             this.treeModules.Name = "treeModules";

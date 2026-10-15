@@ -88,12 +88,15 @@ namespace VisionPlatform.UI
             flowPreview.ImageLoaded += OnPreviewImageLoaded;
             lblRunStatus.Text = "就绪";
 
+            // 统一深色工程配色（canvas / preview / nodeParamPanel 自绘，已跳过）。
+            // ★ 必须在 InitModules 之前：UiTree.Apply 在此定稿树字体（雅黑 10pt），
+            //   InitModules 的分类加粗 NodeFont 从 treeModules.Font 派生——若树字体此时
+            //   还是设计器里的宋体 8pt，分类节点会渲染成宋体 8pt、叶子是雅黑 10pt，两级不一致。
+            UiStyle.ApplyForm(this);
+
             InitModules();
             RefreshPortTree(null);
             LoadFlows();
-
-            // 统一深色工程配色（canvas / preview / nodeParamPanel 自绘，已跳过）
-            UiStyle.ApplyForm(this);
 
             // 语义色：运行/连续运行=绿，单步=蓝，停止/删除=红；其余中性
             btnRun.Kind = UiButtonKind.Start;
@@ -1437,14 +1440,11 @@ namespace VisionPlatform.UI
         /// <summary>流程结果回传：取消时丢弃帧，否则转发给通道（由主界面消费并释放帧）。</summary>
         private void OnRunnerOutput(object sender, FlowOutputEventArgs e)
         {
-            if (_cancel)
-            {
-                if (e.Frame != null) e.Frame.Dispose();
-                return;
-            }
-
-            // 无订阅者（主界面已关闭）时由发布方释放，避免帧泄漏
-            if (!FlowOutputChannel.Publish(e) && e.Frame != null)
+            // 流程编排页发起的运行（运行 / 单步 / 单节点）只在预览区展示（快照路径），
+            // 不再发布到 FlowOutputChannel——主界面视图不显示流程编排发起的运行（用户需求）。
+            // 并行引擎（FlowRunSlot）与主界面下拉运行的发布不受影响，仍会显示在主视图。
+            // 本事件无其它消费者，帧就地释放，避免泄漏。
+            if (e != null && e.Frame != null)
                 e.Frame.Dispose();
         }
 
