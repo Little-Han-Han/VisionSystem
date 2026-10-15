@@ -207,6 +207,7 @@ namespace VisionPlatform.UI
             this.tsBtnAlgo.Name = "tsBtnAlgo";
             this.tsBtnAlgo.Text = "形状匹配调试";
             this.tsBtnAlgo.ToolTipText = "离线单图形状匹配工作台（载入本地图片 / 取帧调试）";
+            this.tsBtnAlgo.Visible = false;   // 用户要求隐藏（保留字段 / 工具栏项 / 事件，随时可恢复）
             this.tsBtnAlgo.Click += new System.EventHandler(this.OnOpenAlgoForm);
 
             this.tsBtnFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
