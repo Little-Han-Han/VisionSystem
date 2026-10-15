@@ -29,7 +29,7 @@ namespace VisionPlatform.Camera
         OpResult StopGrab();
 
         /// <summary>软触发取一帧（超时返回失败）。</summary>
-        OpResult<Bitmap> GrabOne(int timeoutMs = 3000);
+        OpResult<Bitmap> GrabOne(int timeoutMs = 100000);
 
         /// <summary>连续采集模式下收到新帧。</summary>
         event EventHandler<Bitmap> FrameReceived;
