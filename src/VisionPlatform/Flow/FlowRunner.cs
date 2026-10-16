@@ -512,7 +512,21 @@ namespace VisionPlatform.Flow
                 catch (Exception) { p.Frame = null; }
             }
 
+            // ---- 位姿来源解析（端子连线优先）----
+            // Pose 输入端子连到哪个匹配节点，就用【它】的位姿（端子级语义）；
+            // 未连 Pose 线时保持历史语义：上游最近一个匹配节点的全局位姿。
+            // 多条 Pose 线时取链上执行顺序最靠后的（位姿最新）。
+            string poseSrc = FindPoseSourceNode(s, node);
+            double curX = s.PoseCx, curY = s.PoseCy, curA = s.PoseAngle, curS = s.PoseScale;
+            bool hasPose = s.HasPose;
+            if (poseSrc != null && s.TryGetNodePose(poseSrc, out double[] pp))
+            {
+                curX = pp[0]; curY = pp[1]; curA = pp[2]; curS = pp[3];
+                hasPose = true;
+            }
+
             string refSource = node.GetString("RefSource", "Auto");
+            bool autoFirstLatch = false;
 
             double rx, ry, ra;
             if (string.Equals(refSource, "Manual", StringComparison.OrdinalIgnoreCase))
@@ -524,7 +538,7 @@ namespace VisionPlatform.Flow
             }
             else
             {
-                if (!s.HasPose)
+                if (!hasPose)
                 {
                     // 【P0-3 修复】Auto 且上游无定位结果：Warning + 跳过修正，不再判 NG。
                     //
@@ -570,17 +584,18 @@ namespace VisionPlatform.Flow
                 }
                 else
                 {
-                    rx = s.PoseCx;
-                    ry = s.PoseCy;
-                    ra = s.PoseAngle;
+                    rx = curX;
+                    ry = curY;
+                    ra = curA;
                     _autoRefs[node.Id] = new[] { rx, ry, ra };
+                    autoFirstLatch = true;
                 }
             }
 
-            double dx = s.HasPose ? (s.PoseCx - rx) : 0.0;
-            double dy = s.HasPose ? (s.PoseCy - ry) : 0.0;
-            double dAngle = s.HasPose ? (s.PoseAngle - ra) : 0.0;
-            double dScale = s.HasPose ? s.PoseScale : 1.0;
+            double dx = hasPose ? (curX - rx) : 0.0;
+            double dy = hasPose ? (curY - ry) : 0.0;
+            double dAngle = hasPose ? (curA - ra) : 0.0;
+            double dScale = hasPose ? curS : 1.0;
 
             // EnableAngle = 0：只平移不旋转
             if (!node.GetBool("EnableAngle", true)) dAngle = 0.0;
@@ -588,11 +603,15 @@ namespace VisionPlatform.Flow
             // 覆盖式写入（链内多个位置修正节点以最后一个为准，不累加）
             s.Transform.Set(rx, ry, ra, dx, dy, dAngle, dScale);
 
-            // 可视化：基准十字（青色）
-            foreach (IGeometryShape g in FlowShapes.Crosshair(rx, ry)) p.Shapes.Add(g);
+            // 可视化：基准坐标系（X 轴红、Y 轴绿、带箭头方向，随基准角度旋转）
+            foreach (IGeometryShape g in FlowShapes.CoordinateSystem(rx, ry, ra, FlowShapes.DefaultCrossArm * 1.5))
+                p.Shapes.Add(g);
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
-                "位置修正：dX={0:F1} dY={1:F1} dA={2:F2}°", dx, dy, dAngle);
+                "位置修正：基准({0:F1},{1:F1},{2:F1}°) 实测({3:F1},{4:F1},{5:F1}°) dX={6:F1} dY={7:F1} dA={8:F2}°",
+                rx, ry, ra, curX, curY, curA, dx, dy, dAngle);
+            if (autoFirstLatch)
+                p.Summary += "（Auto 首帧示教：基准=当前位姿，偏差 0 属预期）";
 
             // 超差判定（0 = 不限）
             double maxShiftX = node.GetDouble("MaxShiftX", 0);
@@ -638,7 +657,7 @@ namespace VisionPlatform.Flow
             bool needWarp = Math.Abs(dx) > 0.05 || Math.Abs(dy) > 0.05 || Math.Abs(dAngleNorm) > 0.05;
             if (needWarp && s.Current != null)
             {
-                Bitmap warped = WarpToReference(s.Current, s.PoseCx, s.PoseCy, rx, ry, dAngleNorm);
+                Bitmap warped = WarpToReference(s.Current, curX, curY, rx, ry, dAngleNorm);
                 s.Current.Dispose();
                 s.Current = warped;
 
@@ -654,6 +673,35 @@ namespace VisionPlatform.Flow
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 找到连到 <paramref name="node"/> 的 Pose 输入端子的上游节点 Id（端子级位姿来源）；
+        /// 多条 Pose 线时取链上执行顺序最靠后的一个（位姿最新）。未连接返回 null。
+        /// </summary>
+        private static string FindPoseSourceNode(FlowRunSession s, FlowNode node)
+        {
+            if (s?.Flow?.Links == null || node == null) return null;
+
+            string best = null;
+            int bestIdx = -1;
+            foreach (FlowLink link in s.Flow.Links)
+            {
+                if (link == null || link.ToNodeId != node.Id) continue;
+                if (!string.Equals(link.ToPort, "Pose", StringComparison.OrdinalIgnoreCase)) continue;
+
+                string fromId = link.FromNodeId;
+                if (string.IsNullOrEmpty(fromId)) continue;
+
+                // 同一节点多条 Pose 线：取执行顺序最靠后的（位姿最新）
+                int idx = -1;
+                if (s.Chain != null)
+                    for (int i = 0; i < s.Chain.Count; i++)
+                        if (string.Equals(s.Chain[i]?.Id, fromId, StringComparison.Ordinal)) { idx = i; break; }
+
+                if (idx >= bestIdx) { bestIdx = idx; best = fromId; }
+            }
+            return best;
         }
 
         /// <summary>
@@ -836,6 +884,7 @@ namespace VisionPlatform.Flow
 
             // 记录实时位姿，供下游位置修正节点取基准
             s.SetPose(matches[0].Cx, matches[0].Cy, matches[0].Angle, matches[0].Scale);
+            s.SetNodePose(node.Id, matches[0].Cx, matches[0].Cy, matches[0].Angle, matches[0].Scale);
 
             p.Summary = string.Format(CultureInfo.InvariantCulture, "形状匹配：{0} 个，最高 {1:F3}",
                                       matches.Count, matches[0].Score);
@@ -960,6 +1009,7 @@ namespace VisionPlatform.Flow
 
                 // 记录实时位姿（NCC 不支持旋转 / 缩放，角度恒 0、缩放恒 1）
                 s.SetPose(bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
+                s.SetNodePose(node.Id, bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "模板匹配：得分 {0:F3} @({1:F0},{2:F0})", score, bx, by);

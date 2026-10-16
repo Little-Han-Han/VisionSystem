@@ -295,6 +295,10 @@ namespace VisionPlatform.Flow
             Watch = new Stopwatch();
         }
 
+        /// <summary>各匹配类节点最近一次输出的位姿（nodeId → [cx, cy, angle, scale]）。
+        /// 供位置修正按端子连线获取指定上游节点的位姿（端子级语义，替代全局最近位姿）。</summary>
+        public readonly Dictionary<string, double[]> NodePoses = new Dictionary<string, double[]>(StringComparer.Ordinal);
+
         /// <summary>记录实时位姿（供下游位置修正节点取基准）。</summary>
         public void SetPose(double cx, double cy, double angle, double scale)
         {
@@ -303,6 +307,18 @@ namespace VisionPlatform.Flow
             PoseAngle = angle;
             PoseScale = scale;
             HasPose = true;
+        }
+
+        /// <summary>记录指定节点输出的位姿（nodeId → [cx, cy, angle, scale]）。</summary>
+        public void SetNodePose(string nodeId, double cx, double cy, double angle, double scale)
+        {
+            NodePoses[nodeId] = new[] { cx, cy, angle, scale };
+        }
+
+        /// <summary>读取指定节点最近一次输出的位姿；无记录返回 false。</summary>
+        public bool TryGetNodePose(string nodeId, out double[] pose)
+        {
+            return NodePoses.TryGetValue(nodeId, out pose);
         }
 
         /// <summary>替换当前工作帧并释放旧帧。</summary>

@@ -205,6 +205,43 @@ namespace VisionPlatform.Flow
             return list;
         }
 
+        /// <summary>位置修正坐标系 X 轴（红）。</summary>
+        public static readonly Color ColorAxisX = Color.FromArgb(255, 96, 96);
+
+        /// <summary>位置修正坐标系 Y 轴（绿）。</summary>
+        public static readonly Color ColorAxisY = Color.FromArgb(96, 220, 96);
+
+        /// <summary>
+        /// 基准坐标系（位置修正用）：在 (x, y) 处按 angleDeg 画出带箭头的 X/Y 轴，
+        /// 直观显示基准位置与方向（y 向下、顺时针为正，与全库角度约定一致）。
+        /// 臂长 arm 为图像像素；X 轴红、Y 轴绿，原点带标记。
+        /// </summary>
+        public static List<IGeometryShape> CoordinateSystem(double x, double y, double angleDeg, double arm = DefaultCrossArm)
+        {
+            var list = new List<IGeometryShape>(8);
+            double a = angleDeg * Math.PI / 180.0;
+            double cos = Math.Cos(a), sin = Math.Sin(a);
+            double head = arm * 0.28;
+
+            // X 轴：沿角度方向（红），末端两条短箭头线表方向
+            double xx = x + cos * arm, xy = y + sin * arm;
+            double aX = Math.Atan2(sin, cos);
+            list.Add(Line(x, y, xx, xy, ColorAxisX, NormalLine, false));
+            list.Add(Line(xx, xy, xx + Math.Cos(aX + Math.PI * 0.75) * head, xy + Math.Sin(aX + Math.PI * 0.75) * head, ColorAxisX, NormalLine, false));
+            list.Add(Line(xx, xy, xx + Math.Cos(aX - Math.PI * 0.75) * head, xy + Math.Sin(aX - Math.PI * 0.75) * head, ColorAxisX, NormalLine, false));
+
+            // Y 轴：X 方向顺时针转 90°（y 向下坐标系，绿）
+            double yx = x - sin * arm, yy = y + cos * arm;
+            double aY = Math.Atan2(cos, -sin);
+            list.Add(Line(x, y, yx, yy, ColorAxisY, NormalLine, false));
+            list.Add(Line(yx, yy, yx + Math.Cos(aY + Math.PI * 0.75) * head, yy + Math.Sin(aY + Math.PI * 0.75) * head, ColorAxisY, NormalLine, false));
+            list.Add(Line(yx, yy, yx + Math.Cos(aY - Math.PI * 0.75) * head, yy + Math.Sin(aY - Math.PI * 0.75) * head, ColorAxisY, NormalLine, false));
+
+            // 原点标记
+            list.Add(Marker(x, y, ColorRefCross));
+            return list;
+        }
+
         /// <summary>变换后的 ROI 轮廓（青色虚线矩形）。</summary>
         public static List<IGeometryShape> RoiOutline(Rectangle rect)
         {
