@@ -1364,6 +1364,64 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
+        /// 切换深浅色板后由 <see cref="UiThemeManager"/> 调用：重套本窗体。
+        /// <para>【为什么不能只靠 UiStyle.ApplyTree】BuildViews 动态创建的视图 /
+        /// 标题条 / 绑定下拉框不在这棵静态树里（且 ImageViewer 构造时把底色硬编码成
+        /// #202024），ApplyTree 又对自绘控件整棵跳过，只有这里能补上。</para>
+        /// </summary>
+        internal void ReapplyTheme()
+        {
+            // ① 静态树 + 语义色：ApplyTheme 幂等，重跑即拿到新色板
+            ApplyTheme();
+
+            // ② 主徽标：ApplyTheme 里被重置成 "--"（灰），这里用 _verdict 原样还原。
+            //    不走 SetVerdict —— 它会累加连续 NG 计数，主题切换不该动业务计数。
+            UiTheme.StyleBadge(lblVerdict,
+                !_verdict.HasValue ? UiVerdict.None : (_verdict.Value ? UiVerdict.Ok : UiVerdict.Ng));
+
+            // ③ BuildViews 动态创建的控件
+            foreach (ImageViewer v in _views)
+            {
+                if (v == null) continue;
+                v.BackColor = UiTheme.ColorViewBg;
+                // ImageViewer 的 BackColor 只管控件本身；外层 cell 面板是容器，要一起改
+                if (v.Parent != null) v.Parent.BackColor = UiTheme.ColorViewBg;
+            }
+
+            foreach (Label caption in _captions)
+            {
+                if (caption == null) continue;
+                caption.ForeColor = UiTheme.ColorTextSecondary;
+                caption.BackColor = UiTheme.ColorHeaderBg;
+                // 标题条本身同样被强制覆盖过，一起还原成标题栏底色
+                if (caption.Parent != null) caption.Parent.BackColor = UiTheme.ColorHeaderBg;
+            }
+
+            foreach (ComboBox bind in _bindCombos)
+            {
+                if (bind == null) continue;
+                bind.BackColor = UiTheme.ColorCardBg;
+                bind.ForeColor = UiTheme.ColorTextPrimary;
+            }
+
+            // ④ 视图角标：浅色强制覆盖会把它们的语义底刷成面板色，这里按当前文本原样还原
+            //    （文本就是结论字面 OK / NG，不需要额外缓存即可无损复原）。
+            foreach (Label badge in _badges)
+            {
+                if (badge == null) continue;
+
+                if (string.Equals(badge.Text, "OK", StringComparison.Ordinal))
+                    UiTheme.StyleViewBadge(badge, UiVerdict.Ok);
+                else if (string.Equals(badge.Text, "NG", StringComparison.Ordinal))
+                    UiTheme.StyleViewBadge(badge, UiVerdict.Ng);
+                else
+                    UiTheme.StyleViewBadge(badge, UiVerdict.None);
+            }
+
+            Invalidate(true);
+        }
+
+        /// <summary>
         /// 日志行分级着色（FR-UI-09）：ERROR 行橙、含 NG 的行红、含 OK 的行绿、其余次文本色。
         /// <c>DrawMode=OwnerDrawFixed</c> 下必须自己画背景与文本，否则列表全黑。
         /// </summary>

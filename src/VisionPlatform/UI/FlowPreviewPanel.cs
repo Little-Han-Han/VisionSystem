@@ -264,6 +264,8 @@ namespace VisionPlatform.UI
 
             // 新建图形（含 ROI 预览矩形）的线色同样取自主题
             viewer.NewShapeColor = UiTheme.ColorAccent;
+            // 切换主题时重取图像区底色：Designer 里写死了 #202024，不重取会停在旧色板上
+            viewer.BackColor = UiTheme.ColorViewBg;
 
             lblInfo.ForeColor = UiTheme.ColorTextPrimary;
             lblInfo.Font = UiTheme.FontBody;

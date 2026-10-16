@@ -97,7 +97,8 @@ namespace VisionPlatform.UI
         //  界面构建
         // =====================================================================
 
-        private void ApplyTheme()
+        /// <summary>运行时套用主题。切换深浅色板时由 <see cref="UiThemeManager"/> 重新调用。</summary>
+        internal void ApplyTheme()
         {
             BackColor = UiTheme.ColorPanelBg;
             ForeColor = UiTheme.ColorTextPrimary;

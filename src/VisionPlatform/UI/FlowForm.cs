@@ -1480,6 +1480,29 @@ namespace VisionPlatform.UI
             catch (Exception ex) { Logger.Warn("保存流程配置失败：" + ex.Message); }
         }
 
+        /// <summary>
+        /// 切换深浅色板后由 <see cref="UiThemeManager"/> 调用：重套本窗体。
+        /// 画布 / 预览 / 参数面板三个自绘控件在 UiStyle 的跳过名单里，必须逐个点名。
+        /// </summary>
+        public void RefreshTheme()
+        {
+            UiStyle.ApplyForm(this);
+
+            canvas.ApplyTheme();
+            flowPreview.ApplyTheme();
+            nodeParamPanel.ApplyTheme();
+
+            // 语义色按钮：Kind 决定自绘填充色，重设一次即取到新色板
+            btnRun.Kind = UiButtonKind.Start;
+            btnRunLoop.Kind = UiButtonKind.Start;
+            btnStep.Kind = UiButtonKind.Grab;
+            btnRunNode.Kind = UiButtonKind.Grab;
+            btnStop.Kind = UiButtonKind.Stop;
+            btnDeleteFlow.Kind = UiButtonKind.Stop;
+
+            Invalidate(true);
+        }
+
         private void SetStatus(string text)
         {
             if (lblRunStatus != null) lblRunStatus.Text = text;

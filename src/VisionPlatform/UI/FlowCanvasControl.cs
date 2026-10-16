@@ -94,6 +94,13 @@ namespace VisionPlatform.UI
             _toastTimer.Tick += OnToastTick;
         }
 
+        /// <summary>切换深浅色板时由 <see cref="UiThemeManager"/> 调用：重取图像区底色并重绘。</summary>
+        public void ApplyTheme()
+        {
+            BackColor = UiTheme.ColorViewBg;
+            Invalidate();
+        }
+
         /// <summary>释放计时器等自有资源。</summary>
         protected override void Dispose(bool disposing)
         {
