@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -172,6 +173,8 @@ namespace VisionPlatform.Flow
             bool ok;
             try
             {
+                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
+                Logger.Info("[预览诊断] 执行节点 " + p.Index + "/" + p.Total + " " + node.Name + "（" + type + "）");
                 ok = ExecuteNode(session, node, type, p);
             }
             catch (Exception ex)
@@ -622,7 +625,61 @@ namespace VisionPlatform.Flow
                 return false;
             }
 
+            // ---- 像素级位置修正：把工件对齐回基准姿态 ----
+            // 此前本节点只写 s.Transform（坐标重映射），只有带 ROI 的下游节点能感知修正；
+            // 修正节点之后预览与无 ROI 下游看到的仍是未修正原图（用户反馈『传入了匹配姿态
+            // 却没有修正』）。现把偏差以像素级反变换烘进工作帧：
+            //   绕【检测中心】旋转 -dAngle，再平移到【基准位置】——工件回到基准姿态。
+            // 烘进像素后 s.Transform 复位为「无修正」，下游 ROI 不做二次叠加变换。
+            double dAngleNorm = dAngle;
+            if (dAngleNorm > 180.0) dAngleNorm -= 360.0;
+            else if (dAngleNorm < -180.0) dAngleNorm += 360.0;
+
+            bool needWarp = Math.Abs(dx) > 0.05 || Math.Abs(dy) > 0.05 || Math.Abs(dAngleNorm) > 0.05;
+            if (needWarp && s.Current != null)
+            {
+                Bitmap warped = WarpToReference(s.Current, s.PoseCx, s.PoseCy, rx, ry, dAngleNorm);
+                s.Current.Dispose();
+                s.Current = warped;
+
+                // 修正已烘进像素：复位坐标重映射，下游 ROI 不做二次变换
+                s.Transform.Reset();
+
+                // 预览帧刷新为修正后的图像
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+
+                p.Summary += "（已对齐回基准姿态）";
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// 像素级位置修正：源图中位于 (curX, curY, curAngle) 的工件，绕检测中心旋回 -dAngle
+        /// 并平移到基准位置 (refX, refY)——「检测中心落到基准位置、角度回到基准角度」。
+        /// 输出与输入同尺寸；旋转露出的边角填黑。
+        /// </summary>
+        private static Bitmap WarpToReference(Bitmap src, double curX, double curY,
+                                              double refX, double refY, double dAngle)
+        {
+            var dst = new Bitmap(src.Width, src.Height, PixelFormat.Format24bppRgb);
+            using (Graphics g = Graphics.FromImage(dst))
+            {
+                g.Clear(Color.Black);
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+
+                // 变换复合：M = T(ref) · R(-dAngle) · T(-cur)
+                // 源点 cur → 旋转回正 → 落到 ref（y 向下、顺时针为正，与全库角度约定一致）
+                g.TranslateTransform((float)refX, (float)refY);
+                g.RotateTransform(-(float)dAngle);
+                g.TranslateTransform((float)-curX, (float)-curY);
+
+                g.DrawImage(src, 0, 0);
+            }
+            return dst;
         }
 
         /// <summary>
