@@ -12,11 +12,20 @@ namespace VisionPlatform.UI
     /// </summary>
     public partial class SettingsForm : Form
     {
+        /// <summary>打开本窗体时的主题模式：点「取消」/ 直接关窗时用它还原（预览不该变永久）。</summary>
+        private readonly UiThemeMode _themeOnOpen;
+
         public SettingsForm()
         {
             InitializeComponent();
 
+            // 主题下拉的事件订阅刻意写在构造函数里：
+            // 【项目铁律】VS 重序列化 Designer 会悄悄丢掉手写的 `xxx.Event += handler`，
+            // 本项目因此出过一次严重 bug，故 InitializeComponent 里不放动态代码。
+            cmbTheme.SelectedIndexChanged += OnThemeChanged;
+
             LoadFrom(ConfigStore.Current.System);
+            _themeOnOpen = UiTheme.Mode;
             lblCommState.Text = "当前：" + CommState.Describe();
 
             UiStyle.ApplyForm(this);
@@ -31,6 +40,11 @@ namespace VisionPlatform.UI
         private void LoadFrom(SystemSettings s)
         {
             if (s == null) s = SystemSettings.CreateDefault();
+
+            // 主题属于 UiSettings（不是 SystemSettings），但同一个窗体里一并回填：
+            // 选中项决定「保存」时写入哪个模式，缺失即深色。
+            UiSettings ui = ConfigStore.Current.Ui;
+            SelectTheme(ui != null ? ui.Theme : null);
 
             txtSavePath.Text = s.ImageSavePath;
             SelectFormat(s.ImageFormat);
@@ -77,6 +91,39 @@ namespace VisionPlatform.UI
             if (days < 0) days = 0;
             if (days > 3650) days = 3650;
             return days;
+        }
+
+        /// <summary>按配置里的主题模式回填下拉框（"Light" → 浅色，其余 → 深色）。</summary>
+        private void SelectTheme(string theme)
+        {
+            if (cmbTheme == null) return;
+
+            int index = (UiThemeManager.ParseMode(theme) == UiThemeMode.Light) ? 1 : 0;
+            if (index >= cmbTheme.Items.Count) index = 0;
+
+            cmbTheme.SelectedIndex = index;
+        }
+
+        /// <summary>下拉框当前选中的主题模式（0=深色，1=浅色）。</summary>
+        private UiThemeMode SelectedThemeMode
+        {
+            get { return (cmbTheme != null && cmbTheme.SelectedIndex == 1) ? UiThemeMode.Light : UiThemeMode.Dark; }
+        }
+
+        /// <summary>
+        /// 切换主题下拉框：立即预览（换色板 + 重套所有已打开窗体），<strong>不落盘</strong>。
+        /// 用户点「取消」时不会留下痕迹 —— 但这只改内存，真正的持久化在 <see cref="OnOk"/> 里。
+        /// </summary>
+        private void OnThemeChanged(object sender, EventArgs e)
+        {
+            UiThemeManager.Apply(SelectedThemeMode);
+        }
+
+        /// <summary>切换主题后由 <see cref="UiThemeManager"/> 回调：重套本窗体（含新加的主题分组）。</summary>
+        public void RefreshTheme()
+        {
+            UiStyle.ApplyTree(this);
+            Invalidate(true);
         }
 
         private void SelectFormat(string format)
@@ -152,6 +199,10 @@ namespace VisionPlatform.UI
 
             ApplyToConfig();
 
+            // 主题最后落地：先重套界面（含所有已打开窗体），再保存 ——
+            // ConfigStore.Save() 会广播 Changed，放最后可保证只播一次且界面已是新色。
+            UiThemeManager.SaveAndApply(SelectedThemeMode);
+
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -165,6 +216,18 @@ namespace VisionPlatform.UI
         private void OnRestoreDefault(object sender, EventArgs e)
         {
             LoadFrom(SystemSettings.CreateDefault());
+        }
+
+        /// <summary>
+        /// 关窗收尾：主题只在点「保存」时才算数。取消 / ESC / 直接关窗都要还原成
+        /// 打开时的模式，否则"下拉框里随便点一下浅色"就永久改掉了界面。
+        /// </summary>
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (DialogResult != DialogResult.OK && UiTheme.Mode != _themeOnOpen)
+                UiThemeManager.Apply(_themeOnOpen);
+
+            base.OnFormClosing(e);
         }
     }
 }

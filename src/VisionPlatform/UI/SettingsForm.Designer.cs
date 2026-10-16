@@ -38,6 +38,10 @@ namespace VisionPlatform.UI
             this.numYieldAlarm = new System.Windows.Forms.NumericUpDown();
             this.lblYieldAlarmUnit = new System.Windows.Forms.Label();
 
+            this.groupTheme = new System.Windows.Forms.GroupBox();
+            this.lblTheme = new System.Windows.Forms.Label();
+            this.cmbTheme = new System.Windows.Forms.ComboBox();
+
             this.panelButtons = new System.Windows.Forms.Panel();
             this.btnDefault = new VisionPlatform.UI.UiButton();
             this.btnOk = new VisionPlatform.UI.UiButton();
@@ -47,6 +51,7 @@ namespace VisionPlatform.UI
             ((System.ComponentModel.ISupportInitialize)(this.numYieldAlarm)).BeginInit();
             this.groupSave.SuspendLayout();
             this.groupRun.SuspendLayout();
+            this.groupTheme.SuspendLayout();
             this.panelButtons.SuspendLayout();
             this.SuspendLayout();
 
@@ -229,15 +234,44 @@ namespace VisionPlatform.UI
             this.lblYieldAlarmUnit.TabIndex = 4;
             this.lblYieldAlarmUnit.Text = "%（低于此值良率转橙，低于一半转红；0 = 不告警）";
 
+            // ---------- groupTheme ----------
+            this.groupTheme.Controls.Add(this.cmbTheme);
+            this.groupTheme.Controls.Add(this.lblTheme);
+            this.groupTheme.ForeColor = System.Drawing.Color.DeepSkyBlue;
+            this.groupTheme.Location = new System.Drawing.Point(12, 342);
+            this.groupTheme.Name = "groupTheme";
+            this.groupTheme.Size = new System.Drawing.Size(496, 64);
+            this.groupTheme.TabIndex = 2;
+            this.groupTheme.TabStop = false;
+            this.groupTheme.Text = "界面主题";
+
+            this.lblTheme.AutoSize = true;
+            this.lblTheme.ForeColor = System.Drawing.Color.Silver;
+            this.lblTheme.Location = new System.Drawing.Point(14, 28);
+            this.lblTheme.Name = "lblTheme";
+            this.lblTheme.Size = new System.Drawing.Size(67, 15);
+            this.lblTheme.TabIndex = 0;
+            this.lblTheme.Text = "主题模式：";
+
+            this.cmbTheme.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.cmbTheme.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbTheme.ForeColor = System.Drawing.Color.Gainsboro;
+            this.cmbTheme.FormattingEnabled = true;
+            this.cmbTheme.Items.AddRange(new object[] { "深色", "浅色" });
+            this.cmbTheme.Location = new System.Drawing.Point(88, 25);
+            this.cmbTheme.Name = "cmbTheme";
+            this.cmbTheme.Size = new System.Drawing.Size(120, 23);
+            this.cmbTheme.TabIndex = 1;
+
             // ---------- panelButtons ----------
             this.panelButtons.Controls.Add(this.btnCancel);
             this.panelButtons.Controls.Add(this.btnOk);
             this.panelButtons.Controls.Add(this.btnDefault);
             this.panelButtons.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.panelButtons.Location = new System.Drawing.Point(0, 320);
+            this.panelButtons.Location = new System.Drawing.Point(0, 410);
             this.panelButtons.Name = "panelButtons";
             this.panelButtons.Size = new System.Drawing.Size(520, 60);
-            this.panelButtons.TabIndex = 2;
+            this.panelButtons.TabIndex = 3;
 
             this.btnDefault.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnDefault.Location = new System.Drawing.Point(12, 16);
@@ -272,9 +306,10 @@ namespace VisionPlatform.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(520, 412);
+            this.ClientSize = new System.Drawing.Size(520, 470);
             this.Controls.Add(this.groupSave);
             this.Controls.Add(this.groupRun);
+            this.Controls.Add(this.groupTheme);
             this.Controls.Add(this.panelButtons);
             this.ForeColor = System.Drawing.Color.Gainsboro;
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
@@ -291,6 +326,8 @@ namespace VisionPlatform.UI
             this.groupSave.PerformLayout();
             this.groupRun.ResumeLayout(false);
             this.groupRun.PerformLayout();
+            this.groupTheme.ResumeLayout(false);
+            this.groupTheme.PerformLayout();
             this.panelButtons.ResumeLayout(false);
             this.ResumeLayout(false);
         }
@@ -317,6 +354,10 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblYieldAlarm;
         private System.Windows.Forms.NumericUpDown numYieldAlarm;
         private System.Windows.Forms.Label lblYieldAlarmUnit;
+
+        private System.Windows.Forms.GroupBox groupTheme;
+        private System.Windows.Forms.Label lblTheme;
+        private System.Windows.Forms.ComboBox cmbTheme;
 
         private System.Windows.Forms.Panel panelButtons;
         private VisionPlatform.UI.UiButton btnDefault;

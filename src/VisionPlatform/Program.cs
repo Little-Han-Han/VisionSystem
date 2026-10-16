@@ -24,7 +24,7 @@ namespace VisionPlatform
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-
+            
             // 全局异常兜底：把 UI 线程 / 非 UI 线程的未处理异常落到日志，方便定位
             // （例如用户报告「画 ROI 报错」却看不到具体堆栈时，能从日志拿到精确异常）。
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -35,6 +35,13 @@ namespace VisionPlatform
 
             AppPaths.Ensure();
             ConfigStore.Load();
+
+            // 【换色板必须在第一个窗体创建之前】UiTheme 的颜色属性是静态的，
+            // 窗体构造函数里 ApplyTheme 读的就是当时的色板值；晚于此处会让首个窗体
+            // （启动画面）沿用深色、后续窗体才变浅色，出现「一半深一半浅」。
+            UiTheme.SetMode(UiThemeManager.ParseMode(ConfigStore.Current.Ui.Theme));
+            UiStyle.ForceOverride = UiTheme.IsLight;
+
             Logger.Info("===== VisionPlatform 启动 =====");
 
             // 恢复算法参数：优先加载上次使用的配方；无命名配方时直接用保存的检测参数快照
