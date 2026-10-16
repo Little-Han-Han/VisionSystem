@@ -1069,19 +1069,26 @@ namespace VisionSystem.Controls
         {
             _contextMenu = new ContextMenuStrip();
 
+            // Name 必须显式指定：语言设施按 "ImageViewer.<菜单项 Name>" 在对照表里
+            // 查译文（见 VisionPlatform.Core.Lang.ApplySelfDrawnMenu），
+            // 默认值是空字符串会导致查不到而跳过翻译。
             _menuSaveImage = new ToolStripMenuItem("保存图像(&S)");
+            _menuSaveImage.Name = "_menuSaveImage";
             _menuSaveImage.ToolTipText = "把当前图像（不含图形叠加）保存为文件";
             _menuSaveImage.Click += (s, e) => SaveImageToFile();
 
             _menuSaveSnapshot = new ToolStripMenuItem("保存视图截图(&V)");
+            _menuSaveSnapshot.Name = "_menuSaveSnapshot";
             _menuSaveSnapshot.ToolTipText = "把当前所见画面（含图形叠加、网格）保存为文件";
             _menuSaveSnapshot.Click += (s, e) => SaveSnapshotToFile();
 
             _menuFitImage = new ToolStripMenuItem("自适应图像(&F)");
+            _menuFitImage.Name = "_menuFitImage";
             _menuFitImage.ToolTipText = "缩放至完整可见并居中";
             _menuFitImage.Click += (s, e) => FitToWindow();
 
             _menuCrosshair = new ToolStripMenuItem("显示辅助十字线(&C)");
+            _menuCrosshair.Name = "_menuCrosshair";
             _menuCrosshair.CheckOnClick = true;
             _menuCrosshair.Click += (s, e) => ShowCrosshair = _menuCrosshair.Checked;
 

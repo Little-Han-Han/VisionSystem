@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using VisionPlatform.UI;
 
 namespace VisionPlatform.Core
 {
@@ -161,7 +160,14 @@ namespace VisionPlatform.Core
 
             foreach (Control c in root.Controls)
             {
-                if (IsSelfDrawn(c)) continue;   // 自绘控件整棵子树跳过
+                if (IsSelfDrawn(c))
+                {
+                    // 自绘控件的静态文本由它自己重绘，改 Text 没用，整棵子树跳过。
+                    // 但它身上挂的右键菜单是普通 ToolStrip，必须单独补一趟
+                    // （见 ApplySelfDrawnMenu 的说明）。
+                    ApplySelfDrawnMenu(c);
+                    continue;
+                }
 
                 ApplyOne(c, scope);
 
@@ -178,6 +184,10 @@ namespace VisionPlatform.Core
                 string s = Lookup(scope + "." + c.Name);
                 if (s != null) c.Text = s;
             }
+
+            // 右键菜单是 Component，同样不在 Controls 里，也要单独翻一趟
+            if (c.ContextMenuStrip != null)
+                ApplyStripItems(c.ContextMenuStrip.Items, scope);
 
             // ToolStripItem（菜单项 / 工具条按钮 / 状态条标签）不是 Control，
             // 不在 Controls 集合里，必须单独遍历 Items —— 与 UiStyle.cs 的
@@ -257,24 +267,102 @@ namespace VisionPlatform.Core
 
         /// <summary>
         /// 自绘控件名单：这些控件自己接管绘制，遍历改 Text 没用甚至有害，整棵子树跳过。
-        /// 名单与 <see cref="UiStyle.IsSelfDrawn"/> 保持一致。
+        /// <para>
+        /// ⚠ 本名单与 <c>UiStyle</c>（<c>UI/UiStyle.cs</c>）里的同名判断是<strong>两份拷贝</strong>，
+        /// 将来新增/移除自绘控件时<strong>必须同步改两处</strong>，否则会出现
+        /// 「主题套上了但语言没翻」或反之的诡异现象。
+        /// 之所以不直接调用 <c>UiStyle.IsSelfDrawn</c>：它是 private，且 Core 层
+        /// 不应反向依赖 UI 层（本项目 Core 是 AppPaths / Logger / AppSettings 这类基础层）。
+        /// </para>
         /// </summary>
         private static bool IsSelfDrawn(Control c)
         {
             if (c == null) return false;
-            if (c is UiButton) return true;
-
-            // VisionSystem.Controls（ImageViewer 等）与 Flow 系列自绘面板
-            string ns = c.GetType().Namespace;
-            if (!string.IsNullOrEmpty(ns) && ns == "VisionSystem.Controls") return true;
 
             Type t = c.GetType();
-            if (t.Namespace == "VisionPlatform.UI" &&
-                (t.Name == "FlowCanvasControl" || t.Name == "FlowPreviewPanel" ||
-                 t.Name == "NodeParamPanel" || t.Name == "UiTabControl"))
+            string ns = t.Namespace;
+
+            // VisionSystem.Controls（ImageViewer 等）：整个命名空间都是自绘
+            if (ns == "VisionSystem.Controls") return true;
+
+            // VisionPlatform.UI 里的自绘控件与自绘面板
+            // （按类型名比对而非硬引用 UiButton，同样是为了不产生 Core → UI 的依赖）
+            if (ns == "VisionPlatform.UI" &&
+                (t.Name == "UiButton" || t.Name == "FlowCanvasControl" ||
+                 t.Name == "FlowPreviewPanel" || t.Name == "NodeParamPanel" ||
+                 t.Name == "UiTabControl"))
                 return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// 自绘控件身上的右键菜单（<c>ContextMenuStrip</c>）补翻一趟。
+        /// <para>
+        /// 【为什么需要它】<see cref="ApplyTree"/> 在 <see cref="IsSelfDrawn"/> 处直接
+        /// <c>continue</c>，不会下探，所以自绘控件挂的菜单项永远翻不到。而
+        /// <c>ImageViewer</c>（<c>MainForm</c> 的 4 个视图 / <c>AlgoForm</c> /
+        /// <c>CameraForm</c> / <c>FlowPreviewPanel</c> 共 7 个实例）自带 4 条中文菜单
+        /// ——保存图像、保存视图截图、自适应图像、显示辅助十字线。
+        /// </para>
+        /// <para>
+        /// 【为什么用反射而不是硬引用】<c>ImageViewer</c> <strong>从不给基类
+        /// <c>Control.ContextMenuStrip</c> 赋值</strong>，它自己在
+        /// <c>ImageViewer.cs</c> 的右键处理里手动 <c>_contextMenu.Show(...)</c>，
+        /// 因此通用遍历（<see cref="ApplyOne"/> 里那个）拿不到它。
+        /// 这里退一步：对自绘控件反射找一个返回 <c>ContextMenuStrip</c> 的公开
+        /// 实例属性（<c>ImageViewer.ViewerContextMenu</c> 正是这种），
+        /// 既避免了 Core → VisionSystem.Controls 的反向依赖，将来新增自绘控件
+        /// 只要也按这个约定暴露属性即可，无需再改 Lang。
+        /// </para>
+        /// <para>
+        /// 【scope】用控件类型名（如 "ImageViewer"），而不是窗体名 —— 这类菜单是
+        /// 控件库自带、跨窗体共享的，按控件归类更合理，也只需要在表里写一遍。
+        /// </para>
+        /// </summary>
+        private static void ApplySelfDrawnMenu(Control c)
+        {
+            if (c == null) return;
+
+            ContextMenuStrip menu = FindContextMenu(c);
+            if (menu != null) ApplyStripItems(menu.Items, c.GetType().Name);
+        }
+
+        /// <summary>
+        /// 在自绘控件上找它自带的右键菜单：优先用基类 <c>Control.ContextMenuStrip</c>，
+        /// 没挂的话再反射找一个返回 <c>ContextMenuStrip</c> 的公开实例属性
+        /// （如 <c>ImageViewer.ViewerContextMenu</c>）。都找不到返回 null。
+        /// <para>
+        /// 只在自绘控件上调用（数量很少），且只在语言切换时走一次，反射开销可忽略。
+        /// </para>
+        /// </summary>
+        private static ContextMenuStrip FindContextMenu(Control c)
+        {
+            if (c.ContextMenuStrip != null) return c.ContextMenuStrip;
+
+            try
+            {
+                foreach (System.Reflection.PropertyInfo p in c.GetType().GetProperties(
+                             System.Reflection.BindingFlags.Public |
+                             System.Reflection.BindingFlags.Instance))
+                {
+                    if (p.PropertyType != typeof(ContextMenuStrip)) continue;
+                    if (!p.CanRead) continue;
+                    if (p.GetIndexParameters().Length != 0) continue;   // 跳过索引器
+
+                    // 必须判非空再返回：继承来的 Control.ContextMenuStrip 也是
+                    // ContextMenuStrip 类型但值是 null，若直接 return 会漏掉
+                    // 控件自己暴露的那个菜单（枚举顺序不保证）。
+                    ContextMenuStrip m = p.GetValue(c, null) as ContextMenuStrip;
+                    if (m != null) return m;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("读取自绘控件右键菜单失败：" + ex.Message);
+            }
+
+            return null;
         }
 
         // ====================================================================
@@ -294,6 +382,17 @@ namespace VisionPlatform.Core
 
             // ---- 控件静态文本（Lang.ApplyTo 用）----
             _ui["MainForm.tsBtnRefresh"] = new[] { "刷新", "Refresh" };
+
+            // ---- 自绘控件自带右键菜单（ApplySelfDrawnMenu 第二趟用）----
+            // key 前缀取控件类型名而非窗体名：ImageViewer 的菜单是控件库自带、
+            // 跨窗体共享（MainForm 四视图 / AlgoForm / CameraForm / FlowPreviewPanel），
+            // 按控件归类只需在表里写一遍。菜单项 Name 在 ImageViewer.cs 里显式指定。
+            _ui["ImageViewer._menuSaveImage"] = new[] { "保存图像(&S)", "Save Image(&S)" };
+            _ui["ImageViewer._menuSaveImage.ToolTipText"] =
+                new[] { "把当前图像（不含图形叠加）保存为文件", "Save the current image (without overlays) to a file" };
+            _ui["ImageViewer._menuSaveSnapshot"] = new[] { "保存视图截图(&V)", "Save Snapshot(&V)" };
+            _ui["ImageViewer._menuFitImage"] = new[] { "自适应图像(&F)", "Fit Image(&F)" };
+            _ui["ImageViewer._menuCrosshair"] = new[] { "显示辅助十字线(&C)", "Show Crosshair(&C)" };
         }
     }
 }
