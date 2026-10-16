@@ -186,8 +186,13 @@ namespace VisionPlatform.UI
             this.viewer.Location = new System.Drawing.Point(0, 0);
             this.viewer.Name = "viewer";
             this.viewer.NewShapeColor = System.Drawing.Color.Lime;
+            this.viewer.ShowHud = true;
             this.viewer.Size = new System.Drawing.Size(640, 292);
             this.viewer.TabIndex = 0;
+            // 拖框画 ROI：图形先被控件加入 Shapes 再触发事件，事件里接管渲染
+            this.viewer.ShapeCreated += this.OnViewerShapeCreated;
+            // Esc 取消拖框（控件自身只取消当前拖拽，不退出我们的取框状态）
+            this.viewer.KeyDown += this.OnViewerKeyDown;
             // 
             // lblEmpty
             // 
@@ -219,6 +224,10 @@ namespace VisionPlatform.UI
             // 
             this.pullTimer.Enabled = true;
             this.pullTimer.Interval = 33;
+            // ★ 事件订阅与 Start 曾在 VS 重序列化 FlowPreviewPanel 时丢失（75ed7fb），
+            //   导致 OnPullTick 永不执行、运行预览全断——恢复并留此注释防再丢。
+            this.pullTimer.Tick += this.OnPullTick;
+            this.pullTimer.Start();
             // 
             // FlowPreviewPanel
             // 
