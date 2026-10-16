@@ -61,6 +61,7 @@
     <Compile Include="Core\AppSettings.cs" />
     <Compile Include="Core\ImageStore.cs" />
     <Compile Include="Core\Json.cs" />
+    <Compile Include="Core\Lang.cs" />
     <Compile Include="Core\LogEntry.cs" />
     <Compile Include="Core\Logger.cs" />
     <Compile Include="Core\OpResult.cs" />

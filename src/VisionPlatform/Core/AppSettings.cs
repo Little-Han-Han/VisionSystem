@@ -172,11 +172,32 @@ namespace VisionPlatform.Core
         public string CurrentProduct { get; set; }
 
         /// <summary>
+        /// 界面语言：<c>"zh-CN"</c>（默认）或 <c>"en"</c>，取值见 <see cref="Lang"/>。
+        /// 运行时热切换，无需重启软件。
+        /// <para>【用 string 不用 enum】DataContractJsonSerializer 会把 enum 序列化成数字，
+        /// 配置文件里出现 <c>"Language":1</c> 这种不可读的值，排查问题很痛苦；
+        /// 项目里 <see cref="SystemSettings.ImageFormat"/> 存 "PNG" 字符串就是先例。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Language { get; set; }
+
+        /// <summary>
         /// 最大并行流程数（默认 4，合法范围 1~8）。越界值由
         /// <see cref="ClampMaxParallelFlows"/> 与 <see cref="ConfigStore.Load"/> 纠正。
         /// </summary>
         [System.Runtime.Serialization.DataMember]
         public int MaxParallelFlows { get; set; }
+
+        /// <summary>
+        /// 界面主题模式："Dark" / "Light"（大小写不敏感，其余值一律按 Dark 处理）。
+        /// 由 <see cref="UiThemeManager"/> 写入，<see cref="Program.Main"/> 在首个窗体
+        /// 创建之前读取并套用。
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Theme { get; set; }
+
+        /// <summary>默认主题（深色）。</summary>
+        public const string DefaultTheme = "Dark";
 
         /// <summary>最大并行流程数的默认值。</summary>
         public const int DefaultMaxParallelFlows = 4;
@@ -194,6 +215,7 @@ namespace VisionPlatform.Core
             LogCollapsed = false;
             CurrentProduct = "";
             MaxParallelFlows = DefaultMaxParallelFlows;
+            Language = Lang.ZhCN;
         }
 
         /// <summary>把最大并行流程数钳制到 1~8（0 / 99 之类的越界值都会被纠正）。
@@ -226,6 +248,8 @@ namespace VisionPlatform.Core
             // 缺失值（0 → 4）比"抬到 1"更符合预期，故 Clone 也走归一化
             clone.CurrentProduct = CurrentProduct ?? "";
             clone.MaxParallelFlows = NormalizeMaxParallelFlows(MaxParallelFlows);
+            // 缺失值归一化为默认语言；Lang.Normalize 会在保存端再做一次兜底
+            clone.Language = string.IsNullOrWhiteSpace(Language) ? Lang.ZhCN : Language;
             if (ViewBindings != null) clone.ViewBindings = new List<string>(ViewBindings);
             return clone;
         }
@@ -318,6 +342,12 @@ namespace VisionPlatform.Core
             // - AllowCameraShare 缺失即 false → 正是默认值（严格独占），无需额外处理
             if (cfg.Ui.CurrentProduct == null) cfg.Ui.CurrentProduct = "";
             cfg.Ui.MaxParallelFlows = UiSettings.NormalizeMaxParallelFlows(cfg.Ui.MaxParallelFlows);
+
+            // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有 Language 字段，
+            // 反序列化后为 null，这里归一化为默认语言 zh-CN。
+            // 刻意不"钳制"未知代码（如手改出的 "jp"）：语言代码是开放集合，
+            // 钳成 zh-CN 会把用户手改的值静默抹掉，交由 Lang.Normalize 在读取端兜底即可。
+            if (string.IsNullOrWhiteSpace(cfg.Ui.Language)) cfg.Ui.Language = Lang.ZhCN;
 
             _current = cfg;
             return cfg;
