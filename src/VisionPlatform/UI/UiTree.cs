@@ -43,7 +43,7 @@ namespace VisionPlatform.UI
             tree.BorderStyle = BorderStyle.None;         // 边框交给外层容器，避免双线
             // 字体比正文大一号（10pt，正文 FontBody 为 9pt）：解决树节点文字偏小、显得拥挤的问题。
             // 显式写死字体名 + 字号，保证工具箱 / 端子两棵树观感一致。
-            tree.Font = new Font("Microsoft YaHei UI", 10F);
+            tree.Font = new Font(UiTheme.FamilyBody, 10f);
 
             // 交互：整行选中（点空白处也能选中）、失焦后仍保持高亮
             tree.FullRowSelect = true;

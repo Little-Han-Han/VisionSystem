@@ -55,6 +55,16 @@ namespace VisionPlatform.UI
         Ng
     }
 
+    /// <summary>界面主题模式：深色 / 浅色（用户在「系统设置 → 界面主题」里切换）。</summary>
+    public enum UiThemeMode
+    {
+        /// <summary>深色（出厂默认，工业 HMI 常规配色）。</summary>
+        Dark,
+
+        /// <summary>浅色。</summary>
+        Light
+    }
+
     /// <summary>统计数值的语义着色。</summary>
     public enum UiStatKind
     {
@@ -82,55 +92,143 @@ namespace VisionPlatform.UI
     /// </summary>
     public static class UiTheme
     {
+        // ---------------------- 主题模式（深 / 浅）----------------------
+
+        /// <summary>
+        /// 静态构造：先给深色板（与改造前逐个字段的默认值逐位相同），
+        /// 保证「不显式切换」时行为与历史版本完全一致。
+        /// </summary>
+        static UiTheme()
+        {
+            Mode = UiThemeMode.Dark;
+            ApplyDark();
+        }
+
+        /// <summary>当前主题模式。</summary>
+        public static UiThemeMode Mode { get; private set; }
+
+        /// <summary>是否浅色模式（自绘控件判断底色 / 描边时用）。</summary>
+        public static bool IsLight
+        {
+            get { return Mode == UiThemeMode.Light; }
+        }
+
+        /// <summary>色板被切换后触发（自绘控件据此重取色并重绘）。</summary>
+        public static event EventHandler Changed;
+
+        /// <summary>
+        /// 切换色板。幂等：与当前模式相同则直接返回，不触发 <see cref="Changed"/>。
+        /// 换值后再触发，调用方（<see cref="UiThemeManager"/>）负责重套整棵控件树。
+        /// </summary>
+        public static void SetMode(UiThemeMode mode)
+        {
+            if (Mode == mode) return;
+
+            Mode = mode;
+            if (mode == UiThemeMode.Light) ApplyLight();
+            else ApplyDark();
+
+            EventHandler handler = Changed;
+            if (handler != null) handler(null, EventArgs.Empty);
+        }
+
+        /// <summary>深色板：与改造前的 16 个默认值逐位相同（深色模式像素级无回归的保证）。</summary>
+        private static void ApplyDark()
+        {
+            ColorAppBg         = FromHex(0x26, 0x26, 0x2E);   // #26262E
+            ColorPanelBg       = FromHex(0x2A, 0x2A, 0x32);   // #2A2A32
+            ColorCardBg        = FromHex(0x34, 0x34, 0x3E);   // #34343E
+            ColorHeaderBg      = FromHex(0x1E, 0x1E, 0x26);   // #1E1E26
+            ColorViewBg        = FromHex(0x18, 0x18, 0x20);   // #181820
+            ColorDivider       = FromHex(0x46, 0x46, 0x4E);   // #46464E
+            ColorTextPrimary   = FromHex(0xDC, 0xE0, 0xE8);   // #DCE0E8
+            ColorTextSecondary = FromHex(0xA0, 0xA6, 0xB2);   // #A0A6B2
+            ColorAccent        = FromHex(0x00, 0xA0, 0xE6);   // #00A0E6
+            ColorOk            = FromHex(0x2E, 0xCC, 0x71);   // #2ECC71
+            ColorNg            = FromHex(0xE7, 0x4C, 0x3C);   // #E74C3C
+            ColorWarn          = FromHex(0xF3, 0x9C, 0x12);   // #F39C12
+            ColorRunning       = FromHex(0x34, 0x78, 0xDC);   // #3478DC
+            ColorDisabled      = FromHex(0x3A, 0x3A, 0x44);   // #3A3A44
+            ColorNeutral       = FromHex(0x48, 0x48, 0x54);   // #484854
+            ColorTextOnFill    = Color.White;
+        }
+
+        /// <summary>
+        /// 浅色板。
+        /// <para>【图像区恒深色】<see cref="ColorViewBg"/> 在浅色模式下<strong>仍为 #181820</strong>：
+        /// 工业视觉软件（VisionPro / Halcon）通行做法是「浅色外壳 + 深色图像区」——
+        /// 图像要在暗背景下才看得清 ROI 描边与叠加图形。这也让 ImageViewer /
+        /// FlowCanvasControl 等自绘图像控件零改动。</para>
+        /// </summary>
+        private static void ApplyLight()
+        {
+            ColorAppBg         = FromHex(0xF2, 0xF3, 0xF5);   // #F2F3F5 窗体底
+            ColorPanelBg       = FromHex(0xFF, 0xFF, 0xFF);   // #FFFFFF 面板
+            ColorCardBg        = FromHex(0xEA, 0xEC, 0xF0);   // #EAECF0 卡片 / 输入区
+            ColorHeaderBg      = FromHex(0xE3, 0xE6, 0xEB);   // #E3E6EB 标题栏 / 工具栏
+            ColorViewBg        = FromHex(0x18, 0x18, 0x20);   // #181820 图像区（恒深色）
+            ColorDivider       = FromHex(0xC7, 0xCC, 0xD4);   // #C7CCD4
+            ColorTextPrimary   = FromHex(0x1B, 0x1F, 0x26);   // #1B1F26
+            ColorTextSecondary = FromHex(0x5A, 0x62, 0x70);   // #5A6270
+            ColorAccent        = FromHex(0x00, 0x78, 0xC8);   // #0078C8 浅底上要加深
+            ColorOk            = FromHex(0x1E, 0x9E, 0x55);   // #1E9E55
+            ColorNg            = FromHex(0xD0, 0x34, 0x2C);   // #D0342C
+            ColorWarn          = FromHex(0xC8, 0x7A, 0x00);   // #C87A00
+            ColorRunning       = FromHex(0x2A, 0x62, 0xB8);   // #2A62B8
+            ColorDisabled      = FromHex(0xD3, 0xD7, 0xDE);   // #D3D7DE
+            ColorNeutral       = FromHex(0xB9, 0xBE, 0xC8);   // #B9BEC8
+            ColorTextOnFill    = Color.White;
+        }
+
         // ---------------------- 语义色（13 项核心 + 2 项补充）----------------------
 
-        /// <summary>应用底色（窗体背景）#26262E。</summary>
-        public static readonly Color ColorAppBg = FromHex(0x26, 0x26, 0x2E);
+        /// <summary>应用底色（窗体背景）。深色 #26262E / 浅色 #F2F3F5。</summary>
+        public static Color ColorAppBg { get; private set; }
 
-        /// <summary>面板背景（右栏 / 参数面板）#2A2A32。</summary>
-        public static readonly Color ColorPanelBg = FromHex(0x2A, 0x2A, 0x32);
+        /// <summary>面板背景（右栏 / 参数面板）。深色 #2A2A32 / 浅色 #FFFFFF。</summary>
+        public static Color ColorPanelBg { get; private set; }
 
-        /// <summary>卡片背景（统计卡、输入区）#34343E。</summary>
-        public static readonly Color ColorCardBg = FromHex(0x34, 0x34, 0x3E);
+        /// <summary>卡片背景（统计卡、输入区）。深色 #34343E / 浅色 #EAECF0。</summary>
+        public static Color ColorCardBg { get; private set; }
 
-        /// <summary>标题栏 / 工具栏 / 分组标题底色 #1E1E26。</summary>
-        public static readonly Color ColorHeaderBg = FromHex(0x1E, 0x1E, 0x26);
+        /// <summary>标题栏 / 工具栏 / 分组标题底色。深色 #1E1E26 / 浅色 #E3E6EB。</summary>
+        public static Color ColorHeaderBg { get; private set; }
 
-        /// <summary>图像区底色 #181820。</summary>
-        public static readonly Color ColorViewBg = FromHex(0x18, 0x18, 0x20);
+        /// <summary>图像区底色。深浅两板恒为 #181820（图像要在暗背景下才看得清 ROI 描边）。</summary>
+        public static Color ColorViewBg { get; private set; }
 
-        /// <summary>分隔线 / 区块边框 #46464E。</summary>
-        public static readonly Color ColorDivider = FromHex(0x46, 0x46, 0x4E);
+        /// <summary>分隔线 / 区块边框。深色 #46464E / 浅色 #C7CCD4。</summary>
+        public static Color ColorDivider { get; private set; }
 
-        /// <summary>主文本（数值、正文）#DCE0E8。</summary>
-        public static readonly Color ColorTextPrimary = FromHex(0xDC, 0xE0, 0xE8);
+        /// <summary>主文本（数值、正文）。深色 #DCE0E8 / 浅色 #1B1F26。</summary>
+        public static Color ColorTextPrimary { get; private set; }
 
-        /// <summary>次文本（标签、单位）#A0A6B2。</summary>
-        public static readonly Color ColorTextSecondary = FromHex(0xA0, 0xA6, 0xB2);
+        /// <summary>次文本（标签、单位）。深色 #A0A6B2 / 浅色 #5A6270。</summary>
+        public static Color ColorTextSecondary { get; private set; }
 
-        /// <summary>强调色（分区标题、选中态，深天蓝）#00A0E6。</summary>
-        public static readonly Color ColorAccent = FromHex(0x00, 0xA0, 0xE6);
+        /// <summary>强调色（分区标题、选中态）。深色 #00A0E6 / 浅色 #0078C8。</summary>
+        public static Color ColorAccent { get; private set; }
 
-        /// <summary>OK：徽标 / OK 计数 / 成功（绿）#2ECC71 = RGB(46,204,113)。</summary>
-        public static readonly Color ColorOk = FromHex(0x2E, 0xCC, 0x71);
+        /// <summary>OK：徽标 / OK 计数 / 成功（绿）。深色 #2ECC71 / 浅色 #1E9E55。</summary>
+        public static Color ColorOk { get; private set; }
 
-        /// <summary>NG：徽标 / NG 计数 / 失败（红）#E74C3C = RGB(231,76,60)。</summary>
-        public static readonly Color ColorNg = FromHex(0xE7, 0x4C, 0x3C);
+        /// <summary>NG：徽标 / NG 计数 / 失败（红）。深色 #E74C3C / 浅色 #D0342C。</summary>
+        public static Color ColorNg { get; private set; }
 
-        /// <summary>暂停 / 告警（橙）#F39C12 = RGB(243,156,18)。</summary>
-        public static readonly Color ColorWarn = FromHex(0xF3, 0x9C, 0x12);
+        /// <summary>暂停 / 告警（橙）。深色 #F39C12 / 浅色 #C87A00。</summary>
+        public static Color ColorWarn { get; private set; }
 
-        /// <summary>运行中（蓝）#3478DC = RGB(52,120,220)。</summary>
-        public static readonly Color ColorRunning = FromHex(0x34, 0x78, 0xDC);
+        /// <summary>运行中（蓝）。深色 #3478DC / 浅色 #2A62B8。</summary>
+        public static Color ColorRunning { get; private set; }
 
-        /// <summary>未开始 / 禁用（灰）#3A3A44 = RGB(58,58,68)。</summary>
-        public static readonly Color ColorDisabled = FromHex(0x3A, 0x3A, 0x44);
+        /// <summary>未开始 / 禁用（灰）。深色 #3A3A44 / 浅色 #D3D7DE。</summary>
+        public static Color ColorDisabled { get; private set; }
 
-        /// <summary>中性按钮底色（清空统计等）#484854 = RGB(72,72,84)。</summary>
-        public static readonly Color ColorNeutral = FromHex(0x48, 0x48, 0x54);
+        /// <summary>中性按钮底色（清空统计等）。深色 #484854 / 浅色 #B9BEC8。</summary>
+        public static Color ColorNeutral { get; private set; }
 
         /// <summary>填充色块上的文字色（徽标 / 警示条 / 彩色按钮上的前景），纯白。</summary>
-        public static readonly Color ColorTextOnFill = Color.White;
+        public static Color ColorTextOnFill { get; private set; }
 
         // ---------------------- 字体族 ----------------------
 

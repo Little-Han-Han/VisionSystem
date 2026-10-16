@@ -22,6 +22,16 @@ namespace VisionPlatform.UI
     /// </summary>
     public static class UiStyle
     {
+        /// <summary>
+        /// 是否<strong>无条件</strong>覆盖控件底色（忽略 <c>IsSystemColor</c> 门）。
+        /// <para>默认 false —— 深色模式下行为与历史版本逐位相同（只改系统默认色，
+        /// Designer 写死的深色一律保留）。</para>
+        /// <para>【为什么必须有它】浅色主题下，Designer 里写死的深色（如
+        /// <c>Color.FromArgb(30,30,38)</c> 的输入框）在浅底上会变成一块黑斑，
+        /// 只有强制覆盖才能把它们一起翻成浅色。深色模式严禁置 true。</para>
+        /// </summary>
+        public static bool ForceOverride { get; set; }
+
         /// <summary>套用整窗体（含所有子控件）。应在构造函数末尾调用一次。</summary>
         public static void ApplyForm(Form form)
         {
@@ -78,7 +88,7 @@ namespace VisionPlatform.UI
             Panel panel = c as Panel;
             if (panel != null)
             {
-                if (IsSystemColor(panel.BackColor)) panel.BackColor = UiTheme.ColorPanelBg;
+                if (NeedOverride(panel.BackColor)) panel.BackColor = UiTheme.ColorPanelBg;
                 panel.ForeColor = UiTheme.ColorTextPrimary;
                 return;
             }
@@ -86,7 +96,7 @@ namespace VisionPlatform.UI
             GroupBox group = c as GroupBox;
             if (group != null)
             {
-                if (IsSystemColor(group.BackColor)) group.BackColor = UiTheme.ColorPanelBg;
+                if (NeedOverride(group.BackColor)) group.BackColor = UiTheme.ColorPanelBg;
                 group.ForeColor = UiTheme.ColorTextPrimary;
                 group.Font = UiTheme.FontBody;
                 return;
@@ -114,7 +124,7 @@ namespace VisionPlatform.UI
                 label.ForeColor = UiTheme.ColorTextPrimary;
                 label.Font = UiTheme.FontBody;
                 // 只把「未显式设色」的标签底色统一；已设色（徽标 / 分组标题）保持不动
-                if (IsSystemColor(label.BackColor) || label.BackColor == Color.Transparent)
+                if (NeedOverride(label.BackColor) || label.BackColor == Color.Transparent)
                     label.BackColor = UiTheme.ColorPanelBg;
                 return;
             }
@@ -123,7 +133,7 @@ namespace VisionPlatform.UI
             TextBox text = c as TextBox;
             if (text != null)
             {
-                if (IsSystemColor(text.BackColor)) text.BackColor = UiTheme.ColorCardBg;
+                if (NeedOverride(text.BackColor)) text.BackColor = UiTheme.ColorCardBg;
                 text.ForeColor = UiTheme.ColorTextPrimary;
                 text.Font = UiTheme.FontBody;
                 text.BorderStyle = BorderStyle.FixedSingle;
@@ -133,7 +143,7 @@ namespace VisionPlatform.UI
             ComboBox combo = c as ComboBox;
             if (combo != null)
             {
-                if (IsSystemColor(combo.BackColor)) combo.BackColor = UiTheme.ColorCardBg;
+                if (NeedOverride(combo.BackColor)) combo.BackColor = UiTheme.ColorCardBg;
                 combo.ForeColor = UiTheme.ColorTextPrimary;
                 combo.Font = UiTheme.FontBody;
                 if (combo.DropDownStyle != ComboBoxStyle.Simple)
@@ -144,7 +154,7 @@ namespace VisionPlatform.UI
             NumericUpDown numeric = c as NumericUpDown;
             if (numeric != null)
             {
-                if (IsSystemColor(numeric.BackColor)) numeric.BackColor = UiTheme.ColorCardBg;
+                if (NeedOverride(numeric.BackColor)) numeric.BackColor = UiTheme.ColorCardBg;
                 numeric.ForeColor = UiTheme.ColorTextPrimary;
                 numeric.Font = UiTheme.FontBody;
                 numeric.BorderStyle = BorderStyle.FixedSingle;
@@ -156,7 +166,7 @@ namespace VisionPlatform.UI
             {
                 check.ForeColor = UiTheme.ColorTextPrimary;
                 check.Font = UiTheme.FontBody;
-                if (IsSystemColor(check.BackColor)) check.BackColor = UiTheme.ColorPanelBg;
+                if (NeedOverride(check.BackColor)) check.BackColor = UiTheme.ColorPanelBg;
                 return;
             }
 
@@ -165,7 +175,7 @@ namespace VisionPlatform.UI
             {
                 radio.ForeColor = UiTheme.ColorTextPrimary;
                 radio.Font = UiTheme.FontBody;
-                if (IsSystemColor(radio.BackColor)) radio.BackColor = UiTheme.ColorPanelBg;
+                if (NeedOverride(radio.BackColor)) radio.BackColor = UiTheme.ColorPanelBg;
                 return;
             }
 
@@ -175,7 +185,7 @@ namespace VisionPlatform.UI
             {
                 btn.FlatStyle = FlatStyle.Flat;
                 btn.FlatAppearance.BorderSize = 0;
-                if (IsSystemColor(btn.BackColor)) btn.BackColor = UiTheme.ColorCardBg;
+                if (NeedOverride(btn.BackColor)) btn.BackColor = UiTheme.ColorCardBg;
                 btn.ForeColor = UiTheme.ColorTextPrimary;
                 btn.Font = UiTheme.FontButton;
                 btn.UseVisualStyleBackColor = false;
@@ -186,7 +196,7 @@ namespace VisionPlatform.UI
             ListBox list = c as ListBox;
             if (list != null)
             {
-                if (IsSystemColor(list.BackColor)) list.BackColor = UiTheme.ColorViewBg;
+                if (NeedOverride(list.BackColor)) list.BackColor = UiTheme.ColorViewBg;
                 list.ForeColor = UiTheme.ColorTextPrimary;
                 list.Font = UiTheme.FontBody;
                 list.BorderStyle = BorderStyle.FixedSingle;
@@ -237,9 +247,18 @@ namespace VisionPlatform.UI
             PictureBox picture = c as PictureBox;
             if (picture != null)
             {
-                if (IsSystemColor(picture.BackColor)) picture.BackColor = UiTheme.ColorViewBg;
+                if (NeedOverride(picture.BackColor)) picture.BackColor = UiTheme.ColorViewBg;
                 return;
             }
+        }
+
+        /// <summary>
+        /// 是否需要覆盖该底色：<see cref="ForceOverride"/> 为真时一律覆盖，
+        /// 否则只覆盖"设计器没指定、沿用系统默认"的颜色。
+        /// </summary>
+        private static bool NeedOverride(Color c)
+        {
+            return ForceOverride || IsSystemColor(c);
         }
 
         /// <summary>

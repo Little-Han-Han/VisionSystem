@@ -32,7 +32,7 @@ namespace VisionPlatform.UI
             _center = center;
 
             Name = "模板特征";
-            StrokeColor = Color.Orange;
+            StrokeColor = UiTheme.ColorWarn;
             LineWidth = 1f;
             Visible = true;
             IsEditable = false;   // 只读图层：不进选中、不出控制点
