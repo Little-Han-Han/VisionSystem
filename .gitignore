@@ -387,3 +387,11 @@ ThirdParty/**/*.pdb
 # 导致 clone 后缺少 .lib 无法编译。这里把它放行（约 6.5MB，体积可接受）。
 !ThirdParty/**/lib/x64/
 !ThirdParty/**/lib/x64/*.lib
+# ============================================================
+# 测试/冒烟程序（用户要求：不入库，本地保留，确认后自行上传）
+# 注意：VisionSystem.sln 仍引用这三个工程——新机器 clone 后加载解决方案
+# 会提示缺少项目，单独构建 VisionPlatform / VisionAlgo.Native 不受影响。
+# ============================================================
+src/SmokeAlgo/
+src/SmokeUi/
+src/SmokeParallel/
