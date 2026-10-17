@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using VisionPlatform.Camera;
+using VisionPlatform.Communication;
 using VisionPlatform.Core;
 using VisionPlatform.Native;
 using VisionSystem.Controls.Geometry;
@@ -344,6 +345,8 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.ColorExtractor: return RunColorExtractor(s, node, p);
                 case FlowNodeType.ObjectDetect:  return RunObjectDetect(s, node, p);
                 case FlowNodeType.Ocr:           return RunOcr(s, node, p);
+                case FlowNodeType.SendData:      return RunSendData(s, node, p);
+                case FlowNodeType.ReceiveData:   return RunReceiveData(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -903,6 +906,213 @@ namespace VisionPlatform.Flow
                 if (grayOwned && gray != null) gray.Dispose();
                 if (crop != null) crop.Dispose();
             }
+        }
+
+        // ---------------------- 发送数据 / 接收数据（绑定「通讯」界面里已配置的通讯）----------------------
+
+        /// <summary>
+        /// 发送数据：按名称绑定一条通讯，发固定文本 / 格式化文本，或写 Modbus 单个保持寄存器（FC06）。
+        /// <para>不依赖图像：输入端子是可选直通，无输入帧也照常执行（纯通讯场景可独立成链）。</para>
+        /// </summary>
+        private bool RunSendData(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            string commName = ResolveComm(node, "发送数据", p);
+            if (commName == null) return false;
+
+            string mode = node.GetString("DataMode", "FixedText");
+            bool autoConnect = node.GetBool("AutoConnect", true);
+
+            string content;
+            if (string.Equals(mode, "ModbusWrite", StringComparison.OrdinalIgnoreCase))
+            {
+                int addr = node.GetInt("MbAddress", 0);
+                int val = node.GetInt("MbValue", 0);
+                if (addr < 0 || addr > 65535 || val < 0 || val > 65535)
+                {
+                    p.Summary = "发送数据：Modbus 地址 / 写入值需在 0~65535（当前 "
+                              + addr.ToString(CultureInfo.InvariantCulture) + " / "
+                              + val.ToString(CultureInfo.InvariantCulture) + "）";
+                    return false;
+                }
+
+                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p)) return false;
+
+                OpResult wr = CommRegistry.ModbusWrite(commName, (ushort)addr, (ushort)val);
+                if (!wr.Success)
+                {
+                    p.Summary = "发送数据：" + Tail(wr.Message);
+                    return false;
+                }
+
+                content = string.Format(CultureInfo.InvariantCulture, "寄存器 {0} = {1}", addr, val);
+            }
+            else
+            {
+                content = string.Equals(mode, "Format", StringComparison.OrdinalIgnoreCase)
+                    ? ExpandCommFormat(node.GetString("Format", ""), s)
+                    : node.GetString("Text", "");
+
+                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p)) return false;
+
+                OpResult sr = CommRegistry.SendText(commName, content);
+                if (!sr.Success)
+                {
+                    p.Summary = "发送数据：" + Tail(sr.Message);
+                    return false;
+                }
+            }
+
+            CaptureCommFrame(s, p);
+            p.Summary = "发送数据：" + commName + " ← " + ClipText(content, 80);
+            return true;
+        }
+
+        /// <summary>
+        /// 接收数据：按名称绑定一条通讯，取最近一条文本，或读 Modbus 保持寄存器（FC03）拼成可读文本。
+        /// </summary>
+        private bool RunReceiveData(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            string commName = ResolveComm(node, "接收数据", p);
+            if (commName == null) return false;
+
+            string mode = node.GetString("Mode", "TcpText");
+            bool autoConnect = node.GetBool("AutoConnect", true);
+            if (autoConnect && !EnsureCommConnected(commName, "接收数据", p)) return false;
+
+            string content;
+            if (string.Equals(mode, "ModbusRead", StringComparison.OrdinalIgnoreCase))
+            {
+                int addr = node.GetInt("MbAddress", 0);
+                int cnt = node.GetInt("MbCount", 1);
+                if (addr < 0 || addr > 65535)
+                {
+                    p.Summary = "接收数据：Modbus 起始地址需在 0~65535（当前 "
+                              + addr.ToString(CultureInfo.InvariantCulture) + "）";
+                    return false;
+                }
+                if (cnt < 1) cnt = 1;
+                if (cnt > 125) cnt = 125;      // FC03 单次上限
+
+                OpResult<ushort[]> rr = CommRegistry.ModbusRead(commName, (ushort)addr, (ushort)cnt);
+                if (!rr.Success)
+                {
+                    p.Summary = "接收数据：" + Tail(rr.Message);
+                    return false;
+                }
+
+                ushort[] regs = rr.Value;
+                if (regs == null) regs = new ushort[0];
+
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < regs.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(regs[i].ToString(CultureInfo.InvariantCulture));
+                }
+                content = sb.Length > 0 ? sb.ToString() : "(空)";
+            }
+            else
+            {
+                int timeout = node.GetInt("TimeoutMs", 2000);
+                if (timeout < 0) timeout = 0;
+
+                // CommRegistry 只保留「最近一条」文本，这里在超时窗口内轮询等它出现
+                string text = CommRegistry.LastReceived(commName);
+                var sw = Stopwatch.StartNew();
+                while (string.IsNullOrEmpty(text) && sw.ElapsedMilliseconds < timeout)
+                {
+                    System.Threading.Thread.Sleep(20);
+                    text = CommRegistry.LastReceived(commName);
+                }
+                sw.Stop();
+
+                if (string.IsNullOrEmpty(text))
+                {
+                    // 收不到数据不是算法失败：判「跳过」并在摘要里说清，避免整条流程被误判 NG
+                    CaptureCommFrame(s, p);
+                    p.Status = FlowNodeStatus.Skipped;
+                    p.Summary = "接收数据：" + commName + " → 无数据（"
+                              + timeout.ToString(CultureInfo.InvariantCulture)
+                              + "ms 内未收到内容，按跳过处理，不判 NG）";
+                    return true;
+                }
+                content = text;
+            }
+
+            CaptureCommFrame(s, p);
+            p.Summary = "接收数据：" + commName + " → " + ClipText(content, 80);
+            return true;
+        }
+
+        /// <summary>取出节点绑定的通讯名并做存在性校验；失败时写好摘要并返回 null。</summary>
+        private static string ResolveComm(FlowNode node, string prefix, FlowNodeProgress p)
+        {
+            string name = node.GetString("CommName", "");
+            if (string.IsNullOrEmpty(name))
+            {
+                p.Summary = prefix + "：未绑定通讯（请到「通讯」界面添加并保存后，再在本节点选择）";
+                return null;
+            }
+            if (CommRegistry.Config(name) == null)
+            {
+                p.Summary = prefix + "：没有名为「" + name + "」的通讯（请到「通讯」界面检查配置）";
+                return null;
+            }
+            return name;
+        }
+
+        /// <summary>AutoConnect 时未连接就连一次；连接失败写摘要并返回 false（已连接直接 true）。</summary>
+        private static bool EnsureCommConnected(string commName, string prefix, FlowNodeProgress p)
+        {
+            if (CommRegistry.IsConnected(commName)) return true;
+
+            OpResult r = CommRegistry.Connect(commName);
+            if (r.Success) return true;
+
+            p.Summary = prefix + "：" + Tail(r.Message);
+            return false;
+        }
+
+        /// <summary>克隆当前工作帧供预览区显示（通讯节点不改图，也不调 ReplaceFrame）。</summary>
+        private static void CaptureCommFrame(FlowRunSession s, FlowNodeProgress p)
+        {
+            if (s.Current == null) return;
+
+            if (p.Frame != null) p.Frame.Dispose();
+            try { p.Frame = (Bitmap)s.Current.Clone(); }
+            catch (Exception) { p.Frame = null; }
+        }
+
+        /// <summary>
+        /// 展开格式化模板：{Summary} 上游摘要 / {OkNg} OK·NG / {Time} 时间。
+        /// 取不到的占位符<strong>原样保留</strong>（不抛异常、不填空串）。
+        /// </summary>
+        private static string ExpandCommFormat(string format, FlowRunSession s)
+        {
+            string text = format ?? "";
+
+            string summary = "";
+            if (s != null && s.Summaries != null && s.Summaries.Count > 0)
+                summary = s.Summaries[s.Summaries.Count - 1] ?? "";
+
+            if (summary.Length > 0)
+                text = text.Replace("{Summary}", summary);
+
+            text = text.Replace("{OkNg}", (s != null && s.Passed) ? "OK" : "NG");
+            text = text.Replace("{Time}", DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
+            return text;
+        }
+
+        /// <summary>把收发内容压成一行：换行转空格，超长截断并附总长度。</summary>
+        private static string ClipText(string text, int max)
+        {
+            if (string.IsNullOrEmpty(text)) return "(空)";
+
+            string one = text.Replace("\r", " ").Replace("\n", " ");
+            if (one.Length <= max) return one;
+
+            return one.Substring(0, max) + "…（共 "
+                 + text.Length.ToString(CultureInfo.InvariantCulture) + " 字符）";
         }
 
         /// <summary>

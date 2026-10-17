@@ -290,6 +290,36 @@ namespace VisionPlatform.Flow
                     // 是否在预览上绘制字符框
                     Add(list, "ShowBoxes", "1");
                     break;
+
+                case FlowNodeType.SendData:
+                    // 绑定的通讯名称（取自「通讯」界面的配置，下拉动态填充 NodeParamSchema）
+                    Add(list, "CommName", "");
+                    // 数据模式：FixedText = 固定文本；Format = 格式化模板；ModbusWrite = 写单个保持寄存器
+                    Add(list, "DataMode", "FixedText");
+                    // 固定文本内容
+                    Add(list, "Text", "");
+                    // 格式化模板：{Summary} 上游摘要 / {OkNg} OK·NG / {Time} 时间
+                    Add(list, "Format", "{OkNg},{Summary}");
+                    // Modbus 写寄存器（FC06）
+                    Add(list, "MbAddress", "0");
+                    Add(list, "MbValue", "0");
+                    // 未连接时自动连接一次
+                    Add(list, "AutoConnect", "1");
+                    break;
+
+                case FlowNodeType.ReceiveData:
+                    // 绑定的通讯名称
+                    Add(list, "CommName", "");
+                    // 接收模式：TcpText = 取最近一条收到的文本；ModbusRead = 读保持寄存器（FC03）
+                    Add(list, "Mode", "TcpText");
+                    // 等待数据的超时（毫秒；0 = 不等待，只看当前有没有）
+                    Add(list, "TimeoutMs", "2000");
+                    // Modbus 读寄存器起始地址与数量（1~125）
+                    Add(list, "MbAddress", "0");
+                    Add(list, "MbCount", "1");
+                    // 未连接时自动连接一次
+                    Add(list, "AutoConnect", "1");
+                    break;
             }
 
             return list;
@@ -364,7 +394,7 @@ namespace VisionPlatform.Flow
         /// <summary>识别（字符识别 OCR）。</summary>
         public const string CatRecognition = "Recognition";
 
-        /// <summary>全部算法模块，按工具箱显示顺序排列（14 项）。</summary>
+        /// <summary>全部算法模块，按工具箱显示顺序排列（16 项）。</summary>
         public static readonly List<FlowModuleInfo> All = new List<FlowModuleInfo>
         {
             new FlowModuleInfo("ImageSource",      "图像源",          FlowNodeType.ImageSource,      CatAcquisition),
@@ -380,13 +410,15 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("Sharpness",        "清晰度",          FlowNodeType.Sharpness,        CatImageProcessing),
             new FlowModuleInfo("FitCircle",        "圆拟合",          FlowNodeType.FitCircle,        CatSegmentation),
             new FlowModuleInfo("FitLine",          "直线拟合",        FlowNodeType.FitLine,          CatSegmentation),
-            new FlowModuleInfo("ResultOutput",     "结果输出",        FlowNodeType.ResultOutput,     CatOutput)
+            new FlowModuleInfo("ResultOutput",     "结果输出",        FlowNodeType.ResultOutput,     CatOutput),
+            new FlowModuleInfo("SendData",         "发送数据",        FlowNodeType.SendData,         CatOutput),
+            new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput)
         };
 
         /// <summary>
         /// 分类目录（7 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
         /// <para>
-        /// 合计 1 + 2 + 4 + 2 + 3 + 1 + 1 = 14，与 <see cref="All"/> 一一对应、无遗漏无重复。
+        /// 合计 1 + 2 + 4 + 2 + 3 + 3 + 1 = 16，与 <see cref="All"/> 一一对应、无遗漏无重复。
         /// 这是 <see cref="All"/> 的<strong>另一种组织视图</strong>，<see cref="All"/> 本身一字未动
         /// （<c>SmokeParallel</c> 的用例依赖 <see cref="All"/> 的既有顺序）。
         /// </para>

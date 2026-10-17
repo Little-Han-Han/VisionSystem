@@ -54,7 +54,15 @@ namespace VisionPlatform.Flow
         // ===== 本期追加（追加在末尾，保证既有序号与字符串不变）=====
 
         /// <summary>字符识别（传统算法 OCR，原生 va_ocr_*）：字符分割 + 模板匹配，模板为「一个字符一张图、文件名即标签」。</summary>
-        Ocr
+        Ocr,
+
+        // ===== 本期追加（追加在末尾，保证既有序号与字符串不变）=====
+
+        /// <summary>发送数据：按名称绑定「通讯」界面里已配置的一条通讯，发送固定文本 / 格式化文本 / 写 Modbus 寄存器。</summary>
+        SendData,
+
+        /// <summary>接收数据：按名称绑定「通讯」界面里已配置的一条通讯，读取最近一条文本或读 Modbus 保持寄存器。</summary>
+        ReceiveData
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using VisionPlatform.Communication;
 
 namespace VisionPlatform.Flow
 {
@@ -228,6 +229,8 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.FitLine:         return Fit("直线拟合");
                 case FlowNodeType.ObjectDetect:    return ObjectDetect();
                 case FlowNodeType.Ocr:             return Ocr();
+                case FlowNodeType.SendData:        return SendData();
+                case FlowNodeType.ReceiveData:     return ReceiveData();
                 default:                           return null;
             }
         }
@@ -570,6 +573,86 @@ namespace VisionPlatform.Flow
                          + "支持中文标签如 中.png）；目录为空时只做字符分割、不输出文本。"
                          + "输入图像内部自动转灰度，输出图像原样向下传递。";
             return t;
+        }
+
+        /// <summary>发送数据节点：按名称绑定一条通讯，发固定文本 / 格式化文本 / 写 Modbus 寄存器。</summary>
+        private static NodeParamTable SendData()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.SendData, Title = "发送数据" };
+
+            t.Fields.Add(Group("绑定通讯"));
+            t.Fields.Add(CommNameField());
+            t.Fields.Add(Bool("AutoConnect", "未连接时自动连接", "1",
+                "关闭则通讯未连接时直接判 NG，不尝试连接"));
+
+            t.Fields.Add(Group("发送内容"));
+            t.Fields.Add(Enum("DataMode", "数据模式", "FixedText",
+                new[] { "固定文本", "格式化", "Modbus 写寄存器" },
+                new[] { "FixedText", "Format", "ModbusWrite" }));
+            t.Fields.Add(Text("Text", "固定文本", "", "「固定文本」模式发送的内容，可填任意字符串"));
+            t.Fields.Add(Text("Format", "格式化模板", "{OkNg},{Summary}",
+                "「格式化」模式的模板：{Summary} 上游摘要、{OkNg} OK/NG、{Time} 时间；取不到时占位符原样保留"));
+
+            t.Fields.Add(Group("Modbus 写寄存器（FC06）"));
+            t.Fields.Add(Int("MbAddress", "寄存器地址", 0, 65535, "0"));
+            t.Fields.Add(Int("MbValue", "写入值", 0, 65535, "0"));
+
+            t.FooterNote = "通讯在「通讯」界面里创建与命名，这里按名称绑定，改名后需重新选择一次。"
+                         + "TCP 服务端是广播给所有已接入客户端；Modbus 仅支持 03/06/10 功能码，不支持线圈。"
+                         + "发送结果写在节点摘要里（格式：发送数据：{通讯名} ← {内容}）。";
+            return t;
+        }
+
+        /// <summary>接收数据节点：按名称绑定一条通讯，取最近一条文本或读 Modbus 保持寄存器。</summary>
+        private static NodeParamTable ReceiveData()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.ReceiveData, Title = "接收数据" };
+
+            t.Fields.Add(Group("绑定通讯"));
+            t.Fields.Add(CommNameField());
+            t.Fields.Add(Bool("AutoConnect", "未连接时自动连接", "1"));
+
+            t.Fields.Add(Group("接收方式"));
+            t.Fields.Add(Enum("Mode", "模式", "TcpText",
+                new[] { "TCP 接收文本", "Modbus 读寄存器" },
+                new[] { "TcpText", "ModbusRead" }));
+            t.Fields.Add(Int("TimeoutMs", "等待超时(ms)", 0, 60000, "2000",
+                "TCP 模式下为空时轮询等待的时长；0 = 不等待，只看当前有没有"));
+
+            t.Fields.Add(Group("Modbus 读寄存器（FC03）"));
+            t.Fields.Add(Int("MbAddress", "起始地址", 0, 65535, "0"));
+            t.Fields.Add(Int("MbCount", "寄存器数量", 1, 125, "1", "FC03 单次最多 125 个"));
+
+            t.FooterNote = "通讯在「通讯」界面里创建与命名，这里按名称绑定。"
+                         + "TCP 取的是该通讯最近收到的一条文本；超时未收到数据判为「跳过」并在摘要里写明，不判 NG。"
+                         + "Modbus 读到的寄存器会拼成「100, 200, 300」这样的文本；仅支持 03/06/10 功能码。";
+            return t;
+        }
+
+        /// <summary>
+        /// 「绑定通讯」下拉：<strong>运行时</strong>按 <see cref="CommRegistry.Names"/>() 填充。
+        /// <para>
+        /// <see cref="For"/> 每次调用都新建一张 <see cref="NodeParamTable"/>，而
+        /// <see cref="NodeParamField.Options"/> 是可写列表，所以每次打开参数面板拿到的都是最新的通讯列表，
+        /// 不需要额外挂钩 <see cref="CommRegistry.Changed"/>（<c>NodeParamPanel.Build</c> 的 Enum 分支才读 Options）。
+        /// </para>
+        /// </summary>
+        private static NodeParamField CommNameField()
+        {
+            var f = Enum("CommName", "绑定通讯", "",
+                         new string[0], new string[0],
+                         "在「通讯」界面中配置的连接；列表每次打开面板时刷新");
+
+            f.Options.Clear();
+            foreach (string n in CommRegistry.Names())
+            {
+                if (!string.IsNullOrEmpty(n)) f.Options.Add(new NodeParamOption(n, n));
+            }
+            if (f.Options.Count == 0)
+                f.Options.Add(new NodeParamOption("<未配置，请先到通讯界面添加>", ""));
+
+            f.Default = f.Options[0].Value;
+            return f;
         }
     }
 }

@@ -278,6 +278,27 @@ namespace VisionPlatform.Flow
                     P("Count", "字符数量", FlowPortKind.Number, false),
                     P("Text",  "识别文本", FlowPortKind.Text,  false)
                 });
+
+            // ---- 本期新增：发送数据 / 接收数据 ----
+            // 输入图像一律「不必填」：这两个节点不依赖图像也能工作（纯通讯场景可独立成链），
+            // 连了就原样向下透传。输出靠 Text 端子承载收发的文本内容。
+
+            Register(FlowNodeType.SendData,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, false) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Text",  "发送内容", FlowPortKind.Text,  false)
+                });
+
+            Register(FlowNodeType.ReceiveData,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, false) },
+                new List<FlowPortDef>
+                {
+                    P("Image",  "输出图像", FlowPortKind.Image, false),
+                    P("Text",   "接收内容", FlowPortKind.Text,  false),
+                    P("Number", "数据长度", FlowPortKind.Number, false)
+                });
         }
 
         // ---------------------- 注册与构造器 ----------------------
