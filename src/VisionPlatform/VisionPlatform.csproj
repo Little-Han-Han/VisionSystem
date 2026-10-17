@@ -53,6 +53,7 @@
     <Compile Include="Camera\ICamera.cs" />
     <Compile Include="Camera\LocalCamera.cs" />
     <Compile Include="Camera\SimCamera.cs" />
+    <Compile Include="Communication\CommRegistry.cs" />
     <Compile Include="Communication\CommState.cs" />
     <Compile Include="Communication\ModbusTcpClient.cs" />
     <Compile Include="Communication\TcpClientSession.cs" />

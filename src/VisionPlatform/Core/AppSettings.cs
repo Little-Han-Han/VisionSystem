@@ -32,6 +32,14 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public FlowSettings Flows { get; set; }
 
+        /// <summary>
+        /// 通讯管理参数：用户自定义的多条<strong>命名</strong>通讯（TCP 客户端 / TCP 服务端 / Modbus TCP）。
+        /// 流程节点（发送 / 接收数据）按名称绑定这里的一条通讯，运行时由
+        /// Communication 目录下的 CommRegistry 持有对应的活连接对象。
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public CommSettings Comm { get; set; }
+
         public static AppConfig CreateDefault()
         {
             return new AppConfig
@@ -39,7 +47,8 @@ namespace VisionPlatform.Core
                 System = SystemSettings.CreateDefault(),
                 Algorithm = new AlgorithmSettings(),
                 Ui = new UiSettings(),
-                Flows = new FlowSettings()
+                Flows = new FlowSettings(),
+                Comm = CommSettings.CreateDefault()
             };
         }
     }
@@ -259,6 +268,298 @@ namespace VisionPlatform.Core
     }
 
     /// <summary>
+    /// 通讯端点类型常量。
+    /// <para>【为什么是 string 而不是 enum】DataContractJsonSerializer 会把 enum 序列化成数字，
+    /// 配置文件里就会出现 <c>"Kind":1</c> 这种不可读、手改即错的值；先例见
+    /// <see cref="UiSettings.Language"/> 与 <see cref="SystemSettings.ImageFormat"/>。</para>
+    /// </summary>
+    public static class CommKind
+    {
+        /// <summary>TCP 客户端：主动连接远端（PLC / 上位机）。</summary>
+        public const string TcpClient = "TcpClient";
+
+        /// <summary>TCP 服务端：本地监听端口，把结果推给 MES / 上位机。</summary>
+        public const string TcpServer = "TcpServer";
+
+        /// <summary>Modbus TCP 客户端（0x03 / 0x06 / 0x10）。</summary>
+        public const string ModbusTcp = "ModbusTcp";
+
+        /// <summary>三种类型的固定顺序，下标即界面下拉框的 SelectedIndex。</summary>
+        public static readonly string[] All = { TcpClient, TcpServer, ModbusTcp };
+
+        /// <summary>界面显示名，下标与 <see cref="All"/> 严格对齐。</summary>
+        public static readonly string[] DisplayNames = { "TCP 客户端", "TCP 服务端", "Modbus TCP" };
+
+        /// <summary>归一化：未知 / 空值一律按 TCP 客户端处理。</summary>
+        public static string Normalize(string kind)
+        {
+            if (kind == TcpClient || kind == TcpServer || kind == ModbusTcp) return kind;
+            return TcpClient;
+        }
+
+        /// <summary>界面显示名。</summary>
+        public static string Display(string kind)
+        {
+            string k = Normalize(kind);
+            for (int i = 0; i < All.Length; i++)
+                if (All[i] == k) return DisplayNames[i];
+            return DisplayNames[0];
+        }
+
+        /// <summary>该类型的默认端口（Modbus 502，其余 9000）。</summary>
+        public static int DefaultPort(string kind)
+        {
+            return Normalize(kind) == ModbusTcp ? 502 : 9000;
+        }
+    }
+
+    /// <summary>
+    /// 通讯管理参数：用户可自定义增删改名的多条通讯端点。
+    /// 端点顺序即界面列表顺序，<see cref="CommEndpointConfig.Name"/> 在段内唯一（比较时忽略大小写）。
+    /// </summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommSettings
+    {
+        /// <summary>通讯配置结构版本；<see cref="ConfigStore.Load"/> 据此做一次性升级。</summary>
+        public const int CurrentSchemaVersion = 1;
+
+        /// <summary>结构版本（序列化字段，勿删：删了就无法区分「用户停用」与「字段缺失」）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int SchemaVersion { get; set; }
+
+        /// <summary>通讯端点列表。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public List<CommEndpointConfig> Endpoints { get; set; }
+
+        public CommSettings()
+        {
+            SchemaVersion = CurrentSchemaVersion;
+            Endpoints = new List<CommEndpointConfig>();
+        }
+
+        /// <summary>默认值：给出一条示例端点，用户可直接改名 / 改参数，也可删除。</summary>
+        public static CommSettings CreateDefault()
+        {
+            CommSettings s = new CommSettings();
+            s.Endpoints.Add(CommEndpointConfig.Create("TCP 客户端 1", CommKind.TcpClient));
+            return s;
+        }
+
+        /// <summary>
+        /// 就地升级并归一化，返回是否发生变更（幂等，可重复调用；先例 FlowSettings.UpgradeToCurrent）。
+        /// <para>【为什么需要它】<see cref="CommEndpointConfig.Enabled"/> 的默认值应为 true，
+        /// 而 DataContractJsonSerializer 对 JSON 中缺失的 bool 只给 false（铁律 5）。
+        /// 手改过的配置若没有 Enabled 字段，整段通讯会被当成「已停用」，
+        /// 表现为「建好了却一条都连不上」，必须在加载时显式补 true。</para>
+        /// </summary>
+        public static bool UpgradeToCurrent(CommSettings settings)
+        {
+            if (settings == null) return false;
+
+            bool changed = false;
+
+            if (settings.Endpoints == null)
+            {
+                settings.Endpoints = new List<CommEndpointConfig>();
+                changed = true;
+            }
+
+            if (settings.SchemaVersion < CurrentSchemaVersion)
+            {
+                foreach (CommEndpointConfig ep in settings.Endpoints)
+                {
+                    if (ep != null) ep.Enabled = true;
+                }
+
+                settings.SchemaVersion = CurrentSchemaVersion;
+                changed = true;
+            }
+
+            foreach (CommEndpointConfig ep in settings.Endpoints)
+            {
+                if (ep != null) ep.Normalize();
+            }
+
+            return changed;
+        }
+
+        /// <summary>按名称查找（忽略大小写）；未找到返回 null。</summary>
+        public CommEndpointConfig Find(string name)
+        {
+            if (string.IsNullOrEmpty(name) || Endpoints == null) return null;
+
+            foreach (CommEndpointConfig ep in Endpoints)
+            {
+                if (ep != null && string.Equals(ep.Name, name, StringComparison.OrdinalIgnoreCase))
+                    return ep;
+            }
+
+            return null;
+        }
+
+        /// <summary>名称是否已占用（忽略大小写）。<paramref name="excludeSelf"/> 用于改名时排除自身。</summary>
+        public bool NameExists(string name, string excludeSelf)
+        {
+            if (string.IsNullOrEmpty(name) || Endpoints == null) return false;
+
+            foreach (CommEndpointConfig ep in Endpoints)
+            {
+                if (ep == null) continue;
+                if (!string.Equals(ep.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.IsNullOrEmpty(excludeSelf)
+                    && string.Equals(ep.Name, excludeSelf, StringComparison.OrdinalIgnoreCase)) continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>生成一个段内不重名的名称，形如「TCP 客户端 2」。</summary>
+        public string MakeUniqueName(string baseName)
+        {
+            string b = string.IsNullOrWhiteSpace(baseName) ? "通讯" : baseName.Trim();
+
+            for (int i = 1; i < 1000; i++)
+            {
+                string candidate = b + " " + i.ToString(Inv);
+                if (!NameExists(candidate, null)) return candidate;
+            }
+
+            return b + " " + DateTime.Now.ToString("HHmmss", Inv);
+        }
+
+        /// <summary>固定用不变文化生成编号，避免不同区域设置下出现非阿拉伯数字。</summary>
+        private static readonly System.Globalization.CultureInfo Inv =
+            System.Globalization.CultureInfo.InvariantCulture;
+
+        public CommSettings Clone()
+        {
+            CommSettings c = new CommSettings();
+            c.SchemaVersion = SchemaVersion;
+            if (Endpoints != null)
+            {
+                foreach (CommEndpointConfig ep in Endpoints)
+                {
+                    if (ep != null) c.Endpoints.Add(ep.Clone());
+                }
+            }
+            return c;
+        }
+    }
+
+    /// <summary>
+    /// 单条通讯端点的配置。一条端点 = 一个用户自定义名称 + 一种协议 + 各自参数。
+    /// </summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommEndpointConfig
+    {
+        /// <summary>Modbus 从站号默认值。</summary>
+        public const int DefaultSlaveId = 1;
+
+        /// <summary>Modbus 从站号下界。</summary>
+        public const int MinSlaveId = 1;
+
+        /// <summary>Modbus 从站号上界（标准 Modbus 寻址上限）。</summary>
+        public const int MaxSlaveId = 247;
+
+        /// <summary>唯一名称：用户自定义，流程节点按它绑定通讯。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Name { get; set; }
+
+        /// <summary>协议类型，取值见 <see cref="CommKind"/>（字符串，不用 enum）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Kind { get; set; }
+
+        /// <summary>目标主机 / IP；TCP 服务端不使用（本地监听）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Host { get; set; }
+
+        /// <summary>端口；服务端为监听端口。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int Port { get; set; }
+
+        /// <summary>Modbus 从站号，默认 1。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int SlaveId { get; set; }
+
+        /// <summary>是否启用；停用的端点不允许连接。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public bool Enabled { get; set; }
+
+        /// <summary>软件启动时自动连接一次。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public bool AutoConnect { get; set; }
+
+        public CommEndpointConfig()
+        {
+            Name = "";
+            Kind = CommKind.TcpClient;
+            Host = "127.0.0.1";
+            Port = CommKind.DefaultPort(CommKind.TcpClient);
+            SlaveId = DefaultSlaveId;
+            Enabled = true;
+            AutoConnect = false;
+        }
+
+        /// <summary>按类型创建一条带合理默认值的端点。</summary>
+        public static CommEndpointConfig Create(string name, string kind)
+        {
+            CommEndpointConfig c = new CommEndpointConfig();
+            c.Name = name ?? "";
+            c.Kind = CommKind.Normalize(kind);
+            c.Port = CommKind.DefaultPort(c.Kind);
+            c.Host = c.Kind == CommKind.TcpServer ? "" : "127.0.0.1";
+            return c;
+        }
+
+        /// <summary>
+        /// 归一化：DataContractJsonSerializer <strong>不调用构造函数</strong>，
+        /// 旧配置缺失的字段反序列化出来是 null / 0 而不是构造里的默认值，
+        /// 故所有读取处都要兜底（铁律 4）。
+        /// </summary>
+        public void Normalize()
+        {
+            Name = (Name ?? "").Trim();
+            Kind = CommKind.Normalize(Kind);
+            Host = (Host ?? "").Trim();
+            if (Port <= 0 || Port > 65535) Port = CommKind.DefaultPort(Kind);
+            if (Kind == CommKind.TcpServer) Host = "";   // 服务端只监听本地端口，不需要目标主机
+            if (SlaveId < MinSlaveId || SlaveId > MaxSlaveId) SlaveId = DefaultSlaveId;
+        }
+
+        /// <summary>界面「目标」列文本：客户端 host:port，服务端 "监听 :port"。</summary>
+        public string TargetText
+        {
+            get
+            {
+                if (Kind == CommKind.TcpServer) return "监听 :" + Port;
+                return (Host.Length == 0 ? "?" : Host) + ":" + Port;
+            }
+        }
+
+        /// <summary>界面「类型」列文本（中文）。</summary>
+        public string KindDisplay
+        {
+            get { return CommKind.Display(Kind); }
+        }
+
+        public CommEndpointConfig Clone()
+        {
+            return new CommEndpointConfig
+            {
+                Name = Name,
+                Kind = Kind,
+                Host = Host,
+                Port = Port,
+                SlaveId = SlaveId,
+                Enabled = Enabled,
+                AutoConnect = AutoConnect
+            };
+        }
+    }
+
+    /// <summary>
     /// 全局配置的加载 / 保存与全局访问。启动时 <see cref="Load"/>，界面保存时 <see cref="Save"/>。
     /// 配置按系统 / 算法 / 界面三类分区存放于同一个 JSON 文件（<see cref="AppPaths.ConfigFile"/>）。
     /// </summary>
@@ -298,6 +599,17 @@ namespace VisionPlatform.Core
             if (cfg.Ui.ViewBindings == null) cfg.Ui.ViewBindings = new List<string>();
             if (cfg.Flows == null) cfg.Flows = new FlowSettings();
             if (cfg.Flows.Flows == null) cfg.Flows.Flows = new List<FlowDefinition>();
+            if (cfg.Comm == null) cfg.Comm = CommSettings.CreateDefault();
+            if (cfg.Comm.Endpoints == null) cfg.Comm.Endpoints = new List<CommEndpointConfig>();
+
+            // 【旧配置兼容，请勿移除】通讯段是后加的：旧版 appconfig.json 里根本没有 Comm，
+            // 反序列化得 null → 上面已补默认；手改过的配置若缺 Enabled 字段，bool 会给 false，
+            // 表现为「通讯建好了却一条都连不上」，故走一次显式升级。
+            if (CommSettings.UpgradeToCurrent(cfg.Comm))
+            {
+                Logger.Info("通讯配置已就地升级到 Schema v" + CommSettings.CurrentSchemaVersion
+                            + "（补齐 Enabled 等新字段默认值）");
+            }
 
             // 首次运行 / 旧配置没有流程时，补一条空流程并设为当前流程
             if (cfg.Flows.Flows.Count == 0)
