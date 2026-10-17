@@ -265,6 +265,19 @@ namespace VisionPlatform.Flow
                     P("Count", "检测数量", FlowPortKind.Number, false),
                     P("Text", "检测摘要", FlowPortKind.Text, false)
                 });
+
+            // ---- 本期新增：字符识别（传统算法 OCR）----
+            // 输入：图像（内部转灰度）；输出：原图透传 + 字符数量 + 识别文本。
+            // 字符框以叠加层（FlowShapes）画在画布上，端子只承载标量 / 图像 / 文本。
+
+            Register(FlowNodeType.Ocr,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Count", "字符数量", FlowPortKind.Number, false),
+                    P("Text",  "识别文本", FlowPortKind.Text,  false)
+                });
         }
 
         // ---------------------- 注册与构造器 ----------------------

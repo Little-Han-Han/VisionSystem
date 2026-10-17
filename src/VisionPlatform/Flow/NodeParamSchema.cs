@@ -227,6 +227,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.FitCircle:       return Fit("圆拟合");
                 case FlowNodeType.FitLine:         return Fit("直线拟合");
                 case FlowNodeType.ObjectDetect:    return ObjectDetect();
+                case FlowNodeType.Ocr:             return Ocr();
                 default:                           return null;
             }
         }
@@ -530,6 +531,44 @@ namespace VisionPlatform.Flow
 
             t.FooterNote = "输入需为彩色图像（直接接图像源之后效果最佳）；检测框以叠加层显示在画布上，"
                          + "输出图像原样向下传递，可串联 Blob / 卡尺等下游节点。";
+            return t;
+        }
+
+        /// <summary>字符识别（传统算法 OCR，原生 va_ocr_*）的参数表。</summary>
+        private static NodeParamTable Ocr()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.Ocr, Title = "字符识别(OCR)" };
+
+            t.Fields.Add(Group("模板"));
+            // ⚠️ 这里刻意用 Text 而不是 File：NodeParamPanel 的文件浏览过滤器写死成图片格式，
+            //    选目录场景会被误导。模板目录是「相对程序基目录」的名字或相对路径。
+            t.Fields.Add(Text("TemplateDir", "模板目录", "OCRModel",
+                "相对程序运行目录（bin/x64/Release）的文件夹名，默认 OCRModel；留空按 OCRModel 处理"));
+            t.Fields.Add(Note("约定：每个字符一张灰度图放进该目录，文件名（不含扩展名）即标签，"
+                + "如 A.png、7.png；支持中文标签如 中.png。目录为空时只做字符分割、不输出文本。"));
+
+            t.Fields.Add(Group("分割参数"));
+            t.Fields.Add(Int("Threshold", "二值化阈值", -1, 255, "-1",
+                "-1 = Otsu 自适应；光照均匀时改固定阈值（如 128）更稳"));
+            t.Fields.Add(Bool("Invert", "极性反转", "0", "白底黑字时开启；深色背景亮字保持关闭"));
+            t.Fields.Add(Dbl("MinCharH", "字符最小高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉噪声点）"));
+            t.Fields.Add(Dbl("MaxCharH", "字符最大高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉大块污渍）"));
+            t.Fields.Add(Dbl("MinAspect", "最小宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制"));
+            t.Fields.Add(Dbl("MaxAspect", "最大宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制"));
+            t.Fields.Add(Int("MaxGap", "同行最大间隙", -1, 1000, "3",
+                "相邻字符合并的最大水平间隙（像素）；<0 按 3 处理"));
+
+            t.Fields.Add(Group("识别参数"));
+            t.Fields.Add(Int("NormW", "归一化宽", 0, 256, "16", "<=0 按 16；同一套模板必须全程一致"));
+            t.Fields.Add(Int("NormH", "归一化高", 0, 256, "24", "<=0 按 24；同一套模板必须全程一致"));
+            t.Fields.Add(Dbl("AcceptScore", "接受阈值", 0, 1, 2, 0.05m, "0.6",
+                "低于该置信度的字符输出 '?'；调低易误识、调高易漏识"));
+            t.Fields.Add(Int("MaxCount", "最多字符数", 1, 2000, "200", "超出部分被截断"));
+            t.Fields.Add(Bool("ShowBoxes", "绘制字符框", "1", "在预览帧上叠加每个字符的外接框与置信度"));
+
+            t.FooterNote = "模板约定：每个字符一张灰度图放进模板目录，文件名即标签（A.png / 7.png，"
+                         + "支持中文标签如 中.png）；目录为空时只做字符分割、不输出文本。"
+                         + "输入图像内部自动转灰度，输出图像原样向下传递。";
             return t;
         }
     }

@@ -224,6 +224,45 @@ namespace VisionPlatform.Native
         public float score;      /* 置信度 0~1 */
     }
 
+    /// <summary>
+    /// OCR 参数（对应 C 端 VA_OcrParam，见 include/algo/va_ocr.h）。
+    /// 字段顺序 / 类型与 C 端严格一一对应，改动必须同步改 C 端头文件。
+    /// 哨兵语义：threshold&lt;0 → Otsu 自适应阈值；min/max_char_h 与 min/max_aspect &lt;=0 → 不限制；
+    /// max_gap&lt;0 → 按 3 处理；norm_w / norm_h &lt;=0 → 16 / 24。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_OcrParam
+    {
+        public int    threshold;    /* 二值化阈值；<0 自动 Otsu */
+        public int    invert;       /* 1 = 极性反转（白底黑字）*/
+        public double min_char_h;   /* 字符最小高度（像素）；<=0 不限制 */
+        public double max_char_h;   /* 字符最大高度（像素）；<=0 不限制 */
+        public double min_aspect;   /* 最小宽高比 w/h；<=0 不限制 */
+        public double max_aspect;   /* 最大宽高比 w/h；<=0 不限制 */
+        public int    max_gap;      /* 同行相邻字符最大间隙（像素）；<0 按 3 */
+        public int    norm_w;       /* 归一化宽；<=0 按 16 */
+        public int    norm_h;       /* 归一化高；<=0 按 24 */
+        public double accept_score; /* 匹配接受阈值 0~1，低于该值输出 '?' */
+    }
+
+    /// <summary>
+    /// 单个字符（对应 C 端 VA_OcrChar）。label 为 UTF-8 定长 8 字节（VA_OCR_LABEL_BYTES），
+    /// 支持中文标签（如"中"占 3 字节）。仅 va_ocr_recognize 填 label / score，
+    /// va_ocr_segment 只填 x/y/w/h（label 置 "?"、score 置 0）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_OcrChar
+    {
+        public double x;
+        public double y;
+        public double w;
+        public double h;
+        /// <summary>与 C 端 VA_OCR_LABEL_BYTES（8）一致：UTF-8 定长标签。</summary>
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+        public byte[] label;
+        public double score;
+    }
+
     #endregion
 
     /// <summary>算法库返回码。</summary>
@@ -401,6 +440,33 @@ namespace VisionPlatform.Native
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_det_clear(IntPtr handle);
+
+        // ---- 字符识别（传统算法 OCR，va_ocr_*）----
+        // 标签字符串按 UTF-8 字节传，避免默认 ANSI 封送破坏中文标签（如"中.png"）。
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_set_param(IntPtr handle, ref VA_OcrParam param);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_add_template(IntPtr handle, ref VA_Image gray, byte[] label);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_template_count(IntPtr handle, out int out_count);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_clear_templates(IntPtr handle);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_segment(IntPtr handle, ref VA_Image gray,
+                                                ref VA_OcrParam param,
+                                                [In, Out] VA_OcrChar[] out_chars,
+                                                int max_count, out int out_count);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_recognize(IntPtr handle, ref VA_Image gray,
+                                                  ref VA_OcrParam param,
+                                                  byte[] out_text, int text_cap,
+                                                  out double out_mean_score);
     }
 
     /// <summary>
@@ -1191,6 +1257,153 @@ namespace VisionPlatform.Native
             return list;
         }
 
+        // ---------------------- 字符识别（传统算法 OCR）----------------------
+
+        /// <summary>设置 OCR 上下文默认参数（后续 Segment / Recognize 可逐次覆盖）。</summary>
+        public OpResult SetOcrParam(OcrParam param)
+        {
+            if (param == null) param = OcrParam.Default();
+
+            VA_OcrParam p = param.ToNative();
+            int rc = NativeMethods.va_ocr_set_param(_handle, ref p);
+            return rc == VaResult.OK
+                ? OpResult.Ok("OCR 参数已设置")
+                : OpResult.Fail(VaResult.ToString(rc) + "：" + LastError);
+        }
+
+        /// <summary>
+        /// 添加一个字符模板：gray 为单个字符的灰度图，label 为该字符的标签（支持中文）。
+        /// 上层约定「文件名即标签」，见 FlowRunner 的 OCRModel 目录加载。
+        /// </summary>
+        public OpResult AddOcrTemplate(Bitmap gray, string label)
+        {
+            if (gray == null) return OpResult.Fail("模板图像为空");
+
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    int rc = NativeMethods.va_ocr_add_template(_handle, ref img,
+                                                               Utf8NullTerminated(label ?? ""));
+                    return rc == VaResult.OK
+                        ? OpResult.Ok("已添加字符模板：" + (label ?? ""))
+                        : OpResult.Fail(VaResult.ToString(rc) + "：" + LastError);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult.Fail("添加字符模板失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>取当前已加载的字符模板数量（0 表示没有模板，只能做字符分割）。</summary>
+        public OpResult<int> OcrTemplateCount()
+        {
+            int count = 0;
+            int rc = NativeMethods.va_ocr_template_count(_handle, out count);
+            return rc == VaResult.OK
+                ? OpResult<int>.Ok(count)
+                : OpResult<int>.Fail(VaResult.ToString(rc) + "：" + LastError);
+        }
+
+        /// <summary>清空全部字符模板。</summary>
+        public OpResult ClearOcrTemplates()
+        {
+            int rc = NativeMethods.va_ocr_clear_templates(_handle);
+            return rc == VaResult.OK
+                ? OpResult.Ok("字符模板已清空")
+                : OpResult.Fail(VaResult.ToString(rc) + "：" + LastError);
+        }
+
+        /// <summary>
+        /// 字符分割：只输出字符外接框（x/y/w/h 为左上角 + 宽高，图像坐标）。
+        /// 原生不填 label / score（标签固定 "?"、置信度 0），需要文本请调 <see cref="Recognize"/>。
+        /// </summary>
+        public OpResult<List<OcrChar>> Segment(Bitmap gray, OcrParam param, int maxCount)
+        {
+            if (gray == null) return OpResult<List<OcrChar>>.Fail("输入图像为空");
+            if (param == null) param = OcrParam.Default();
+            if (maxCount <= 0) maxCount = 200;
+
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_OcrParam p = param.ToNative();
+
+                    VA_OcrChar[] raw = NewOcrCharBuffer(maxCount);
+                    int count = 0;
+
+                    int rc = NativeMethods.va_ocr_segment(_handle, ref img, ref p,
+                                                          raw, maxCount, out count);
+                    if (rc != VaResult.OK && rc != VaResult.ErrSize)
+                        return OpResult<List<OcrChar>>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    // ErrSize 表示原生缓冲区不够装，此时原生已填满整个数组
+                    int n = (rc == VaResult.ErrSize) ? raw.Length : Math.Min(count, raw.Length);
+                    var list = new List<OcrChar>(n);
+                    for (int i = 0; i < n; i++)
+                        list.Add(OcrChar.FromNative(raw[i]));
+
+                    return OpResult<List<OcrChar>>.Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<OcrChar>>.Fail("字符分割失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 字符识别：分割 + 模板匹配，输出整行文本（行间以 '\n' 分隔）与平均置信度。
+        /// 模板为空时文本为空串（不算失败），仍可用 <see cref="Segment"/> 拿字符框。
+        /// </summary>
+        public OpResult<OcrResult> Recognize(Bitmap gray, OcrParam param)
+        {
+            if (gray == null) return OpResult<OcrResult>.Fail("输入图像为空");
+            if (param == null) param = OcrParam.Default();
+
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_OcrParam p = param.ToNative();
+
+                    byte[] textBuf = new byte[4096];
+                    double meanScore = 0.0;
+
+                    int rc = NativeMethods.va_ocr_recognize(_handle, ref img, ref p,
+                                                            textBuf, textBuf.Length, out meanScore);
+                    if (rc != VaResult.OK)
+                        return OpResult<OcrResult>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var res = new OcrResult
+                    {
+                        Text = Utf8FromBuffer(textBuf),
+                        MeanScore = meanScore,
+                        Chars = new List<OcrChar>()
+                    };
+                    return OpResult<OcrResult>.Ok(res);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<OcrResult>.Fail("字符识别失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>分配 OCR 字符缓冲；含 ByValArray 的结构体必须逐个初始化数组字段才能封送。</summary>
+        private static VA_OcrChar[] NewOcrCharBuffer(int n)
+        {
+            var arr = new VA_OcrChar[n];
+            for (int i = 0; i < n; i++)
+                arr[i].label = new byte[8];
+            return arr;
+        }
+
         /// <summary>把字符串转 UTF-8 字节并补 null 结尾（供原生 const char* 参数，支持中文路径）。</summary>
         private static byte[] Utf8NullTerminated(string s)
         {
@@ -1199,6 +1412,16 @@ namespace VisionPlatform.Native
             Array.Copy(bytes, result, bytes.Length);
             result[bytes.Length] = 0;
             return result;
+        }
+
+        /// <summary>把原生写回的 UTF-8 字节缓冲解成字符串（截断到第一个 '\0'）。</summary>
+        private static string Utf8FromBuffer(byte[] buf)
+        {
+            if (buf == null || buf.Length == 0) return string.Empty;
+
+            int n = Array.IndexOf(buf, (byte)0);
+            if (n < 0) n = buf.Length;
+            return System.Text.Encoding.UTF8.GetString(buf, 0, n);
         }
 
         /// <summary>
@@ -2426,6 +2649,150 @@ namespace VisionPlatform.Native
             return string.Format("[{0}] ({1:F1},{2:F1}) {3:F0}x{4:F0} score={5:F3}",
                 ClassName, X, Y, Width, Height, Score);
         }
+    }
+
+    /// <summary>
+    /// 字符识别（传统算法 OCR）参数。哨兵值与原生一致：
+    /// Threshold&lt;0 → Otsu；MinCharH / MaxCharH / MinAspect / MaxAspect &lt;=0 → 不限制；
+    /// MaxGap&lt;0 → 3；NormW / NormH &lt;=0 → 16 / 24。
+    /// </summary>
+    public class OcrParam
+    {
+        /// <summary>二值化阈值 0~255；负数走 Otsu 自适应（默认 -1）。</summary>
+        public int Threshold { get; set; }
+
+        /// <summary>极性反转：白底黑字设 true。</summary>
+        public bool Invert { get; set; }
+
+        /// <summary>字符最小高度（像素）；&lt;=0 不限制。</summary>
+        public double MinCharH { get; set; }
+
+        /// <summary>字符最大高度（像素）；&lt;=0 不限制。</summary>
+        public double MaxCharH { get; set; }
+
+        /// <summary>最小宽高比 w/h；&lt;=0 不限制。</summary>
+        public double MinAspect { get; set; }
+
+        /// <summary>最大宽高比 w/h；&lt;=0 不限制。</summary>
+        public double MaxAspect { get; set; }
+
+        /// <summary>同行相邻字符最大间隙（像素）；&lt;0 按 3。</summary>
+        public int MaxGap { get; set; }
+
+        /// <summary>归一化宽；&lt;=0 按 16。</summary>
+        public int NormW { get; set; }
+
+        /// <summary>归一化高；&lt;=0 按 24。</summary>
+        public int NormH { get; set; }
+
+        /// <summary>匹配接受阈值 0~1；低于该值输出 '?'（默认 0.6）。</summary>
+        public double AcceptScore { get; set; }
+
+        public static OcrParam Default()
+        {
+            return new OcrParam
+            {
+                Threshold = -1,
+                Invert = false,
+                MinCharH = 0.0,
+                MaxCharH = 0.0,
+                MinAspect = 0.0,
+                MaxAspect = 0.0,
+                MaxGap = 3,
+                NormW = 16,
+                NormH = 24,
+                AcceptScore = 0.6
+            };
+        }
+
+        internal VA_OcrParam ToNative()
+        {
+            VA_OcrParam p = new VA_OcrParam();
+            p.threshold = Threshold;
+            p.invert = Invert ? 1 : 0;
+            p.min_char_h = MinCharH;
+            p.max_char_h = MaxCharH;
+            p.min_aspect = MinAspect;
+            p.max_aspect = MaxAspect;
+            p.max_gap = MaxGap;
+            p.norm_w = NormW;
+            p.norm_h = NormH;
+            p.accept_score = AcceptScore;
+            return p;
+        }
+
+        public override string ToString()
+        {
+            return string.Format("阈值{0} 高[{1:F0}~{2:F0}] 宽高比[{3:F2}~{4:F2}] 归一{5}x{6} 接受{7:F2}",
+                Threshold < 0 ? "Otsu" : Threshold.ToString(),
+                MinCharH, MaxCharH, MinAspect, MaxAspect, NormW, NormH, AcceptScore);
+        }
+    }
+
+    /// <summary>单个字符：左上角 + 宽高（图像像素坐标）+ 标签 + 置信度。</summary>
+    public class OcrChar
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double W { get; set; }
+        public double H { get; set; }
+
+        /// <summary>识别出的字符（UTF-8 解码，支持中文）；纯分割时为 "?"。</summary>
+        public string Label { get; set; }
+
+        /// <summary>匹配置信度 0~1；纯分割时为 0。</summary>
+        public double Score { get; set; }
+
+        public OcrChar() { Label = ""; }
+
+        internal static OcrChar FromNative(VA_OcrChar c)
+        {
+            return new OcrChar
+            {
+                X = c.x, Y = c.y, W = c.w, H = c.h,
+                Label = Utf8Label(c.label),
+                Score = c.score
+            };
+        }
+
+        /// <summary>解码定长 8 字节 UTF-8 标签（截断到第一个 '\0'）。</summary>
+        internal static string Utf8Label(byte[] label)
+        {
+            if (label == null || label.Length == 0) return string.Empty;
+
+            int n = Array.IndexOf(label, (byte)0);
+            if (n < 0) n = label.Length;
+            return System.Text.Encoding.UTF8.GetString(label, 0, n);
+        }
+
+        public override string ToString()
+        {
+            return string.Format("{0} ({1:F1},{2:F1}) {3:F0}x{4:F0} score={5:F3}",
+                Label, X, Y, W, H, Score);
+        }
+    }
+
+    /// <summary>一次字符识别结果：整行文本（行间 '\n'）+ 平均置信度 + 可选字符框。</summary>
+    public class OcrResult
+    {
+        /// <summary>识别文本；多行为 '\n' 分隔。模板为空时为空串。</summary>
+        public string Text { get; set; }
+
+        /// <summary>全体字符的平均置信度 0~1。</summary>
+        public double MeanScore { get; set; }
+
+        /// <summary>字符框列表（仅 Segment 填充，Recognize 返回空列表）。</summary>
+        public List<OcrChar> Chars { get; set; }
+
+        public OcrResult()
+        {
+            Text = string.Empty;
+            MeanScore = 0.0;
+            Chars = new List<OcrChar>();
+        }
+
+        /// <summary>是否识别出了非空文本。</summary>
+        public bool HasText { get { return !string.IsNullOrEmpty(Text); } }
     }
 
     /// <summary>目标识别（OpenVINO YOLO）的一次推理结果：类别名表 + 检测框列表。</summary>

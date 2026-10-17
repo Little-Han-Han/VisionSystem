@@ -49,7 +49,12 @@ namespace VisionPlatform.Flow
         // ===== 本期追加（追加在末尾，保证既有序号与字符串不变）=====
 
         /// <summary>目标识别（OpenVINO YOLO，原生 va_det_*）：深度学习目标检测，输出检测框（类别 / 分数 / 坐标）。</summary>
-        ObjectDetect
+        ObjectDetect,
+
+        // ===== 本期追加（追加在末尾，保证既有序号与字符串不变）=====
+
+        /// <summary>字符识别（传统算法 OCR，原生 va_ocr_*）：字符分割 + 模板匹配，模板为「一个字符一张图、文件名即标签」。</summary>
+        Ocr
     }
 
     /// <summary>

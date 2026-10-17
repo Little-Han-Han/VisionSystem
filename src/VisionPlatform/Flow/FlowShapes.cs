@@ -65,6 +65,9 @@ namespace VisionPlatform.Flow
         /// <summary>拟合圆 / 拟合直线结果（天蓝）。</summary>
         public static readonly Color ColorFit = Color.DeepSkyBlue;
 
+        /// <summary>字符识别字符框（橙色）。</summary>
+        public static readonly Color ColorOcr = Color.FromArgb(255, 152, 0);
+
         /// <summary>默认十字臂长（图像像素）。</summary>
         public const float DefaultCrossArm = 24f;
 
@@ -296,6 +299,25 @@ namespace VisionPlatform.Flow
             r.IsEditable = false;
             r.Name = "Detection";
             if (!string.IsNullOrEmpty(label)) r.Label = label;
+            return r;
+        }
+
+        /// <summary>字符识别的字符外接框（轴对齐矩形，左上角 + 宽高，均为图像坐标）。</summary>
+        /// <param name="x">左上角 X（图像坐标）。</param>
+        /// <param name="y">左上角 Y（图像坐标）。</param>
+        /// <param name="width">宽（图像像素）。</param>
+        /// <param name="height">高（图像像素）。</param>
+        /// <param name="labelText">框标签（一般为「字符 + 置信度」）。</param>
+        public static RectangleShape OcrBox(double x, double y, double width, double height, string labelText)
+        {
+            float w = (float)Math.Max(1.0, width);
+            float h = (float)Math.Max(1.0, height);
+            var r = new RectangleShape((float)x, (float)y, w, h);
+            r.StrokeColor = ColorOcr;
+            r.LineWidth = NormalLine;
+            r.IsEditable = false;
+            r.Name = "OcrChar";
+            if (!string.IsNullOrEmpty(labelText)) r.Label = labelText;
             return r;
         }
     }

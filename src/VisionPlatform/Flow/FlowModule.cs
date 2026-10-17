@@ -263,6 +263,33 @@ namespace VisionPlatform.Flow
                     // 最多保留的目标数
                     Add(list, "MaxCount", "100");
                     break;
+
+                case FlowNodeType.Ocr:
+                    // 字符模板目录（相对程序基目录，即 bin/x64/Release/OCRModel）
+                    // 约定：每个字符一张灰度图，文件名（去扩展名）即标签，如 A.png / 7.png / 中.png
+                    Add(list, "TemplateDir", "OCRModel");
+                    // 二值化阈值（-1 = Otsu 自适应）
+                    Add(list, "Threshold", "-1");
+                    // 极性反转（1 = 白底黑字）
+                    Add(list, "Invert", "0");
+                    // 字符高度下限 / 上限（像素，0 = 不限制）
+                    Add(list, "MinCharH", "0");
+                    Add(list, "MaxCharH", "0");
+                    // 字符宽高比下限 / 上限（0 = 不限制）
+                    Add(list, "MinAspect", "0");
+                    Add(list, "MaxAspect", "0");
+                    // 同行相邻字符最大间隙（像素）
+                    Add(list, "MaxGap", "3");
+                    // 归一化尺寸
+                    Add(list, "NormW", "16");
+                    Add(list, "NormH", "24");
+                    // 匹配接受阈值（0~1）
+                    Add(list, "AcceptScore", "0.6");
+                    // 最多输出的字符数
+                    Add(list, "MaxCount", "200");
+                    // 是否在预览上绘制字符框
+                    Add(list, "ShowBoxes", "1");
+                    break;
             }
 
             return list;
@@ -334,7 +361,10 @@ namespace VisionPlatform.Flow
         /// <summary>输出与通信（结果输出）。</summary>
         public const string CatOutput = "Output";
 
-        /// <summary>全部算法模块，按工具箱显示顺序排列（13 项）。</summary>
+        /// <summary>识别（字符识别 OCR）。</summary>
+        public const string CatRecognition = "Recognition";
+
+        /// <summary>全部算法模块，按工具箱显示顺序排列（14 项）。</summary>
         public static readonly List<FlowModuleInfo> All = new List<FlowModuleInfo>
         {
             new FlowModuleInfo("ImageSource",      "图像源",          FlowNodeType.ImageSource,      CatAcquisition),
@@ -343,6 +373,7 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("ShapeMatch",       "形状匹配",        FlowNodeType.ShapeMatch,       CatLocation),
             new FlowModuleInfo("TemplateMatch",    "模板匹配(NCC)",   FlowNodeType.TemplateMatch,    CatLocation),
             new FlowModuleInfo("ObjectDetect",     "目标识别",        FlowNodeType.ObjectDetect,     CatLocation),
+            new FlowModuleInfo("Ocr",              "字符识别(OCR)",   FlowNodeType.Ocr,              CatRecognition),
             new FlowModuleInfo("Blob",             "Blob 分析",       FlowNodeType.Blob,             CatSegmentation),
             new FlowModuleInfo("LineCaliper",      "直线卡尺",        FlowNodeType.LineCaliper,      CatCaliper),
             new FlowModuleInfo("CircleCaliper",    "圆卡尺",          FlowNodeType.CircleCaliper,    CatCaliper),
@@ -353,9 +384,9 @@ namespace VisionPlatform.Flow
         };
 
         /// <summary>
-        /// 分类目录（6 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
+        /// 分类目录（7 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
         /// <para>
-        /// 合计 1 + 2 + 4 + 2 + 3 + 1 = 13，与 <see cref="All"/> 一一对应、无遗漏无重复。
+        /// 合计 1 + 2 + 4 + 2 + 3 + 1 + 1 = 14，与 <see cref="All"/> 一一对应、无遗漏无重复。
         /// 这是 <see cref="All"/> 的<strong>另一种组织视图</strong>，<see cref="All"/> 本身一字未动
         /// （<c>SmokeParallel</c> 的用例依赖 <see cref="All"/> 的既有顺序）。
         /// </para>
@@ -400,9 +431,9 @@ namespace VisionPlatform.Flow
             var keys = new[]
             {
                 CatAcquisition, CatImageProcessing, CatLocation,
-                CatCaliper, CatSegmentation, CatOutput
+                CatCaliper, CatSegmentation, CatOutput, CatRecognition
             };
-            var names = new[] { "采集", "图像处理", "定位与匹配", "卡尺与测量", "分割与拟合", "输出与通信" };
+            var names = new[] { "采集", "图像处理", "定位与匹配", "卡尺与测量", "分割与拟合", "输出与通信", "识别" };
 
             var result = new List<FlowModuleCategory>(keys.Length);
             // 本地索引：Categories 此刻尚未赋值完成（正在初始化），不能走 CategoryOfKey

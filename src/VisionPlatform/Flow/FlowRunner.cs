@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using VisionPlatform.Camera;
 using VisionPlatform.Core;
@@ -68,6 +69,13 @@ namespace VisionPlatform.Flow
         private readonly Dictionary<string, TrainedModel> _models = new Dictionary<string, TrainedModel>();
         private string _shapeModelOwner;
         private string _nccModelOwner;
+
+        // OCR 字符模板缓存：
+        //   原生模板挂在算法上下文上、没有 save/load，且 VisionAlgo 句柄可能被重建。
+        //   这里记录「已灌入的模板目录指纹」（路径 + 文件数 + 最后写入时间），
+        //   指纹变化或原生模板数为 0（句柄是新的）时，清空后重新灌入。
+        private string _ocrTemplateDir;
+        private string _ocrTemplateFingerprint;
 
         /// <summary>结果产出事件（FlowForm 转发给 FlowOutputChannel）。</summary>
         public event EventHandler<FlowOutputEventArgs> OutputReady;
@@ -335,6 +343,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.ImageFilter:  return RunImageFilter(s, node, p);
                 case FlowNodeType.ColorExtractor: return RunColorExtractor(s, node, p);
                 case FlowNodeType.ObjectDetect:  return RunObjectDetect(s, node, p);
+                case FlowNodeType.Ocr:           return RunOcr(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -773,6 +782,227 @@ namespace VisionPlatform.Flow
                 "目标识别：检测到 {0} 个目标{1}", outp.Detections.Count,
                 show > 0 ? "（" + top + (outp.Detections.Count > show ? "…" : "") + "）" : "");
             return true;
+        }
+
+        // ---------------------- 字符识别（传统算法 OCR，原生 va_ocr_*）----------------------
+
+        private bool RunOcr(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "字符识别：无输入帧";
+                return true;
+            }
+
+            Bitmap frame = s.Current;
+            Rectangle roi = ResolveRoi(s, node, frame.Width, frame.Height);
+
+            Bitmap crop = null;
+            Bitmap gray = null;
+            bool grayOwned = false;
+
+            try
+            {
+                // ① 取图：OCR 走灰度链路，ROI 非空时只处理 ROI 内的一块
+                if (!roi.IsEmpty)
+                {
+                    crop = CropTemplate(frame, roi);
+                    if (crop == null) { p.Summary = "字符识别：ROI 裁剪失败"; return false; }
+                }
+                Bitmap input = crop ?? frame;
+
+                if (input.PixelFormat == PixelFormat.Format8bppIndexed)
+                {
+                    gray = input;
+                }
+                else
+                {
+                    gray = ToGrayBitmap(input);
+                    grayOwned = true;
+                }
+                if (gray == null) { p.Summary = "字符识别：灰度转换失败"; return false; }
+
+                // ② 读参数
+                var op = new OcrParam
+                {
+                    Threshold = node.GetInt("Threshold", -1),
+                    Invert = node.GetBool("Invert", false),
+                    MinCharH = node.GetDouble("MinCharH", 0),
+                    MaxCharH = node.GetDouble("MaxCharH", 0),
+                    MinAspect = node.GetDouble("MinAspect", 0),
+                    MaxAspect = node.GetDouble("MaxAspect", 0),
+                    MaxGap = node.GetInt("MaxGap", 3),
+                    NormW = node.GetInt("NormW", 16),
+                    NormH = node.GetInt("NormH", 24),
+                    AcceptScore = node.GetDouble("AcceptScore", 0.6)
+                };
+                int maxCount = node.GetInt("MaxCount", 200);
+                bool showBoxes = node.GetBool("ShowBoxes", true);
+
+                // ③ 模板目录（相对程序基目录，默认 bin/x64/Release/OCRModel）
+                string dirName = node.GetString("TemplateDir", "OCRModel");
+                if (string.IsNullOrWhiteSpace(dirName)) dirName = "OCRModel";
+                string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dirName);
+
+                OpResult<int> tpl = EnsureOcrTemplates(dir);
+                if (!tpl.Success)
+                {
+                    p.Summary = "字符识别：" + Tail(tpl.Message);
+                    return false;
+                }
+                bool hasTemplate = tpl.Value > 0;
+
+                // ④ 识别：拿到整行文本 + 平均置信度
+                OpResult<OcrResult> rr = _algo.Recognize(gray, op);
+                if (!rr.Success)
+                {
+                    p.Summary = "字符识别：" + Tail(rr.Message);
+                    return false;
+                }
+
+                string text = (rr.Value != null) ? (rr.Value.Text ?? "") : "";
+                double meanScore = (rr.Value != null) ? rr.Value.MeanScore : 0.0;
+
+                // ⑤ 字符框叠加（图像坐标；ROI 模式下要从 ROI 局部坐标还原到整帧坐标）
+                int charCount = 0;
+                if (showBoxes)
+                {
+                    OpResult<List<OcrChar>> sr = _algo.Segment(gray, op, maxCount);
+                    if (sr.Success && sr.Value != null)
+                    {
+                        charCount = sr.Value.Count;
+                        foreach (OcrChar c in sr.Value)
+                        {
+                            string label = (string.IsNullOrEmpty(c.Label) ? "?" : c.Label)
+                                         + " " + c.Score.ToString("F2", CultureInfo.InvariantCulture);
+                            var box = FlowShapes.OcrBox(c.X + roi.X, c.Y + roi.Y, c.W, c.H, label);
+                            if (box != null) box.Name = "OcrChar";
+                            p.Shapes.Add(box);
+                        }
+                    }
+                }
+                if (charCount <= 0 && text.Length > 0)
+                    charCount = text.Replace("\n", "").Replace("\r", "").Length;
+
+                // ⑥ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+
+                // ⑦ 摘要
+                string shown = text.Replace("\r", "").Replace("\n", "⏎");
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "字符识别：\"{0}\"（{1} 字符，平均置信度 {2:F2}）{3}",
+                    shown, charCount, meanScore,
+                    hasTemplate ? "" : "；模板目录为空，仅做分割");
+                return true;
+            }
+            finally
+            {
+                if (grayOwned && gray != null) gray.Dispose();
+                if (crop != null) crop.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 保证原生 OCR 上下文里已灌入 dir 目录下的字符模板；返回模板数量（0 = 目录为空，只做分割）。
+        /// 目录不存在时自动创建。原生模板挂在算法上下文上且没有 save/load，
+        /// 因此用「目录路径 + 文件数 + 最后写入时间」指纹 + 原生模板计数双重判断是否需要重载：
+        /// 指纹变化（模板文件增删 / 改）或原生计数为 0（句柄被重建）都会清空重灌。
+        /// </summary>
+        private OpResult<int> EnsureOcrTemplates(string dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir)) dir = "OCRModel";
+
+            if (!Directory.Exists(dir))
+            {
+                try { Directory.CreateDirectory(dir); }
+                catch (Exception ex) { return OpResult<int>.Fail("无法创建模板目录 " + dir + "：" + ex.Message); }
+            }
+
+            List<string> files = ListOcrTemplateFiles(dir);
+
+            long stamp = 0;
+            foreach (string f in files)
+            {
+                long t = File.GetLastWriteTimeUtc(f).Ticks;
+                if (t > stamp) stamp = t;
+            }
+            string fingerprint = dir + "|" + files.Count + "|" + stamp;
+
+            OpResult<int> cur = _algo.OcrTemplateCount();
+            if (!cur.Success) return cur;
+
+            if (cur.Value > 0
+                && string.Equals(dir, _ocrTemplateDir, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(fingerprint, _ocrTemplateFingerprint, StringComparison.Ordinal))
+            {
+                return cur;
+            }
+
+            if (cur.Value > 0)
+            {
+                OpResult clr = _algo.ClearOcrTemplates();
+                if (!clr.Success) return OpResult<int>.Fail(clr.Message);
+            }
+
+            int added = 0;
+            foreach (string f in files)
+            {
+                string label = Path.GetFileNameWithoutExtension(f);
+                if (string.IsNullOrEmpty(label)) continue;
+
+                using (Bitmap bmp = LoadTemplateBitmap(f))
+                {
+                    if (bmp == null) continue;
+                    OpResult r = _algo.AddOcrTemplate(bmp, label);
+                    if (!r.Success)
+                        return OpResult<int>.Fail("加载模板 " + Path.GetFileName(f) + " 失败：" + r.Message);
+                    added++;
+                }
+            }
+
+            _ocrTemplateDir = dir;
+            _ocrTemplateFingerprint = fingerprint;
+            return OpResult<int>.Ok(added);
+        }
+
+        /// <summary>列出模板目录下的图片文件（按文件名排序，保证模板顺序稳定）。</summary>
+        private static List<string> ListOcrTemplateFiles(string dir)
+        {
+            var list = new List<string>();
+            string[] all;
+            try { all = Directory.GetFiles(dir); }
+            catch (Exception) { return list; }
+
+            foreach (string f in all)
+            {
+                string ext = Path.GetExtension(f);
+                if (string.IsNullOrEmpty(ext)) continue;
+                ext = ext.ToLowerInvariant();
+                if (ext == ".bmp" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tif" || ext == ".tiff")
+                    list.Add(f);
+            }
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            return list;
+        }
+
+        /// <summary>
+        /// 读一张模板图并复制一份（复制是为了立刻释放文件句柄，让用户可以随时替换模板文件）。
+        /// 读取失败返回 null（跳过该文件，不判 NG）。
+        /// </summary>
+        private static Bitmap LoadTemplateBitmap(string path)
+        {
+            try
+            {
+                using (Image img = Image.FromFile(path))
+                    return new Bitmap(img);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         // ---------------------- 位置修正（FR-ALG-08 / 09 / 10）----------------------
