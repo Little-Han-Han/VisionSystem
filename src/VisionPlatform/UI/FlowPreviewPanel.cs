@@ -44,6 +44,10 @@ namespace VisionPlatform.UI
         private string _infoBeforeRoi = "";                         // 进入拖框前的顶条文本，退出时还原
         private DrawSpec _drawSpec;                                 // 当前要画的几何（矩形/直线/圆环）；null 视为矩形（兼容旧 BeginRoiPick）
 
+        // 结果表格点行后要突出的图形。ShowFrame 每 33ms 会 ClearShapes + 重新 Add，
+        // 高亮会被冲掉，故记在这里、每次 ShowFrame 末尾重新施加（见 ShowFrame）。
+        private IGeometryShape _highlightedShape;
+
         private Panel panelTop;
         private ComboBox cmbMode;
         private Label lblInfo;
@@ -712,7 +716,24 @@ namespace VisionPlatform.UI
                 foreach (IGeometryShape s in shapes)
                     if (s != null) viewer.Shapes.Add(s);
             }
+
+            // 重新施加「点结果表格行」的高亮：上面的 ClearShapes + Add 已经把选中态清掉了。
+            // 若高亮目标不在本帧图形里（连续运行时图形是新实例），SelectShape 找不到即自然不高亮。
+            if (_highlightedShape != null)
+                viewer.SelectShape(_highlightedShape);
+
             viewer.Shapes.NotifyChanged();
+        }
+
+        /// <summary>
+        /// 突出显示某个结果图形（由「输出结果」表格点行驱动）；null = 取消全部高亮。
+        /// 结果图形 <c>IsEditable=false</c>，鼠标不会误选，程序化设置选中态是安全的。
+        /// </summary>
+        public void HighlightShape(IGeometryShape shape)
+        {
+            _highlightedShape = shape;
+            viewer.SelectShape(shape);      // shape 为 null 时即把所有 IsSelected 置 false
+            viewer.Invalidate();
         }
 
         /// <summary>取摘要首行（以「；」分隔），避免覆盖标签过长。</summary>

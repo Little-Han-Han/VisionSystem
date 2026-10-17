@@ -39,6 +39,11 @@ namespace VisionPlatform.UI
         private FlowNode _selectedNode; // 画布当前选中节点（画 ROI / 回填图像源都优先用它）
         private DrawSpec _drawSpec;     // 本次正在画的是哪一组几何（多组并存时由用户选）
 
+        // 右栏「输出结果」面板：纯代码构建、Dock=Bottom，放在「编辑输入参数」下方。
+        // 刻意不改 FlowForm.Designer.cs——本项目历史上出现过 VS 重序列化把事件订阅弄丢的事故，
+        // 这里走运行时 Controls.Add，既有订阅零风险。
+        private FlowResultPanel resultPanel;
+
         /// <summary>
         /// 每个节点上次画的是哪一组 ROI：key = 节点 Id，value = 该组的 X 参数键（组标识）。
         /// 必须带节点身份，否则切到别的节点后会拿旧组去查新节点的组，可能查错组甚至画错参数。
@@ -95,6 +100,16 @@ namespace VisionPlatform.UI
             //   InitModules 的分类加粗 NodeFont 从 treeModules.Font 派生——若树字体此时
             //   还是设计器里的宋体 8pt，分类节点会渲染成宋体 8pt、叶子是雅黑 10pt，两级不一致。
             UiStyle.ApplyForm(this);
+
+            // 输出结果面板：Add 在最后 → WinForms 逆序停靠，它先拿到 Bottom，
+            // nodeParamPanel(Fill) 自动收缩，正好落在「编辑输入参数」下方。
+            // 放在 UiStyle.ApplyForm 之后：本面板自建配色（ApplyTheme）是唯一来源，
+            // 不希望再被通用遍历覆盖掉语义色。
+            resultPanel = new FlowResultPanel();
+            resultPanel.Dock = DockStyle.Bottom;
+            resultPanel.Height = 220;
+            resultPanel.ShapeSelected += OnResultShapeSelected;
+            panelRight.Controls.Add(resultPanel);
 
             InitModules();
             RefreshPortTree(null);
@@ -341,6 +356,7 @@ namespace VisionPlatform.UI
 
             _selectedNode = null;
             nodeParamPanel.SetNode(null);
+            resultPanel?.Clear();           // 换流程：上一次运行的结果已不对应当前流程
             RefreshPortTree(null);          // 换流程：端子树回到「未选中节点」
             flowPreview.SetSelectedNodeId("");
             _controller?.SetSelectedNode("");   // 同步清空控制器的「选中节点」专用槽
@@ -462,6 +478,7 @@ namespace VisionPlatform.UI
             _selectedNode = (e != null) ? e.Node : null;
 
             nodeParamPanel.SetNode(e.Node);
+            resultPanel?.Clear();           // 换节点：旧结果属于别的节点，先清掉等下一次运行
 
             // 预览「选中节点」模式据此过滤该节点自身的输出
             flowPreview.SetSelectedNodeId(e != null && e.Node != null ? e.Node.Id : "");
@@ -1418,6 +1435,8 @@ namespace VisionPlatform.UI
                                          FlowCanvasControl.ToRunState(snap.Status),
                                          snap.IsChainEnd ? snap.CycleMs : snap.ElapsedMs);
 
+                    FeedResultPanel(snap);
+
                     if (snap.IsChainEnd)
                     {
                         SetStatus(string.Format("运行完成（{0} ms）：{1}　{2}{3}",
@@ -1437,6 +1456,33 @@ namespace VisionPlatform.UI
             {
                 // 窗体已销毁：忽略
             }
+        }
+
+        /// <summary>
+        /// 把运行快照喂给右栏「输出结果」面板。
+        /// 右栏上半部分编辑的是<strong>当前选中节点</strong>的输入参数，故结果也优先跟随它：
+        /// 选中了节点就只刷该节点的输出（同样避免一次运行里逐节点重建表格造成抖动）；
+        /// 没选中节点则每个快照都刷，最终停在链尾结果上。
+        /// </summary>
+        private void FeedResultPanel(FlowProgressSnapshot snap)
+        {
+            if (resultPanel == null || snap == null) return;
+
+            string sel = _selectedNode != null ? _selectedNode.Id : "";
+            if (!string.IsNullOrEmpty(sel) && !string.Equals(snap.NodeId, sel, StringComparison.Ordinal))
+            {
+                // 看的是某个节点，但整链跑完了：结论照旧更新到底部
+                if (snap.IsChainEnd) resultPanel.ApplyVerdict(snap);
+                return;
+            }
+
+            resultPanel.Apply(snap);
+        }
+
+        /// <summary>点击结果表格的某一行 → 在预览图像里突出对应图形（null 取消高亮）。</summary>
+        private void OnResultShapeSelected(IGeometryShape shape)
+        {
+            flowPreview.HighlightShape(shape);
         }
 
         /// <summary>一次启动彻底结束（回到 Idle）：复位按钮；若关窗被挂起则自动关闭。</summary>
@@ -1502,6 +1548,7 @@ namespace VisionPlatform.UI
             canvas.ApplyTheme();
             flowPreview.ApplyTheme();
             nodeParamPanel.ApplyTheme();
+            if (resultPanel != null) resultPanel.ApplyTheme();
 
             // 语义色按钮：Kind 决定自绘填充色，重设一次即取到新色板
             btnRun.Kind = UiButtonKind.Start;

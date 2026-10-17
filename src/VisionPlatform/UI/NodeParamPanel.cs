@@ -117,19 +117,15 @@ namespace VisionPlatform.UI
             body.Controls.Clear();
             _inputs.Clear();
 
-            var grid = new TableLayoutPanel();
-            grid.Dock = DockStyle.Top;
-            grid.AutoSize = true;
-            grid.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            grid.ColumnCount = 2;
-            grid.Padding = new Padding(UiTheme.Margin);
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52f));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48f));
+            TableLayoutPanel grid = NewParamGrid();
+            TableLayoutPanel advGrid = NewParamGrid();   // 「高级参数」区（默认折叠）
+            int advancedCount = 0;
 
             foreach (NodeParamField f in table.Fields)
             {
                 if (f == null) continue;
 
+                // 分组标题 / 提示文本是分节说明，永远留在主表里，不参与折叠
                 if (f.Kind == NodeParamKind.Group)
                 {
                     AddGroupRow(grid, f.Label);
@@ -141,17 +137,90 @@ namespace VisionPlatform.UI
                     continue;
                 }
 
-                AddLabelRow(grid, f);
+                TableLayoutPanel host = f.Advanced ? advGrid : grid;
+
+                AddLabelRow(host, f);
 
                 Control input = CreateInput(f);
-                grid.Controls.Add(input, 1, grid.RowCount);
-                grid.RowCount++;
+                host.Controls.Add(input, 1, host.RowCount);
+                host.RowCount++;
+
+                if (f.Advanced) advancedCount++;
             }
 
             if (!string.IsNullOrEmpty(table.FooterNote))
                 AddFooterRow(grid, table.FooterNote);
 
+            if (advancedCount > 0)
+            {
+                // 高级区放在主表下方。WinForms 的 Dock 按 Controls 集合【逆序】停靠
+                // （索引大的先停靠、排在上面），所以按「内部表格 → 标题 → 主表」的顺序 Add，
+                // 最终自上而下才是：主表 / 标题 / 内部表格。
+                // 三者都直接挂在 body 上（不再套一层 AutoSize Panel）：AutoSize + Dock 嵌套
+                // 会让外层容器算不出高度而塌成 0。
+                advGrid.Visible = false;                       // 默认折叠
+                body.Controls.Add(advGrid);
+                body.Controls.Add(NewAdvancedHeader(advGrid, advancedCount));
+            }
+
             body.Controls.Add(grid);
+        }
+
+        private static TableLayoutPanel NewParamGrid()
+        {
+            var grid = new TableLayoutPanel();
+            grid.Dock = DockStyle.Top;
+            grid.AutoSize = true;
+            grid.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            grid.ColumnCount = 2;
+            grid.Padding = new Padding(UiTheme.Margin);
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52f));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48f));
+            return grid;
+        }
+
+        /// <summary>
+        /// 「高级参数」可折叠区的标题行（<strong>内部表格默认折叠</strong>，见 <see cref="Build"/>）。
+        /// 三角沿用 MainForm 日志折叠的约定：折叠态 ▲（点它展开）、展开态 ▼（点它收起）。
+        /// </summary>
+        private Label NewAdvancedHeader(Control inner, int count)
+        {
+            var header = new Label();
+            header.Dock = DockStyle.Top;
+            header.Height = 26;
+            header.TextAlign = ContentAlignment.MiddleLeft;
+            header.Text = AdvancedHeaderText(false, count);
+            header.Cursor = Cursors.Hand;
+            header.ForeColor = UiTheme.ColorAccent;
+            header.Font = UiTheme.FontGroupTitle;
+            header.Tag = inner;                     // 点击时据此找到要展开/折叠的容器
+            header.Click += OnAdvancedHeaderClick;
+            toolTip.SetToolTip(header, "不常用的参数，点击展开/折叠");
+            return header;
+        }
+
+        private static string AdvancedHeaderText(bool expanded, int count)
+        {
+            return string.Format("高级参数（{0} 项）  {1}", count, expanded ? "▼" : "▲");
+        }
+
+        private void OnAdvancedHeaderClick(object sender, EventArgs e)
+        {
+            var header = sender as Label;
+            if (header == null) return;
+
+            Control inner = header.Tag as Control;
+            if (inner == null) return;
+
+            inner.Visible = !inner.Visible;
+            header.Text = AdvancedHeaderText(inner.Visible, AdvancedCount(inner));
+        }
+
+        /// <summary>统计折叠区里的参数条数（用于标题「高级参数（n 项）」）。</summary>
+        private static int AdvancedCount(Control inner)
+        {
+            var grid = inner as TableLayoutPanel;
+            return grid != null ? grid.RowCount : 0;
         }
 
         private void AddGroupRow(TableLayoutPanel grid, string text)

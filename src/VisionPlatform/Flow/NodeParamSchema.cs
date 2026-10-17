@@ -85,6 +85,14 @@ namespace VisionPlatform.Flow
         /// <summary>提示文本（可空）。</summary>
         public string Hint { get; set; }
 
+        /// <summary>
+        /// 是否为「不常用」参数：true 时 <c>NodeParamPanel</c> 把它收进默认折叠的
+        /// 「高级参数」区，避免参数多的节点（形状匹配 / 模板匹配 / Blob / 卡尺）一打开就是一长条。
+        /// <para>它<strong>只影响界面归组</strong>，与 Key、默认值、取值范围、落盘完全无关，
+        /// 折叠状态下参数照常读写。</para>
+        /// </summary>
+        public bool Advanced { get; set; }
+
         public NodeParamField()
         {
             Key = "";
@@ -142,67 +150,80 @@ namespace VisionPlatform.Flow
     {
         // ---------------------- 便捷构造 ----------------------
 
-        private static NodeParamField Group(string title)
+        // ⚠ 8 个辅助的 advanced 都是「可选参数且排在最后」：既有调用点不传即 false，
+        //   逐字保持原有的 Key / 顺序 / 默认值，只追加标记。
+
+        private static NodeParamField Group(string title, bool advanced = false)
         {
-            return new NodeParamField { Kind = NodeParamKind.Group, Label = title };
+            return new NodeParamField { Kind = NodeParamKind.Group, Label = title, Advanced = advanced };
         }
 
-        private static NodeParamField Note(string text)
+        private static NodeParamField Note(string text, bool advanced = false)
         {
-            return new NodeParamField { Kind = NodeParamKind.Note, Label = text };
+            return new NodeParamField { Kind = NodeParamKind.Note, Label = text, Advanced = advanced };
         }
 
-        private static NodeParamField Int(string key, string label, decimal min, decimal max, string def, string hint = "")
+        private static NodeParamField Int(string key, string label, decimal min, decimal max,
+                                          string def, string hint = "", bool advanced = false)
         {
             return new NodeParamField
             {
                 Key = key, Label = label, Kind = NodeParamKind.Int,
                 Min = min, Max = max, Decimals = 0, Increment = 1m,
-                Default = def, Hint = hint
+                Default = def, Hint = hint, Advanced = advanced
             };
         }
 
         private static NodeParamField Dbl(string key, string label, decimal min, decimal max,
-                                          int decimals, decimal inc, string def, string hint = "")
+                                          int decimals, decimal inc, string def,
+                                          string hint = "", bool advanced = false)
         {
             return new NodeParamField
             {
                 Key = key, Label = label, Kind = NodeParamKind.Double,
                 Min = min, Max = max, Decimals = decimals, Increment = inc,
-                Default = def, Hint = hint
+                Default = def, Hint = hint, Advanced = advanced
             };
         }
 
-        private static NodeParamField Bool(string key, string label, string def, string hint = "")
+        private static NodeParamField Bool(string key, string label, string def,
+                                           string hint = "", bool advanced = false)
         {
             return new NodeParamField
             {
-                Key = key, Label = label, Kind = NodeParamKind.Bool, Default = def, Hint = hint
+                Key = key, Label = label, Kind = NodeParamKind.Bool, Default = def,
+                Hint = hint, Advanced = advanced
             };
         }
 
-        private static NodeParamField Text(string key, string label, string def, string hint = "")
+        private static NodeParamField Text(string key, string label, string def,
+                                           string hint = "", bool advanced = false)
         {
             return new NodeParamField
             {
-                Key = key, Label = label, Kind = NodeParamKind.Text, Default = def, Hint = hint
+                Key = key, Label = label, Kind = NodeParamKind.Text, Default = def,
+                Hint = hint, Advanced = advanced
             };
         }
 
-        private static NodeParamField File(string key, string label, string hint = "")
+        private static NodeParamField File(string key, string label,
+                                           string hint = "", bool advanced = false)
         {
             return new NodeParamField
             {
-                Key = key, Label = label, Kind = NodeParamKind.File, Default = "", Hint = hint
+                Key = key, Label = label, Kind = NodeParamKind.File, Default = "",
+                Hint = hint, Advanced = advanced
             };
         }
 
         private static NodeParamField Enum(string key, string label, string def,
-                                           string[] texts, string[] values, string hint = "")
+                                           string[] texts, string[] values,
+                                           string hint = "", bool advanced = false)
         {
             var f = new NodeParamField
             {
-                Key = key, Label = label, Kind = NodeParamKind.Enum, Default = def, Hint = hint
+                Key = key, Label = label, Kind = NodeParamKind.Enum, Default = def,
+                Hint = hint, Advanced = advanced
             };
             for (int i = 0; i < texts.Length; i++)
                 f.Options.Add(new NodeParamOption(texts[i], i < values.Length ? values[i] : texts[i]));
@@ -335,8 +356,8 @@ namespace VisionPlatform.Flow
 
             t.Fields.Add(Group("训练"));
             t.Fields.Add(Dbl("Contrast", "对比度", 0, 255, 1, 1m, "30"));
-            t.Fields.Add(Int("MaxFeatures", "最多特征点", 10, 100000, "1500"));
-            t.Fields.Add(Dbl("MinFeatureDist", "最小间距", 0, 100, 1, 0.5m, "2"));
+            t.Fields.Add(Int("MaxFeatures", "最多特征点", 10, 100000, "1500", "", true));
+            t.Fields.Add(Dbl("MinFeatureDist", "最小间距", 0, 100, 1, 0.5m, "2", "", true));
 
             t.Fields.Add(Group("搜索区域"));
             t.Fields.Add(Int("SearchX", "X", 0, 100000, "0"));
@@ -347,16 +368,16 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Group("匹配"));
             t.Fields.Add(Dbl("AngleStart", "起始角(°)", -360, 360, 2, 1m, "-10"));
             t.Fields.Add(Dbl("AngleEnd", "结束角(°)", -360, 360, 2, 1m, "10"));
-            t.Fields.Add(Dbl("AngleStep", "角度步长(°)", 0, 360, 3, 0.5m, "1"));
+            t.Fields.Add(Dbl("AngleStep", "角度步长(°)", 0, 360, 3, 0.5m, "1", "", true));
             t.Fields.Add(Dbl("ScaleMin", "最小缩放", 0, 10, 4, 0.1m, "1"));
             t.Fields.Add(Dbl("ScaleMax", "最大缩放", 0, 10, 4, 0.1m, "1"));
-            t.Fields.Add(Dbl("ScaleStep", "缩放步长", 0, 10, 4, 0.05m, "0", "0 = 不搜索缩放"));
-            t.Fields.Add(Int("PyramidLevels", "金字塔层数", 1, 8, "4"));
+            t.Fields.Add(Dbl("ScaleStep", "缩放步长", 0, 10, 4, 0.05m, "0", "0 = 不搜索缩放", true));
+            t.Fields.Add(Int("PyramidLevels", "金字塔层数", 1, 8, "4", "", true));
             t.Fields.Add(Dbl("MinScore", "最小得分", 0, 1, 4, 0.05m, "0.7"));
             t.Fields.Add(Int("MaxMatches", "最多目标数", 1, 1000, "1"));
-            t.Fields.Add(Dbl("MaxOverlap", "重叠阈值", 0, 1, 3, 0.05m, "0.5"));
-            t.Fields.Add(Dbl("Greediness", "贪婪系数", 0, 1, 3, 0.05m, "0.9", "0 = 关闭启发式（最慢最稳）"));
-            t.Fields.Add(Bool("Subpixel", "亚像素精化", "1"));
+            t.Fields.Add(Dbl("MaxOverlap", "重叠阈值", 0, 1, 3, 0.05m, "0.5", "", true));
+            t.Fields.Add(Dbl("Greediness", "贪婪系数", 0, 1, 3, 0.05m, "0.9", "0 = 关闭启发式（最慢最稳）", true));
+            t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
             return t;
         }
 
@@ -380,7 +401,7 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Group("判定"));
             t.Fields.Add(Dbl("MinScore", "最小得分", 0, 1, 3, 0.05m, "0.8"));
             t.Fields.Add(Int("MaxMatches", "最多目标数", 1, 1000, "1"));
-            t.Fields.Add(Bool("Subpixel", "亚像素精化", "1"));
+            t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
 
             t.FooterNote = "仅支持平移匹配，不支持旋转/缩放；有旋转请用形状匹配。";
             return t;
@@ -406,13 +427,13 @@ namespace VisionPlatform.Flow
 
             t.Fields.Add(Group("过滤（0 = 不限）"));
             t.Fields.Add(Dbl("MinArea", "最小面积", 0, 100000000, 0, 10m, "100"));
-            t.Fields.Add(Dbl("MaxArea", "最大面积", 0, 100000000, 0, 10m, "0"));
-            t.Fields.Add(Dbl("MinWidth", "最小宽", 0, 100000, 0, 1m, "0"));
-            t.Fields.Add(Dbl("MinHeight", "最小高", 0, 100000, 0, 1m, "0"));
+            t.Fields.Add(Dbl("MaxArea", "最大面积", 0, 100000000, 0, 10m, "0", "", true));
+            t.Fields.Add(Dbl("MinWidth", "最小宽", 0, 100000, 0, 1m, "0", "", true));
+            t.Fields.Add(Dbl("MinHeight", "最小高", 0, 100000, 0, 1m, "0", "", true));
             t.Fields.Add(Dbl("MinCircularity", "最小圆度", 0, 1, 3, 0.05m, "0"));
             t.Fields.Add(Note("圆度＝面积/外接矩形面积（圆≈0.785，矩形≈1.0）。"));
             t.Fields.Add(Int("MaxCount", "最多保留", 0, 1000, "50"));
-            t.Fields.Add(Enum("SortBy", "排序", "Area", new[] { "面积降序" }, new[] { "Area" }));
+            t.Fields.Add(Enum("SortBy", "排序", "Area", new[] { "面积降序" }, new[] { "Area" }, "", true));
 
             t.Fields.Add(Group("判定（0 = 不限）"));
             t.Fields.Add(Int("ExpectMin", "期望个数下限", 0, 1000, "0"));
@@ -438,14 +459,14 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Enum("Polarity", "极性", "0",
                 new[] { "Any（不过滤）", "由暗到亮", "由亮到暗" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Dbl("EdgeThreshold", "边缘阈值", 0, 255, 1, 1m, "30", "灰度跳变幅值"));
-            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2", "一维均值滤波，抗噪"));
+            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2", "一维均值滤波，抗噪", true));
             t.Fields.Add(Enum("SelectMode", "选边策略", "0",
                 new[] { "最强", "最前", "最后" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Int("MinEdgeCount", "最少边缘点", 0, 200, "3"));
 
             t.Fields.Add(Group("离群剔除"));
             t.Fields.Add(Bool("RejectOutliers", "剔除离群点", "1", "首轮拟合后按残差剔除一轮"));
-            t.Fields.Add(Dbl("OutlierTolerance", "剔除阈值(px)", 0, 100, 2, 0.5m, "2"));
+            t.Fields.Add(Dbl("OutlierTolerance", "剔除阈值(px)", 0, 100, 2, 0.5m, "2", "", true));
 
             t.Fields.Add(Group("判定（0 = 不限）"));
             t.Fields.Add(Dbl("LengthMin", "长度下限", 0, 1000000, 1, 1m, "0"));
@@ -475,14 +496,14 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Enum("Polarity", "极性", "0",
                 new[] { "Any（不过滤）", "由暗到亮", "由亮到暗" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Dbl("EdgeThreshold", "边缘阈值", 0, 255, 1, 1m, "30"));
-            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2"));
+            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2", "", true));
             t.Fields.Add(Enum("SelectMode", "选边策略", "0",
                 new[] { "最强", "最前", "最后" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Int("MinEdgeCount", "最少边缘点", 0, 360, "5"));
 
             t.Fields.Add(Group("离群剔除"));
             t.Fields.Add(Bool("RejectOutliers", "剔除离群点", "1"));
-            t.Fields.Add(Dbl("OutlierTolerance", "剔除阈值(px)", 0, 100, 2, 0.5m, "2"));
+            t.Fields.Add(Dbl("OutlierTolerance", "剔除阈值(px)", 0, 100, 2, 0.5m, "2", "", true));
 
             t.Fields.Add(Group("判定（0 = 不限）"));
             t.Fields.Add(Dbl("DiameterMin", "直径下限", 0, 1000000, 1, 1m, "0"));
@@ -554,16 +575,16 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Int("Threshold", "二值化阈值", -1, 255, "-1",
                 "-1 = Otsu 自适应；光照均匀时改固定阈值（如 128）更稳"));
             t.Fields.Add(Bool("Invert", "极性反转", "0", "白底黑字时开启；深色背景亮字保持关闭"));
-            t.Fields.Add(Dbl("MinCharH", "字符最小高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉噪声点）"));
-            t.Fields.Add(Dbl("MaxCharH", "字符最大高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉大块污渍）"));
-            t.Fields.Add(Dbl("MinAspect", "最小宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制"));
-            t.Fields.Add(Dbl("MaxAspect", "最大宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制"));
+            t.Fields.Add(Dbl("MinCharH", "字符最小高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉噪声点）", true));
+            t.Fields.Add(Dbl("MaxCharH", "字符最大高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉大块污渍）", true));
+            t.Fields.Add(Dbl("MinAspect", "最小宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制", true));
+            t.Fields.Add(Dbl("MaxAspect", "最大宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制", true));
             t.Fields.Add(Int("MaxGap", "同行最大间隙", -1, 1000, "3",
                 "相邻字符合并的最大水平间隙（像素）；<0 按 3 处理"));
 
             t.Fields.Add(Group("识别参数"));
-            t.Fields.Add(Int("NormW", "归一化宽", 0, 256, "16", "<=0 按 16；同一套模板必须全程一致"));
-            t.Fields.Add(Int("NormH", "归一化高", 0, 256, "24", "<=0 按 24；同一套模板必须全程一致"));
+            t.Fields.Add(Int("NormW", "归一化宽", 0, 256, "16", "<=0 按 16；同一套模板必须全程一致", true));
+            t.Fields.Add(Int("NormH", "归一化高", 0, 256, "24", "<=0 按 24；同一套模板必须全程一致", true));
             t.Fields.Add(Dbl("AcceptScore", "接受阈值", 0, 1, 2, 0.05m, "0.6",
                 "低于该置信度的字符输出 '?'；调低易误识、调高易漏识"));
             t.Fields.Add(Int("MaxCount", "最多字符数", 1, 2000, "200", "超出部分被截断"));

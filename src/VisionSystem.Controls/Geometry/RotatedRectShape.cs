@@ -174,6 +174,14 @@ namespace VisionSystem.Controls.Geometry
                 g.DrawPolygon(pen, screen);
             }
 
+            // 选中高亮：与 RectangleShape 同款的半透明白外框（向外扩 2 屏幕像素）。
+            // 形状匹配的结果框（FlowShapes.MatchBox）正是本类型，缺了它「点结果表格行」在图像上没反应。
+            if (IsSelected)
+            {
+                using (Pen pen = new Pen(Color.FromArgb(120, 255, 255, 255), 2f))
+                    g.DrawPolygon(pen, OffsetOutward(screen, 2f));
+            }
+
             // 绘制局部 X 轴方向指示线，便于判断朝向
             PointF axisEnd = ToWorld(new PointF(_width * 0.5f, 0f));
             using (Pen axisPen = new Pen(Color.FromArgb(150, StrokeColor), 1f))
@@ -277,6 +285,31 @@ namespace VisionSystem.Controls.Geometry
         public override string ToString()
         {
             return ToGeometryString();
+        }
+
+        /// <summary>
+        /// 把多边形顶点沿「远离中心」的方向整体外扩 <paramref name="dist"/>（屏幕像素），
+        /// 用于绘制选中高亮外框（轴对齐矩形可以直接 -2/+4，旋转矩形只能按顶点推）。
+        /// </summary>
+        private static PointF[] OffsetOutward(PointF[] pts, float dist)
+        {
+            if (pts == null || pts.Length == 0) return pts;
+
+            float cx = 0f, cy = 0f;
+            for (int i = 0; i < pts.Length; i++) { cx += pts[i].X; cy += pts[i].Y; }
+            cx /= pts.Length;
+            cy /= pts.Length;
+
+            var result = new PointF[pts.Length];
+            for (int i = 0; i < pts.Length; i++)
+            {
+                float dx = pts[i].X - cx;
+                float dy = pts[i].Y - cy;
+                float len = (float)Math.Sqrt(dx * dx + dy * dy);
+                if (len < 0.0001f) { result[i] = pts[i]; continue; }
+                result[i] = new PointF(pts[i].X + dx / len * dist, pts[i].Y + dy / len * dist);
+            }
+            return result;
         }
 
         private static float NormalizeAngle(float deg)

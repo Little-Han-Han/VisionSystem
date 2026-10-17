@@ -118,6 +118,7 @@
       <DependentUpon>FlowForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\FlowDrawSpec.cs" />
+    <Compile Include="UI\FlowResultPanel.cs" />
     <Compile Include="UI\FlowCanvasTypes.cs" />
     <Compile Include="UI\UiButton.cs">
       <SubType>Component</SubType>
