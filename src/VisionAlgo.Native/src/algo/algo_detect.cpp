@@ -13,20 +13,8 @@ namespace va {
 
 namespace {
 
-// COCO 80 类默认名表（模型无侧车 .txt 时使用）
-const char* kCocoNames[80] = {
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
-    "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
-    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
-    "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
-    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
-    "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
-    "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
-    "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
-};
+// 类别名不再内嵌于源码：必须提供与模型同名的 .txt 侧车文件（每行一个类别名）。
+// 缺失时 DetCreate 直接报错，避免静默使用错误类别。
 
 struct Box {
     float x, y, w, h;   // 原图像素坐标（左上角 + 宽高）
@@ -152,10 +140,17 @@ int DetCreate(Context* ctx, const char* model_path, const char* device)
             inW = (int)in_shape[3];
         }
 
-        // 输出形状：{1, 4 + num_classes, anchors}
+        // 输出形状：最后一个维度是 4 + num_classes 或 anchors；Ultralytics 导出为
+        // [1, 4+nc, anchors]（通道在前）或 [1, anchors, 4+nc]（通道在后）。
+        // anchors(约 8400) 远大于 4+nc(约 84)，取较小者作为 4+nc。
         auto out_shape = model->output().get_shape();
-        int numClasses = 0;
-        if (out_shape.size() == 3) numClasses = (int)out_shape[1] - 4;
+        if (out_shape.size() < 2) {
+            SetError(ctx, "unexpected YOLO output rank");
+            return VA_ERR_ARG;
+        }
+        int od0 = (int)out_shape[out_shape.size() - 2];
+        int od1 = (int)out_shape[out_shape.size() - 1];
+        int numClasses = std::min(od0, od1) - 4;
 
         if (inW <= 0 || inH <= 0 || numClasses <= 0) {
             SetError(ctx, "unexpected YOLO model I/O shape (need [1,3,H,W] in / [1,4+nc,A] out)");
@@ -165,13 +160,16 @@ int DetCreate(Context* ctx, const char* model_path, const char* device)
         ov::CompiledModel compiled = ctx->det.core.compile_model(model, dev);
         ov::InferRequest infer = compiled.create_infer_request();
 
-        // 类别名：优先侧车 <model>.txt，否则内置 COCO 80 类 + 补 "class_N"
+        // 类别名：必须提供与模型同名的 .txt 侧车文件（每行一个类别名）。缺失即报错。
         std::vector<std::string> names;
         if (!LoadNames(model_path, names)) {
-            for (int i = 0; i < numClasses && i < 80; ++i) names.push_back(kCocoNames[i]);
-            while ((int)names.size() < numClasses)
-                names.push_back("class_" + std::to_string(names.size()));
+            SetError(ctx, ("类别文件未找到：请在模型同目录放置 " + std::string(model_path) +
+                           " 去扩展名后的 .txt（每行一个类别名）").c_str());
+            return VA_ERR_ARG;
         }
+        // 类别数不足时按 class_N 补齐，避免越界
+        while ((int)names.size() < numClasses)
+            names.push_back("class_" + std::to_string(names.size()));
 
         ctx->det.compiled    = std::move(compiled);
         ctx->det.infer       = std::move(infer);
@@ -217,28 +215,82 @@ int DetRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thre
 
         auto out_tensor = ctx->det.infer.get_output_tensor();
         const float* data = out_tensor.data<float>();
-        auto out_shape = out_tensor.get_shape();   // {1, 4 + nc, anchors}
-        int nc = (int)out_shape[1] - 4;
-        int anchors = (int)out_shape[2];
-        int stride = 4 + nc;
+        auto out_shape = out_tensor.get_shape();   // [1, C, A] 或 [1, A, C]
+        int rank = (int)out_shape.size();
+        if (rank < 2) { SetError(ctx, "unexpected YOLO output rank"); return VA_ERR_INTERNAL; }
+
+        // 两个尾部维度：一个是 4 + numClasses（通道），一个是 anchors。
+        // anchors(约 8400) 远大于 4+nc(约 84)，取较小者为 4+nc。
+        int dimA = (int)out_shape[rank - 2];
+        int dimB = (int)out_shape[rank - 1];
+        int C = std::min(dimA, dimB);     // 4 + numClasses
+        int A = std::max(dimA, dimB);     // anchors
+        int nc = C - 4;
+        int anchors = A;
+        bool channelsFirst = ((int)out_shape[rank - 2] == C);  // [.., C, A] 否则 [.., A, C]
+
+        if (nc <= 0 || anchors <= 0) { SetError(ctx, "unexpected YOLO output shape"); return VA_ERR_INTERNAL; }
+
+        // 按布局求 (anchor a, channel c) 的扁平下标（C 序：通道在前时为 c*A+a，通道在后时为 a*C+c）
+        auto idx = [&](int a, int c) -> size_t {
+            return channelsFirst ? ((size_t)c * (size_t)A + (size_t)a)
+                                 : ((size_t)a * (size_t)C + (size_t)c);
+        };
+
+        // ===== 一次性诊断：把输出张量格式样本写到 exe 同目录 detect_diag.txt =====
+        // 本环境无法离线加载 onnx，用一次真实推理落盘，定位坐标 / 类别解析问题。
+        // 若运行后该文件未生成，说明正在加载的是旧版（未含本段）原生 DLL。
+        {
+            static bool s_diag = false;
+            if (!s_diag) {
+                s_diag = true;
+                std::ofstream dg("detect_diag.txt");
+                if (dg.is_open()) {
+                    dg << "rank=" << rank << "\n";
+                    dg << "dims=";
+                    for (size_t z = 0; z < out_shape.size(); ++z) dg << (long long)out_shape[z] << " ";
+                    dg << "\n";
+                    dg << "C=" << C << " A=" << A << " nc=" << nc << " anchors=" << anchors
+                       << " channelsFirst=" << (int)channelsFirst << "\n";
+                    dg << "scale=" << scale << " padX=" << padX << " padY=" << padY
+                       << " inW=" << inW << " inH=" << inH << "\n";
+                    for (int a = 0; a < anchors && a < 2; ++a) {
+                        dg << "--- anchor " << a << " channelsFirst(c*A+a) ---\n";
+                        for (int c = 0; c < nc + 4 && c < 12; ++c)
+                            dg << "  ch" << c << "=" << data[(size_t)c * (size_t)A + a] << "\n";
+                        dg << "--- anchor " << a << " channelsLast(a*C+c) ---\n";
+                        for (int c = 0; c < nc + 4 && c < 12; ++c)
+                            dg << "  ch" << c << "=" << data[(size_t)a * (size_t)C + c] << "\n";
+                    }
+                    float bxMin = 1e30f, bxMax = -1e30f, scMax = -1e30f;
+                    for (int a = 0; a < anchors; ++a) {
+                        float cx = data[idx(a,0)], cy = data[idx(a,1)], w = data[idx(a,2)], h = data[idx(a,3)];
+                        bxMin = std::min(bxMin, std::min(cx, std::min(cy, std::min(w, h))));
+                        bxMax = std::max(bxMax, std::max(cx, std::max(cy, std::max(w, h))));
+                        for (int c = 0; c < nc; ++c) scMax = std::max(scMax, data[idx(a, 4 + c)]);
+                    }
+                    dg << "boxValRange=[" << bxMin << "," << bxMax << "] maxClassRaw=" << scMax << "\n";
+                    dg.close();
+                }
+            }
+        }
 
         // 解析：每个 anchor 取最大类，超过阈值则视为候选
         std::vector<Box> candidates;
         for (int a = 0; a < anchors; ++a) {
-            const float* row = data + (size_t)a * stride;
-            float cx = row[0], cy = row[1], w = row[2], h = row[3];
+            float cx = data[idx(a, 0)], cy = data[idx(a, 1)], w = data[idx(a, 2)], h = data[idx(a, 3)];
 
             // 退化框（宽高非正）直接丢弃，不参与后续阈值 / NMS
             if (w <= 0.0f || h <= 0.0f) continue;
 
             int bestCls = 0; float bestScore = -1e30f;
             for (int c = 0; c < nc; ++c) {
-                float s = 1.0f / (1.0f + std::exp(-row[4 + c]));   // sigmoid
+                float s = 1.0f / (1.0f + std::exp(-data[idx(a, 4 + c)]));   // sigmoid
                 if (s > bestScore) { bestScore = s; bestCls = c; }
             }
             if (bestScore < score_thresh) continue;
 
-            // 目标输入空间 → 原图坐标
+            // 目标输入空间 → 原图坐标（letterbox 逆变换）
             Box b;
             b.x = (cx - w * 0.5f - (float)padX) / scale;
             b.y = (cy - h * 0.5f - (float)padY) / scale;

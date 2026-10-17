@@ -24,7 +24,6 @@
       <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000006}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
-
   <!-- 头文件夹 -->
   <ItemGroup>
     <ClInclude Include="include\vision_algo.h">
@@ -70,7 +69,6 @@
       <Filter>include\algo</Filter>
     </ClInclude>
   </ItemGroup>
-
   <!-- 源文件夹 -->
   <ItemGroup>
     <ClCompile Include="src\vision_algo.cpp">
@@ -116,7 +114,6 @@
       <Filter>src\algo</Filter>
     </ClCompile>
   </ItemGroup>
-
   <!-- Common 文件夹：公共头文件与实现 -->
   <ItemGroup>
     <ClInclude Include="Common\va_export.h">
@@ -138,16 +135,12 @@
       <Filter>Common</Filter>
     </ClCompile>
   </ItemGroup>
-
   <!-- 依赖说明文档 -->
   <ItemGroup>
     <Text Include="..\..\ThirdParty\README.md">
       <Filter>ThirdParty</Filter>
     </Text>
     <Text Include="..\..\ThirdParty\HikVision\README.md">
-      <Filter>ThirdParty</Filter>
-    </Text>
-    <Text Include="..\..\ThirdParty\OpenVino2025.4.1\runtime\version.txt">
       <Filter>ThirdParty</Filter>
     </Text>
   </ItemGroup>

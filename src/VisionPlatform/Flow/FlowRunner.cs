@@ -745,8 +745,9 @@ namespace VisionPlatform.Flow
             foreach (DetectResult d in outp.Detections)
             {
                 bool primary = (outp.Best != null) && object.ReferenceEquals(d, outp.Best);
-                IGeometryShape box = FlowShapes.DetectBox(d.X, d.Y, d.Width, d.Height, primary);
-                if (box != null) box.Name = d.ClassName + " " + d.Score.ToString("F2", CultureInfo.InvariantCulture);
+                string label = d.ClassName + " " + d.Score.ToString("F2", CultureInfo.InvariantCulture);
+                var box = FlowShapes.DetectBox(d.X, d.Y, d.Width, d.Height, primary, label);
+                if (box != null) box.Name = label;   // Name 供悬浮提示，Label 供画布绘制
                 p.Shapes.Add(box);
                 idx++;
             }

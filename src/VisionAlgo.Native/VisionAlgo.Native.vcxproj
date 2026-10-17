@@ -10,16 +10,13 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <ProjectGuid>{3F2A1B4C-2001-4A7E-9D21-6E8B5C4A2001}</ProjectGuid>
     <RootNamespace>VisionAlgoNative</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -33,15 +30,11 @@
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
-            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
-            Label="LocalAppDataPlatform" />
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-
   <PropertyGroup Label="UserMacros">
     <!-- OpenCV 预编译包根目录：只提供 vc14/vc15 的 lib，但 MSVC 2015~2022 ABI 兼容，
          v143 工具集可直接链接 vc15 的库。 -->
@@ -50,13 +43,11 @@
          lib/bin 再按 intel64\{Debug,Release} 分 Debug/Release，下面路径都相对 runtime。 -->
     <OpenVinoRoot>$(ProjectDir)..\..\ThirdParty\OpenVino2025.4.1\runtime</OpenVinoRoot>
   </PropertyGroup>
-
   <PropertyGroup>
     <TargetName>VisionAlgo.Native</TargetName>
     <OutDir>$(ProjectDir)..\..\bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>obj\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
-
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -90,11 +81,10 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
       <Message>Copy OpenCV + OpenVINO (Debug) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Disabled</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -127,7 +117,6 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
       <Message>Copy OpenCV + OpenVINO (Release) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-
   <!-- 头文件夹：include 下放对外头文件，其中 algo 子目录按算法类别分文件 -->
   <ItemGroup>
     <ClInclude Include="include\vision_algo.h" />
@@ -177,6 +166,5 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <Text Include="..\..\ThirdParty\README.md" />
     <Text Include="..\..\ThirdParty\HikVision\README.md" />
   </ItemGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

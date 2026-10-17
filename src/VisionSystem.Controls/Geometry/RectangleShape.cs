@@ -66,6 +66,8 @@ namespace VisionSystem.Controls.Geometry
         }
 
         public string Name { get; set; }
+        /// <summary>可选标签文本：非空时在框左上角绘制（目标识别用其显示类别 + 置信度）。</summary>
+        public string Label { get; set; }
         public object Tag { get; set; }
         public Color StrokeColor { get; set; } = Color.Orange;
         public float LineWidth { get; set; } = 2f;
@@ -105,6 +107,22 @@ namespace VisionSystem.Controls.Geometry
             {
                 using (Pen pen = new Pen(Color.FromArgb(120, 255, 255, 255), 1f))
                     g.DrawRectangle(pen, r.X - 2f, r.Y - 2f, r.Width + 4f, r.Height + 4f);
+            }
+
+            // 标签文本（类别名 + 置信度等）：绘制在框左上角上方，深色底 + 框色字，保证可读
+            if (!string.IsNullOrEmpty(Label))
+            {
+                using (var font = new Font("Segoe UI", 9f, FontStyle.Bold))
+                using (var textBrush = new SolidBrush(Color.FromArgb(235, StrokeColor.R, StrokeColor.G, StrokeColor.B)))
+                using (var bgBrush = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
+                {
+                    SizeF sz = g.MeasureString(Label, font);
+                    float bx = r.X;
+                    float by = r.Y - sz.Height - 2f;
+                    if (by < 0f) by = r.Y + 2f;   // 顶部越界则画在框内
+                    g.FillRectangle(bgBrush, bx, by, sz.Width + 6f, sz.Height + 3f);
+                    g.DrawString(Label, font, textBrush, bx + 3f, by + 1f);
+                }
             }
         }
 
@@ -186,6 +204,7 @@ namespace VisionSystem.Controls.Geometry
         {
             if (target == null) return;
             target.Name = Name;
+            target.Label = Label;
             target.Tag = Tag;
             target.StrokeColor = StrokeColor;
             target.LineWidth = LineWidth;

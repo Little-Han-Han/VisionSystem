@@ -286,7 +286,7 @@ namespace VisionPlatform.Flow
         /// <param name="width">宽（图像像素）。</param>
         /// <param name="height">高（图像像素）。</param>
         /// <param name="primary">是否为置信度最高的目标（用更粗的线）。</param>
-        public static RectangleShape DetectBox(double x, double y, double width, double height, bool primary)
+        public static RectangleShape DetectBox(double x, double y, double width, double height, bool primary, string label)
         {
             float w = (float)Math.Max(1.0, width);
             float h = (float)Math.Max(1.0, height);
@@ -295,6 +295,7 @@ namespace VisionPlatform.Flow
             r.LineWidth = primary ? BoldLine : ThinLine;
             r.IsEditable = false;
             r.Name = "Detection";
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
             return r;
         }
     }

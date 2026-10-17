@@ -15,8 +15,8 @@
  *
  *  坐标：返回结果为原图（输入 VA_Image）像素坐标系下的左上角 (x, y) 与宽高 (w, h)。
  *
- *  类别名：优先读取与模型同名的 .txt（每行一个类名，COCO 风格）；
- *          不存在时回退到内置 COCO 80 类，超出部分补 "class_N"。
+ *  类别名：必须提供与模型同名的 .txt（每行一个类名，COCO 风格）；
+ *          缺失时 va_det_create 直接报错，不内嵌任何默认类别。
  *
  *  返回码：VA_OK / VA_ERR_ARG / VA_ERR_TYPE / VA_ERR_SIZE
  *          / VA_ERR_NO_TEMPLATE（未 create）/ VA_ERR_INTERNAL
