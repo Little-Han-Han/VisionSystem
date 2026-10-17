@@ -54,6 +54,8 @@ namespace VisionPlatform.UI
             treeModules.ItemDrag += OnModuleItemDrag;
             lstFlows.SelectedIndexChanged += OnFlowSelectionChanged;
             cmbCamera.SelectedIndexChanged += OnCameraBindingChanged;
+            // 相机管理里打开/关闭相机时自动刷新绑定下拉，无需手动点「刷新」
+            CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
 
             canvas.NodeSelected += OnCanvasNodeSelected;
             canvas.NodeAdded += OnCanvasChanged;
@@ -1089,13 +1091,15 @@ namespace VisionPlatform.UI
                 cmbCamera.Items.Clear();
                 cmbCamera.Items.Add(new BindItem("", "（未绑定）"));
 
-                var opened = CameraManager.Instance.OpenedCameras;
+                // 读取「相机管理」的完整相机列表（含未打开的），让流程能直接绑定任意已登记相机，
+                // 再到相机管理里打开；不再只看「已打开」列表，避免绑定下拉读不到相机管理列表。
+                var infos = CameraManager.Instance.Enumerate();
                 bool found = string.IsNullOrEmpty(want);
-                foreach (ICamera cam in opened)
+                foreach (CameraInfo info in infos)
                 {
-                    if (cam == null || cam.Info == null) continue;
-                    cmbCamera.Items.Add(new BindItem(cam.Info.Id, cam.Info.ToString()));
-                    if (cam.Info.Id == want) found = true;
+                    if (info == null) continue;
+                    cmbCamera.Items.Add(new BindItem(info.Id, info.ToString()));
+                    if (info.Id == want) found = true;
                 }
 
                 // 绑定存在但相机未打开：仍显示出来，便于保留绑定关系
@@ -1134,6 +1138,13 @@ namespace VisionPlatform.UI
             f.CameraId = it != null ? it.CameraId : "";
             SaveFlows();
             SetStatus("相机绑定：" + (string.IsNullOrEmpty(f.CameraId) ? "未绑定" : f.CameraId));
+        }
+
+        private void OnCameraManagerChanged(object sender, EventArgs e)
+        {
+            if (IsDisposed || Disposing) return;
+            // 相机管理列表/打开状态变化后，立即刷新绑定下拉，避免「读不到相机管理列表、未刷新」
+            RefreshCameraBindings();
         }
 
         private void OnViewIndexChanged(object sender, EventArgs e)
@@ -1540,6 +1551,9 @@ namespace VisionPlatform.UI
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
+
+            // 退订相机管理变更事件，避免本窗体被 CameraManager 静态单例持有而无法回收
+            CameraManager.Instance.CurrentChanged -= OnCameraManagerChanged;
 
             // 先请求取消
             _cancel = true;

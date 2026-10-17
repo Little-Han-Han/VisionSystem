@@ -536,6 +536,10 @@ namespace VisionPlatform.Flow
         {
             var cycleWatch = new Stopwatch();
 
+            // 连续运行整体算一次「运行」：在循环外清空位置修正 Auto 基准缓存，
+            // 保证本轮首帧示教得到的基准能在后续帧复用（不被每帧 Begin 清空）。
+            _runner.ClearAutoReferences();
+
             while (!_stop)
             {
                 cycleWatch.Restart();
@@ -544,7 +548,8 @@ namespace VisionPlatform.Flow
                 try
                 {
                     // 连续运行关掉逐节点留帧：避免每周期 N 份 Bitmap 堆积
-                    s = _runner.Begin(flow, camera, false);
+                    // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）
+                    s = _runner.Begin(flow, camera, false, false);
 
                     if (s.Aborted)
                     {
