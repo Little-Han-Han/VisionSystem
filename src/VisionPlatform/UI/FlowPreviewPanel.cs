@@ -44,9 +44,18 @@ namespace VisionPlatform.UI
         private string _infoBeforeRoi = "";                         // 进入拖框前的顶条文本，退出时还原
         private DrawSpec _drawSpec;                                 // 当前要画的几何（矩形/直线/圆环）；null 视为矩形（兼容旧 BeginRoiPick）
 
-        // 结果表格点行后要突出的图形。ShowFrame 每 33ms 会 ClearShapes + 重新 Add，
+        // 结果表格点行后要突出的目标。ShowFrame 每 33ms 会 ClearShapes + 重新 Add，
         // 高亮会被冲掉，故记在这里、每次 ShowFrame 末尾重新施加（见 ShowFrame）。
-        private IGeometryShape _highlightedShape;
+        //
+        // 【为什么不是图形实例】每个运行周期 FlowNodeProgress.Shapes 都被重建：
+        // FlowShapes.MatchBox → new RotatedRectShape、OcrBox → new RectangleShape，每周期都是新实例，
+        // 存实例引用必然在下一帧失效（连续运行下高亮只闪一下就没了）。
+        // 故高亮身份改用「节点 Id + 该节点 Shapes 列表内的序号」：同一节点在同一流程里
+        // 每周期产出图形的顺序是确定的（检测框按分数、字符按行列排序），序号跨周期稳定。
+        private string _hlNodeId = "";    // 高亮所属节点 Id；空 = 无高亮
+        private int _hlIndex = -1;        // 在该节点 Shapes 列表内的序号；-1 = 无高亮
+        private string _curNodeId = "";   // 当前快照的节点 Id
+        private bool _curNodeOwnShapes;   // 当前帧画的是「该节点自身图形」；false = 链尾全链图形，序号与该节点对不上
 
         private Panel panelTop;
         private ComboBox cmbMode;
@@ -61,7 +70,6 @@ namespace VisionPlatform.UI
         private Label lblSummary;
         private System.ComponentModel.IContainer components;
         private Timer pullTimer;
-        private int _diagTick;   // [预览诊断][临时] 拉取入口节流计数——定位后随诊断日志一起移除
 
         public FlowPreviewPanel()
         {
@@ -589,10 +597,6 @@ namespace VisionPlatform.UI
             FlowRunController ctl = _controller;
             if (ctl == null) return;
 
-            // [预览诊断][临时] 每 ~3 秒记录一次拉取入口状态（定位「被挡住不拉帧」）——定位后移除
-            if (++_diagTick % 90 == 0)
-                Logger.Info("[预览诊断] tick roiPicking=" + _roiPicking + " mode=" + Mode + " paused=" + _paused);
-
             // 拖框期间不拉帧：否则定时器会用运行帧覆盖用户正在画的 ROI
             if (_roiPicking) return;
 
@@ -608,11 +612,6 @@ namespace VisionPlatform.UI
             // 其它模式从既有 _pending 槽取（链尾快照仍在，切模式即可回看最后一次运行）。
             FlowProgressSnapshot snap = ctl.TryTakePending(Mode == FlowPreviewMode.SelectedNode);
             if (snap == null) return;
-
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] Pull mode=" + Mode + " sel='" + _selectedNodeId +
-                        "' node=" + snap.NodeId + " chainEnd=" + snap.IsChainEnd +
-                        " hasFrame=" + (snap.Frame != null));
 
             if (_paused)
             {
@@ -630,8 +629,6 @@ namespace VisionPlatform.UI
 
             if (!string.IsNullOrEmpty(snap.ErrorMessage))
             {
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] Apply ERROR " + snap.ErrorMessage);
                 lblInfo.Text = snap.ErrorMessage;
                 snap.ReleaseFrame();
                 return;
@@ -653,8 +650,6 @@ namespace VisionPlatform.UI
             {
                 if (!string.IsNullOrEmpty(_selectedNodeId) && snap.NodeId != _selectedNodeId)
                 {
-                    // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                    Logger.Info("[预览诊断] Apply FILTERED-SEL node=" + snap.NodeId + " sel='" + _selectedNodeId + "'");
                     snap.ReleaseFrame();
                     return;
                 }
@@ -662,15 +657,9 @@ namespace VisionPlatform.UI
 
             if (mode == FlowPreviewMode.ChainEnd && !snap.IsChainEnd)
             {
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] Apply FILTERED-CHAIN node=" + snap.NodeId);
                 snap.ReleaseFrame();
                 return;
             }
-
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] Apply SHOW node=" + snap.NodeId + " frame=" + (snap.Frame != null) +
-                        " shapes=" + (snap.Shapes != null ? snap.Shapes.Count : 0));
 
             _hasRun = true;
             lblEmpty.Visible = false;
@@ -679,6 +668,11 @@ namespace VisionPlatform.UI
             List<IGeometryShape> shapes = (mode == FlowPreviewMode.ChainEnd && snap.AllShapes.Count > 0)
                 ? snap.AllShapes
                 : snap.Shapes;
+
+            // 记下本帧的「高亮身份上下文」：只有画的是该节点自身图形时，
+            // 结果表格里的图形序号才能对上（链尾全链图形是各节点图形的拼接，序号不可比）。
+            _curNodeId = snap.NodeId ?? "";
+            _curNodeOwnShapes = !ReferenceEquals(shapes, snap.AllShapes);
 
             ShowFrame(snap.Frame, shapes);
             snap.Frame = null;      // 已交给视图持有（OwnsImage=true），此后不得再释放
@@ -718,22 +712,51 @@ namespace VisionPlatform.UI
             }
 
             // 重新施加「点结果表格行」的高亮：上面的 ClearShapes + Add 已经把选中态清掉了。
-            // 若高亮目标不在本帧图形里（连续运行时图形是新实例），SelectShape 找不到即自然不高亮。
-            if (_highlightedShape != null)
-                viewer.SelectShape(_highlightedShape);
+            // 这里按「节点 Id + 序号」在新实例上重新定位，因此连续运行时高亮不会被刷新冲掉。
+            ReapplyHighlight();
 
             viewer.Shapes.NotifyChanged();
         }
 
         /// <summary>
-        /// 突出显示某个结果图形（由「输出结果」表格点行驱动）；null = 取消全部高亮。
+        /// 按 <c>_hlNodeId + _hlIndex</c> 在当前已加入视图的图形上重新落高亮。
         /// 结果图形 <c>IsEditable=false</c>，鼠标不会误选，程序化设置选中态是安全的。
         /// </summary>
-        public void HighlightShape(IGeometryShape shape)
+        private void ReapplyHighlight()
         {
-            _highlightedShape = shape;
-            viewer.SelectShape(shape);      // shape 为 null 时即把所有 IsSelected 置 false
+            IGeometryShape target = null;
+
+            // 节点 Id 对不上（切了节点 / 换了流程）或本帧画的是全链图形时，序号无意义 → 不高亮
+            if (_hlIndex >= 0 && _hlNodeId.Length > 0
+                && string.Equals(_hlNodeId, _curNodeId, StringComparison.Ordinal)
+                && _curNodeOwnShapes
+                && _hlIndex < viewer.Shapes.Count)
+            {
+                target = viewer.Shapes[_hlIndex];
+            }
+
+            if (target != null) viewer.SelectShape(target);
+            else viewer.Shapes.ClearSelection();
+        }
+
+        /// <summary>
+        /// 突出显示某个结果图形（由「输出结果」表格点行驱动）。
+        /// <paramref name="shapeIndex"/> 是该图形在<paramref name="nodeId"/> 节点 <c>Shapes</c> 列表内的序号；
+        /// 传 &lt; 0 或空节点 Id 表示取消高亮。
+        /// </summary>
+        public void SetHighlight(string nodeId, int shapeIndex)
+        {
+            _hlNodeId = nodeId ?? "";
+            _hlIndex = (_hlNodeId.Length > 0 && shapeIndex >= 0) ? shapeIndex : -1;
+
+            ReapplyHighlight();     // 立刻给反馈；后续每帧由 ShowFrame 继续重施加
             viewer.Invalidate();
+        }
+
+        /// <summary>取消结果行高亮（切节点 / 换流程时调用，避免高亮残留到别的节点）。</summary>
+        public void ClearHighlight()
+        {
+            SetHighlight("", -1);
         }
 
         /// <summary>取摘要首行（以「；」分隔），避免覆盖标签过长。</summary>

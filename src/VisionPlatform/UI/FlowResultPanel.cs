@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
@@ -38,8 +39,17 @@ namespace VisionPlatform.UI
         private UiVerdict _verdict = UiVerdict.None;
         private string _chainText = "";
 
-        /// <summary>点击结果行时触发；参数为要突出的图形，null 表示取消高亮。</summary>
-        public event Action<IGeometryShape> ShapeSelected;
+        // 上一次 Apply 的快照节点 Id。图形每运行周期都是新实例，高亮只能靠「节点 Id + 序号」定位。
+        private string _nodeId = "";
+        // 与 grid.Rows 逐行对齐的「图形序号」：图形行记它在 snap.Shapes 内的序号，非图形行（节点/状态/摘要）记 -1。
+        // 表格里混着节点级行，行号 ≠ 图形序号，故必须单独记一份。
+        private readonly List<int> _rowShapeIndex = new List<int>();
+
+        /// <summary>
+        /// 点击结果行时触发；参数为（节点 Id、该节点 Shapes 列表内的图形序号）。
+        /// 序号 &lt; 0 或节点 Id 为空表示取消高亮。
+        /// </summary>
+        public event Action<string, int> ShapeSelected;
 
         public FlowResultPanel()
         {
@@ -178,6 +188,8 @@ namespace VisionPlatform.UI
         {
             if (snap == null) { Clear(); return; }
 
+            _nodeId = snap.NodeId ?? "";
+
             lblNode.Text = string.Format(CultureInfo.InvariantCulture,
                 "第 {0}/{1} 个节点：{2}　{3}　{4} ms",
                 snap.Index, snap.Total, snap.NodeName, StatusText(snap.Status), snap.ElapsedMs);
@@ -185,12 +197,14 @@ namespace VisionPlatform.UI
             BeginRebuild();
             try
             {
-                AddRow(null, "节点", snap.NodeName, "", "", "", "",
+                _rowShapeIndex.Clear();
+
+                AddRow(null, -1, "节点", snap.NodeName, "", "", "", "",
                        string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 个", snap.Index, snap.Total));
-                AddRow(null, "状态", StatusText(snap.Status), "", "", "", "",
+                AddRow(null, -1, "状态", StatusText(snap.Status), "", "", "", "",
                        snap.ElapsedMs + " ms");
                 if (!string.IsNullOrEmpty(snap.Summary))
-                    AddRow(null, "摘要", OneLine(snap.Summary), "", "", "", "", "");
+                    AddRow(null, -1, "摘要", OneLine(snap.Summary), "", "", "", "", "");
 
                 int n = 0;
                 if (snap.Shapes != null)
@@ -198,16 +212,17 @@ namespace VisionPlatform.UI
                     foreach (IGeometryShape s in snap.Shapes)
                     {
                         if (s == null) continue;
-                        n++;
+                        // 序号从 0 起，与预览区加入视图的顺序一致（两边同样跳过 null）
                         RectangleF b = s.Bounds;
-                        AddRow(s, "图形 " + n, ValueOf(s),
+                        AddRow(s, n, "图形 " + (n + 1), ValueOf(s),
                                Num(b.X), Num(b.Y), Num(b.Width), Num(b.Height),
                                string.IsNullOrEmpty(s.Name) ? s.GetType().Name : s.Name);
+                        n++;
                     }
                 }
 
                 if (n == 0)
-                    AddRow(null, "（该节点没有图形输出）", "", "", "", "", "", "");
+                    AddRow(null, -1, "（该节点没有图形输出）", "", "", "", "", "", "");
             }
             finally
             {
@@ -235,13 +250,17 @@ namespace VisionPlatform.UI
             lblNode.Text = "等待运行…";
 
             BeginRebuild();
-            try { grid.Rows.Clear(); }
+            try { grid.Rows.Clear(); _rowShapeIndex.Clear(); }
             finally { EndRebuild(); }
+
+            _nodeId = "";
 
             _verdict = UiVerdict.None;
             _chainText = "";
             UiTheme.StyleBadge(lblVerdict, _verdict);
             lblChain.Text = "";
+
+            FireShapeSelected("", -1);      // 换流程 / 换节点：旧高亮一并撤掉，避免残留在别的节点上
         }
 
         private void BeginRebuild()
@@ -254,12 +273,16 @@ namespace VisionPlatform.UI
             _suppressSelection = false;
         }
 
-        /// <summary>加一行；<paramref name="shape"/> 挂到 <c>Row.Tag</c>，点击行时据此高亮（引用相等）。</summary>
-        private void AddRow(IGeometryShape shape, string item, string value,
+        /// <summary>
+        /// 加一行。<paramref name="shape"/> 仍挂到 <c>Row.Tag</c>（点选当帧可立刻按实例高亮），
+        /// <paramref name="shapeIndex"/> 另记一份到 <see cref="_rowShapeIndex"/>（非图形行传 -1）。
+        /// </summary>
+        private void AddRow(IGeometryShape shape, int shapeIndex, string item, string value,
                             string x, string y, string w, string h, string remark)
         {
             int i = grid.Rows.Add(item, value, x, y, w, h, remark);
             grid.Rows[i].Tag = shape;
+            _rowShapeIndex.Add(shapeIndex);
         }
 
         // =====================================================================
@@ -269,7 +292,7 @@ namespace VisionPlatform.UI
         private void OnGridCellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e == null || e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
-            RaiseShapeSelected(grid.Rows[e.RowIndex].Tag as IGeometryShape);
+            RaiseShapeSelected(e.RowIndex);
         }
 
         private void OnGridSelectionChanged(object sender, EventArgs e)
@@ -277,13 +300,25 @@ namespace VisionPlatform.UI
             if (_suppressSelection) return;                 // Rows.Clear() / 重建期间不响应
 
             DataGridViewRow row = grid.CurrentRow;
-            RaiseShapeSelected(row != null ? row.Tag as IGeometryShape : null);
+            RaiseShapeSelected(row != null ? row.Index : -1);
         }
 
-        private void RaiseShapeSelected(IGeometryShape shape)
+        /// <summary>
+        /// 按行号发高亮请求：图形行发（节点 Id、图形序号），非图形行 / 空行发（""、-1）表示取消。
+        /// </summary>
+        private void RaiseShapeSelected(int rowIndex)
         {
-            Action<IGeometryShape> h = ShapeSelected;
-            if (h != null) h(shape);
+            if (rowIndex < 0 || rowIndex >= _rowShapeIndex.Count) { FireShapeSelected("", -1); return; }
+
+            int shapeIndex = _rowShapeIndex[rowIndex];
+            if (shapeIndex >= 0 && _nodeId.Length > 0) FireShapeSelected(_nodeId, shapeIndex);
+            else FireShapeSelected("", -1);
+        }
+
+        private void FireShapeSelected(string nodeId, int shapeIndex)
+        {
+            Action<string, int> h = ShapeSelected;
+            if (h != null) h(nodeId, shapeIndex);
         }
 
         // =====================================================================

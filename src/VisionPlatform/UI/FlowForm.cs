@@ -357,6 +357,7 @@ namespace VisionPlatform.UI
             _selectedNode = null;
             nodeParamPanel.SetNode(null);
             resultPanel?.Clear();           // 换流程：上一次运行的结果已不对应当前流程
+            flowPreview.ClearHighlight();   // 同上：别让旧节点的高亮残留到新流程上
             RefreshPortTree(null);          // 换流程：端子树回到「未选中节点」
             flowPreview.SetSelectedNodeId("");
             _controller?.SetSelectedNode("");   // 同步清空控制器的「选中节点」专用槽
@@ -479,6 +480,7 @@ namespace VisionPlatform.UI
 
             nodeParamPanel.SetNode(e.Node);
             resultPanel?.Clear();           // 换节点：旧结果属于别的节点，先清掉等下一次运行
+            flowPreview.ClearHighlight();   // 同上：旧高亮属于别的节点
 
             // 预览「选中节点」模式据此过滤该节点自身的输出
             flowPreview.SetSelectedNodeId(e != null && e.Node != null ? e.Node.Id : "");
@@ -1479,10 +1481,13 @@ namespace VisionPlatform.UI
             resultPanel.Apply(snap);
         }
 
-        /// <summary>点击结果表格的某一行 → 在预览图像里突出对应图形（null 取消高亮）。</summary>
-        private void OnResultShapeSelected(IGeometryShape shape)
+        /// <summary>
+        /// 点击结果表格的某一行 → 在预览图像里突出对应图形。
+        /// 用「节点 Id + 图形序号」而不是图形实例：连续运行时图形每周期都重建，实例引用撑不过下一帧。
+        /// </summary>
+        private void OnResultShapeSelected(string nodeId, int shapeIndex)
         {
-            flowPreview.HighlightShape(shape);
+            flowPreview.SetHighlight(nodeId, shapeIndex);
         }
 
         /// <summary>一次启动彻底结束（回到 Idle）：复位按钮；若关窗被挂起则自动关闭。</summary>
