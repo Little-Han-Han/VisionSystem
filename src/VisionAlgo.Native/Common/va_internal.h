@@ -5,6 +5,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -16,6 +17,14 @@
 #include "algo/va_camera.h"
 // 卡尺的对外结构体（VA_CaliperParam / VA_CaliperPoint）声明在对外头文件里
 #include "algo/va_caliper.h"
+// 图像滤波的参数结构体（VA_FilterParam）声明在对外头文件里
+#include "algo/va_filter.h"
+// 颜色提取的参数 / 统计结构体（VA_ColorParam / VA_ColorStat）声明在对外头文件里
+#include "algo/va_color.h"
+// 分类器的参数结构体（VA_ClassParam）声明在对外头文件里
+#include "algo/va_classify.h"
+// OCR 的参数 / 结果结构体（VA_OcrParam / VA_OcrChar）声明在对外头文件里
+#include "algo/va_ocr.h"
 
 namespace va {
 
@@ -30,12 +39,37 @@ struct ShapeModel {
     ShapeModel() : width(0.0), height(0.0), valid(false) {}
 };
 
+// 分类器状态：累积的训练样本 + 训练好的模型，挂在 Context 上
+struct ClassifierState {
+    VA_ClassParam                     param;      // va_clf_create 时保存
+    std::vector<std::vector<float> >  features;   // 每个样本一条特征向量
+    std::vector<int>                  labels;     // 与 features 一一对应
+    cv::Ptr<cv::ml::StatModel>        model;      // SVM 或 KNearest
+    bool                              created;    // 已 create（参数有效）
+    bool                              trained;    // 已训练（可用于预测）
+
+    ClassifierState() : created(false), trained(false) {
+        std::memset(&param, 0, sizeof(param));
+    }
+};
+
+// OCR 状态：字符模板库（已归一化）+ 默认参数，挂在 Context 上
+struct OcrState {
+    VA_OcrParam             param;      // va_ocr_set_param 时保存，作为缺省值
+    std::vector<cv::Mat>    templates;  // 归一化后的单通道字符模板
+    std::vector<std::string> labels;    // 与 templates 一一对应
+
+    OcrState() { std::memset(&param, 0, sizeof(param)); }
+};
+
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
     cv::Mat     tmpl;
     bool        hasTemplate;
     ShapeModel  shape;              // 形状匹配模型
+    ClassifierState clf;            // 分类器（样本 + 模型）
+    OcrState        ocr;            // 传统算法 OCR（模板库）
 
     Context() : hasTemplate(false) {}
 };
@@ -117,6 +151,43 @@ int TrainTemplate(Context* ctx, const VA_Image* gray, const int* roi);
 int MatchTemplate(Context* ctx, const VA_Image* gray, VA_MatchResult* out);
 
 int EdgeCount(Context* ctx, const VA_Image* gray, int scanRow, int delta, int* outCount);
+
+// ---------------------- 图像滤波 ----------------------
+// 均值 / 高斯 / 中值 / 双边 / USM 锐化 / 自定义 3x3 核，后接可选形态学。
+// 支持 1 通道与 3 通道输入。实现见 src/algo/algo_filter.cpp，导出见 va_filter。
+int Filter(Context* ctx, const VA_Image* src, VA_Image* dst, const VA_FilterParam* param);
+
+// ---------------------- 颜色提取 ----------------------
+// BGR / HSV 阈值分割 + 形态学清理 + 连通域过滤，需要 3/4 通道彩色输入。
+// 实现见 src/algo/algo_color.cpp，导出见 va_color_extract。
+int ColorExtract(Context* ctx, const VA_Image* src, VA_Image* dstMask,
+                 const VA_ColorParam* param, double minArea, double maxArea,
+                 VA_Blob* outBlobs, int maxCount, int* outCount,
+                 VA_ColorStat* outStat);
+
+// ---------------------- 分类器 ----------------------
+// 轮廓特征（Hu 矩 / 几何）+ OpenCV ml 的 SVM / KNN。
+// 实现见 src/algo/algo_classify.cpp，导出见 va_clf_*。
+int ClfCreate(Context* ctx, const VA_ClassParam* param);
+int ClfAddSample(Context* ctx, const VA_Image* gray, int label);
+int ClfSampleCount(Context* ctx, int* outCount);
+int ClfTrain(Context* ctx);
+int ClfPredict(Context* ctx, const VA_Image* gray, int* outLabel, double* outScore);
+int ClfSave(Context* ctx, const char* path);
+int ClfLoad(Context* ctx, const char* path);
+int ClfClear(Context* ctx);
+
+// ---------------------- 传统算法 OCR ----------------------
+// 连通域分割 + 归一化 + 模板匹配识别（无 contrib，自搭）。
+// 实现见 src/algo/algo_ocr.cpp，导出见 va_ocr_*。
+int OcrSetParam(Context* ctx, const VA_OcrParam* param);
+int OcrAddTemplate(Context* ctx, const VA_Image* gray, const char* label);
+int OcrTemplateCount(Context* ctx, int* outCount);
+int OcrClearTemplates(Context* ctx);
+int OcrSegment(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
+               VA_OcrChar* outChars, int maxCount, int* outCount);
+int OcrRecognize(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
+                 char* outText, int textCap, double* outMeanScore);
 
 // ---------------------- 卡尺 ----------------------
 // 沿路径等分投放投影卡尺找边 → 最小二乘拟合 → 离群剔除一轮 → RMS。

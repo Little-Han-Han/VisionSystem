@@ -30,6 +30,48 @@ namespace VisionPlatform.Native
         public int morph_ksize;
     }
 
+    /// <summary>
+    /// 滤波参数（对应 C 端 VA_FilterParam，见 include/algo/va_filter.h）。
+    /// 字段顺序 / 类型与 C 端严格一一对应，改动必须同步改头文件。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_FilterParam
+    {
+        public int    type;         /* 滤波类型：见 FilterType */
+        public int    ksize;        /* 核边长；原生会修正为 >=3 的奇数 */
+        public double sigma;        /* 高斯 / 双边的 sigma；<=0 时自动推导 */
+        public double amount;       /* 锐化强度（USM），典型 1.0；0 = 不锐化 */
+        public int    morph_op;     /* 形态学算子：见 FilterMorphOp */
+        public int    morph_shape;  /* 结构化元素形状：见 MorphShape */
+        public int    morph_ksize;  /* 形态学核边长；<3 则不做形态学 */
+        public int    iterations;   /* 形态学迭代次数；<1 按 1 */
+    }
+
+    /// <summary>
+    /// 颜色提取参数（对应 C 端 VA_ColorParam，见 include/algo/va_color.h）。
+    /// low / high 是 4 元定长数组，必须用 ByValArray 固定长度，否则内存布局与 C 端不一致。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_ColorParam
+    {
+        public int space;       /* 颜色空间：0 = BGR，1 = HSV */
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+        public int[] low;       /* 下界：B/H, G/S, R/V, (未用) */
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+        public int[] high;      /* 上界：B/H, G/S, R/V, (未用) */
+        public int morph_op;    /* 形态学清理算子：0 无 / 1 开 / 2 闭 */
+        public int morph_ksize; /* 形态学核边长；<3 则不做 */
+    }
+
+    /// <summary>颜色提取的命中统计（对应 C 端 VA_ColorStat）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_ColorStat
+    {
+        public double pixel_count;             /* 命中像素数 */
+        public double ratio;                   /* 命中像素 / 总像素，0~1 */
+        public double mean_b, mean_g, mean_r;  /* 命中区域内的平均颜色（BGR 字节序） */
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct VA_Blob
     {
@@ -221,6 +263,38 @@ namespace VisionPlatform.Native
         public static extern int va_preprocess(IntPtr handle, ref VA_Image src,
                                                ref VA_Image dst, ref VA_PreprocessParam param);
 
+        // ---- 图像滤波 / 颜色提取（3 通道彩色链路）----
+        //
+        // C 端这两个函数的图像输出参数都允许传 NULL（dst / dst_mask / out_blobs / out_stat）。
+        // C# 的 ref 不能表达 NULL，因此「不要掩膜」单独起一个别名声明（EntryPoint 指回同一个导出名），
+        // 用 IntPtr.Zero 显式传空指针，避免为了凑 ref 而白算一张不需要的图。
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_filter(IntPtr handle, ref VA_Image src,
+                                           ref VA_Image dst, ref VA_FilterParam param);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_color_extract(IntPtr handle, ref VA_Image src,
+                                                  ref VA_Image dst_mask,
+                                                  ref VA_ColorParam param,
+                                                  double min_area, double max_area,
+                                                  [In, Out] VA_Blob[] out_blobs,
+                                                  int max_count, out int out_count,
+                                                  ref VA_ColorStat out_stat);
+
+        /// <summary>
+        /// <see cref="va_color_extract"/> 的「不要掩膜」版本：dst_mask 固定传 NULL，
+        /// 其余参数逐一对应。只要统计与 Blob、不想付掩膜的分配与拷贝开销时用这个。
+        /// </summary>
+        [DllImport(Dll, EntryPoint = "va_color_extract", CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_color_extract_nomask(IntPtr handle, ref VA_Image src,
+                                                         IntPtr dst_mask,
+                                                         ref VA_ColorParam param,
+                                                         double min_area, double max_area,
+                                                         [In, Out] VA_Blob[] out_blobs,
+                                                         int max_count, out int out_count,
+                                                         ref VA_ColorStat out_stat);
+
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_blob_analyze(IntPtr handle, ref VA_Image gray,
                                                  double min_area, double max_area,
@@ -375,6 +449,191 @@ namespace VisionPlatform.Native
                 finally
                 {
                     if (dstData != null && dst != null) dst.UnlockBits(dstData);
+                }
+            }
+        }
+
+        // ---------------------- 图像滤波 / 颜色提取 ----------------------
+
+        /// <summary>
+        /// 图像滤波：平滑 / 锐化 + 可选形态学。
+        /// <para>
+        /// 通道数<strong>进出一致</strong>：<paramref name="param"/>.KeepColor 为真且输入是
+        /// 24bpp / 32bpp 彩色图时走 3 通道（BGR）链路，输入输出都是 24bpp；
+        /// 否则走既有灰度链路（输入输出都是 8bpp 灰度）。返回值可直接作为下游工作帧。
+        /// </para>
+        /// </summary>
+        public OpResult<Bitmap> Filter(Bitmap src, FilterParam param)
+        {
+            if (src == null) return OpResult<Bitmap>.Fail("输入图像为空");
+            if (param == null) param = FilterParam.Default();
+
+            VA_FilterParam p = param.ToNative();
+            return (param.KeepColor && IsColorFormat(src.PixelFormat))
+                ? FilterOnColor(src, p)
+                : FilterOnGray(src, p);
+        }
+
+        private OpResult<Bitmap> FilterOnGray(Bitmap src, VA_FilterParam p)
+        {
+            // 与既有算法一致：彩色图按 Rec.601 亮度公式转 8bpp 灰度后再交给算法库
+            using (var gi = new GrayInput(src))
+            {
+                Bitmap dst = null;
+                BitmapData dstData = null;
+                bool ok = false;
+
+                try
+                {
+                    VA_Image srcImg = gi.Image;
+
+                    dst = CreateGrayBitmap(src.Width, src.Height, out dstData);
+
+                    VA_Image dstImg = new VA_Image();
+                    dstImg.data = dstData.Scan0;
+                    dstImg.width = dst.Width;
+                    dstImg.height = dst.Height;
+                    dstImg.channels = 1;
+                    dstImg.stride = dstData.Stride;
+
+                    int rc = NativeMethods.va_filter(_handle, ref srcImg, ref dstImg, ref p);
+                    if (rc != VaResult.OK)
+                        return OpResult<Bitmap>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    ok = true;
+                    return OpResult<Bitmap>.Ok(dst);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<Bitmap>.Fail("图像滤波失败：" + ex.Message);
+                }
+                finally
+                {
+                    // 顺序：先解锁（位图还活着），失败路径再释放，避免对已释放位图 UnlockBits
+                    if (dstData != null && dst != null) dst.UnlockBits(dstData);
+                    if (!ok && dst != null) dst.Dispose();
+                }
+            }
+        }
+
+        private OpResult<Bitmap> FilterOnColor(Bitmap src, VA_FilterParam p)
+        {
+            using (var ci = new ColorInput(src))
+            {
+                Bitmap dst = null;
+                BitmapData dstData = null;
+                bool ok = false;
+
+                try
+                {
+                    VA_Image srcImg = ci.Image;
+
+                    dst = CreateColorBitmap(src.Width, src.Height, out dstData);
+
+                    VA_Image dstImg = new VA_Image();
+                    dstImg.data = dstData.Scan0;
+                    dstImg.width = dst.Width;
+                    dstImg.height = dst.Height;
+                    dstImg.channels = 3;
+                    dstImg.stride = dstData.Stride;
+
+                    int rc = NativeMethods.va_filter(_handle, ref srcImg, ref dstImg, ref p);
+                    if (rc != VaResult.OK)
+                        return OpResult<Bitmap>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    ok = true;
+                    return OpResult<Bitmap>.Ok(dst);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<Bitmap>.Fail("图像滤波失败：" + ex.Message);
+                }
+                finally
+                {
+                    if (dstData != null && dst != null) dst.UnlockBits(dstData);
+                    if (!ok && dst != null) dst.Dispose();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 颜色提取：在 BGR / HSV 空间做阈值分割 → 形态学清理 → 连通域统计。
+        /// <para>
+        /// <strong>必须使用彩色输入</strong>（24bpp / 32bpp）；传入灰度图时
+        /// <see cref="ColorInput"/> 也会把它按三通道复制成 BGR，但那样阈值就没有意义了，
+        /// 因此调用方（FlowRunner）会在无彩色帧时直接判失败并给出中文提示。
+        /// </para>
+        /// <para>
+        /// <paramref name="param"/>.OutputMask 为 false 时不向原生要掩膜，
+        /// 返回结果的 <see cref="ColorExtractResult.Mask"/> 为 null。
+        /// </para>
+        /// </summary>
+        public OpResult<ColorExtractResult> ExtractColor(Bitmap src, ColorExtractParam param)
+        {
+            if (src == null) return OpResult<ColorExtractResult>.Fail("输入图像为空");
+            if (param == null) param = ColorExtractParam.Default();
+
+            using (var ci = new ColorInput(src))
+            {
+                Bitmap mask = null;
+                BitmapData maskData = null;
+                bool ok = false;
+
+                try
+                {
+                    VA_Image srcImg = ci.Image;
+                    VA_ColorParam p = param.ToNative();
+
+                    // OutputMask 为假时跳过掩膜缓冲：省一次全图分配与逐行拷贝
+                    VA_Image maskImg = new VA_Image();
+                    if (param.OutputMask)
+                    {
+                        mask = CreateGrayBitmap(src.Width, src.Height, out maskData);
+                        maskImg.data = maskData.Scan0;
+                        maskImg.width = mask.Width;
+                        maskImg.height = mask.Height;
+                        maskImg.channels = 1;
+                        maskImg.stride = maskData.Stride;
+                    }
+
+                    int maxCount = param.MaxCount > 0 ? param.MaxCount : 1;
+                    VA_Blob[] raw = new VA_Blob[maxCount];
+                    int count = 0;
+                    VA_ColorStat stat = new VA_ColorStat();
+
+                    int rc = param.OutputMask
+                        ? NativeMethods.va_color_extract(_handle, ref srcImg, ref maskImg, ref p,
+                                                         param.MinArea, param.MaxArea,
+                                                         raw, maxCount, out count, ref stat)
+                        : NativeMethods.va_color_extract_nomask(_handle, ref srcImg, IntPtr.Zero, ref p,
+                                                                param.MinArea, param.MaxArea,
+                                                                raw, maxCount, out count, ref stat);
+
+                    if (rc != VaResult.OK)
+                        return OpResult<ColorExtractResult>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var result = new ColorExtractResult();
+                    result.Mask = mask;
+                    result.PixelCount = stat.pixel_count;
+                    result.Ratio = stat.ratio;
+                    result.MeanB = stat.mean_b;
+                    result.MeanG = stat.mean_g;
+                    result.MeanR = stat.mean_r;
+
+                    for (int i = 0; i < count && i < raw.Length; i++)
+                        result.Blobs.Add(BlobResult.FromNative(raw[i]));
+
+                    ok = true;
+                    return OpResult<ColorExtractResult>.Ok(result);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<ColorExtractResult>.Fail("颜色提取失败：" + ex.Message);
+                }
+                finally
+                {
+                    if (maskData != null && mask != null) mask.UnlockBits(maskData);
+                    if (!ok && mask != null) mask.Dispose();
                 }
             }
         }
@@ -838,6 +1097,13 @@ namespace VisionPlatform.Native
             }
         }
 
+        /// <summary>该像素格式是否是「能被算法库当彩色处理」的格式（24bpp / 32bpp）。</summary>
+        internal static bool IsColorFormat(PixelFormat format)
+        {
+            int ch = ChannelsOf(format);
+            return ch == 3 || ch == 4;
+        }
+
         /// <summary>8bpp 索引图的调色板是否为「灰度且索引值等于亮度」。</summary>
         private static bool IsIdentityGrayPalette(Bitmap bmp)
         {
@@ -938,6 +1204,87 @@ namespace VisionPlatform.Native
             }
         }
 
+        /// <summary>
+        /// 彩色算法输入：把任意位图统一转成 <strong>24bpp BGR 连续缓冲区</strong>再交给算法库
+        /// （channels=3）。与 <see cref="GrayInput"/> 互为补充 ——
+        /// 颜色提取与彩色滤波必须走这里，否则拿到的是 1 通道灰度，颜色信息已经丢失。
+        /// <para>
+        /// GDI+ 的 24bpp 内存字节序就是 BGR，与 OpenCV 的 BGR 一致，因此这里不做通道交换。
+        /// 数据固定在托管数组中（pinned），调用期间不会被 GC 移动，Dispose 时释放。
+        /// </para>
+        /// </summary>
+        private sealed class ColorInput : IDisposable
+        {
+            public VA_Image Image;
+
+            private GCHandle _pin;
+            private Bitmap _owned;
+
+            public ColorInput(Bitmap src)
+            {
+                if (src == null) throw new ArgumentNullException("src");
+
+                int w = src.Width;
+                int h = src.Height;
+                byte[] bgr = new byte[w * h * 3];
+
+                Bitmap work = src;
+                if (work.PixelFormat != PixelFormat.Format24bppRgb)
+                {
+                    // 32bpp / 索引 / 16bpp 等先经 GDI+ 归一化到 24bpp（丢 Alpha，保留颜色）
+                    work = new Bitmap(w, h, PixelFormat.Format24bppRgb);
+                    using (var g = Graphics.FromImage(work))
+                        g.DrawImage(src, 0, 0, w, h);
+                    _owned = work;
+                }
+
+                var rect = new Rectangle(0, 0, w, h);
+                BitmapData d = work.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+                try
+                {
+                    int stride = d.Stride;
+                    int rowBytes = w * 3;
+                    byte[] row = new byte[stride];
+
+                    for (int y = 0; y < h; y++)
+                    {
+                        Marshal.Copy(IntPtr.Add(d.Scan0, y * stride), row, 0, stride);
+                        // 去掉行尾填充，排成连续缓冲（算法库按 stride = w*3 读）
+                        Buffer.BlockCopy(row, 0, bgr, y * rowBytes, rowBytes);
+                    }
+                }
+                finally
+                {
+                    work.UnlockBits(d);
+                }
+
+                _pin = GCHandle.Alloc(bgr, GCHandleType.Pinned);
+
+                Image = new VA_Image();
+                Image.data = _pin.AddrOfPinnedObject();
+                Image.width = w;
+                Image.height = h;
+                Image.channels = 3;     // 交给算法库的是 3 通道 BGR
+                Image.stride = w * 3;
+            }
+
+            public void Dispose()
+            {
+                if (_pin.IsAllocated) _pin.Free();
+                if (_owned != null) { _owned.Dispose(); _owned = null; }
+            }
+        }
+
+        /// <summary>创建 24bpp 彩色位图并返回已锁定的 BitmapData（供原生直接写入）。</summary>
+        internal static Bitmap CreateColorBitmap(int width, int height, out BitmapData data)
+        {
+            var bmp = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+
+            data = bmp.LockBits(new Rectangle(0, 0, width, height),
+                                ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+            return bmp;
+        }
+
         /// <summary>创建带灰度调色板的 8bpp 位图并返回已锁定的 BitmapData。</summary>
         internal static Bitmap CreateGrayBitmap(int width, int height, out BitmapData data)
         {
@@ -1000,6 +1347,271 @@ namespace VisionPlatform.Native
             p.morph_op = MorphOp;
             p.morph_ksize = MorphKsize;
             return p;
+        }
+    }
+
+    /// <summary>
+    /// 滤波类型（与 C 端 VA_FILTER_* 一一对应，<strong>编号不同不要混用</strong>）。
+    /// </summary>
+    public static class FilterType
+    {
+        /// <summary>原样输出（只做可选形态学）。</summary>
+        public const int None = 0;
+        /// <summary>均值滤波。</summary>
+        public const int Box = 1;
+        /// <summary>高斯滤波（默认）。</summary>
+        public const int Gauss = 2;
+        /// <summary>中值滤波（去椒盐噪声）。</summary>
+        public const int Median = 3;
+        /// <summary>双边滤波（保边去噪）。</summary>
+        public const int Bilateral = 4;
+        /// <summary>锐化：USM（高斯模糊后反相叠加）。</summary>
+        public const int Usm = 5;
+        /// <summary>自定义 3x3 卷积核（原生内为固定锐化核）。</summary>
+        public const int Custom = 6;
+
+        /// <summary>类型值 → 中文名（未知值返回原文）。</summary>
+        public static string Name(int type)
+        {
+            switch (type)
+            {
+                case None:      return "原样";
+                case Box:       return "均值";
+                case Gauss:     return "高斯";
+                case Median:    return "中值";
+                case Bilateral: return "双边";
+                case Usm:       return "锐化";
+                case Custom:    return "自定义";
+                default:        return "类型" + type;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 滤波后形态学算子（与 C 端 VA_MORPH_* 一一对应）。
+    /// ⚠️ 与 <see cref="PreprocessParam.MorphOp"/>（0 无 / 1 开 / 2 闭）<strong>编号不同</strong>，
+    /// 这里是 OpenCV MorphTypes 的编号，两者不要互相套用。
+    /// </summary>
+    public static class FilterMorphOp
+    {
+        /// <summary>不做形态学。</summary>
+        public const int None = 0;
+        public const int Dilate = 1;
+        public const int Erode = 2;
+        public const int Open = 3;
+        public const int Close = 4;
+        public const int Gradient = 5;
+        public const int TopHat = 6;
+        public const int BlackHat = 7;
+
+        /// <summary>算子值 → 中文名（未知值返回原文）。</summary>
+        public static string Name(int op)
+        {
+            switch (op)
+            {
+                case None:     return "无";
+                case Dilate:   return "膨胀";
+                case Erode:    return "腐蚀";
+                case Open:     return "开运算";
+                case Close:    return "闭运算";
+                case Gradient: return "梯度";
+                case TopHat:   return "顶帽";
+                case BlackHat: return "黑帽";
+                default:       return "运算" + op;
+            }
+        }
+    }
+
+    /// <summary>形态学结构化元素形状（与 C 端 VA_MORPH_SHAPE_* 一一对应）。</summary>
+    public static class FilterMorphShape
+    {
+        public const int Rect = 0;
+        public const int Ellipse = 1;
+        public const int Cross = 2;
+    }
+
+    /// <summary>
+    /// 图像滤波参数（对应 <see cref="VA_FilterParam"/>）。
+    /// <see cref="KeepColor"/> 只影响托管侧走哪条链路，不传给原生。
+    /// </summary>
+    public class FilterParam
+    {
+        /// <summary>滤波类型（见 <see cref="FilterType"/>）。</summary>
+        public int Type { get; set; }
+
+        /// <summary>核边长（奇数；<![CDATA[<3]]> 时用算子默认值）。</summary>
+        public int Ksize { get; set; }
+
+        /// <summary>高斯 / 双边的 sigma；&lt;=0 时由 ksize 推导。</summary>
+        public double Sigma { get; set; }
+
+        /// <summary>锐化强度（USM），典型 1.0；0 = 不锐化。</summary>
+        public double Amount { get; set; }
+
+        /// <summary>形态学算子（见 <see cref="FilterMorphOp"/>）。</summary>
+        public int MorphOp { get; set; }
+
+        /// <summary>形态学结构化元素形状（见 <see cref="FilterMorphShape"/>）。</summary>
+        public int MorphShape { get; set; }
+
+        /// <summary>形态学核边长；&lt;3 则不做形态学。</summary>
+        public int MorphKsize { get; set; }
+
+        /// <summary>形态学迭代次数；&lt;1 按 1 处理。</summary>
+        public int Iterations { get; set; }
+
+        /// <summary>
+        /// 是否按<strong>彩色</strong>处理：true = 3 通道进 3 通道出（输入必须是 24bpp / 32bpp）；
+        /// false = 转灰度后 1 通道进 1 通道出。仅托管侧生效。
+        /// </summary>
+        public bool KeepColor { get; set; }
+
+        public static FilterParam Default()
+        {
+            return new FilterParam
+            {
+                Type = FilterType.Gauss,
+                Ksize = 5,
+                Sigma = 0,
+                Amount = 1.0,
+                MorphOp = FilterMorphOp.None,
+                MorphShape = FilterMorphShape.Rect,
+                MorphKsize = 3,
+                Iterations = 1,
+                KeepColor = false
+            };
+        }
+
+        internal VA_FilterParam ToNative()
+        {
+            VA_FilterParam p = new VA_FilterParam();
+            p.type = Type;
+            p.ksize = Ksize;
+            p.sigma = Sigma;
+            p.amount = Amount;
+            p.morph_op = MorphOp;
+            p.morph_shape = MorphShape;
+            p.morph_ksize = MorphKsize;
+            p.iterations = Iterations;
+            return p;
+        }
+    }
+
+    /// <summary>颜色空间（与 C 端 VA_COLOR_SPACE_* 一一对应）。</summary>
+    public static class ColorSpace
+    {
+        /// <summary>BGR 三通道独立阈值（0~255）。</summary>
+        public const int Bgr = 0;
+
+        /// <summary>HSV 阈值。⚠ H 取值 0~179（OpenCV 口径，不是 0~360），S / V 取 0~255。</summary>
+        public const int Hsv = 1;
+    }
+
+    /// <summary>颜色分割后的形态学清理算子（与 C 端 VA_COLOR_MORPH_* 一一对应）。</summary>
+    public static class ColorMorphOp
+    {
+        public const int None = 0;
+        public const int Open = 1;
+        public const int Close = 2;
+    }
+
+    /// <summary>
+    /// 颜色提取参数（对应 <see cref="VA_ColorParam"/>）。
+    /// <see cref="OutputMask"/>、MinArea / MaxArea / MaxCount 里的后三项同时用于托管侧，
+    /// MinArea / MaxArea / MaxCount 也会原样传给原生。
+    /// </summary>
+    public class ColorExtractParam
+    {
+        /// <summary>颜色空间（见 <see cref="ColorSpace"/>）。</summary>
+        public int Space { get; set; }
+
+        /// <summary>下界三分量（B/H, G/S, R/V）。</summary>
+        public int[] Low { get; set; }
+
+        /// <summary>上界三分量（B/H, G/S, R/V）。</summary>
+        public int[] High { get; set; }
+
+        /// <summary>形态学清理算子（见 <see cref="ColorMorphOp"/>）。</summary>
+        public int MorphOp { get; set; }
+
+        /// <summary>形态学核边长；&lt;3 则不做。</summary>
+        public int MorphKsize { get; set; }
+
+        /// <summary>连通域面积下限（像素）。</summary>
+        public double MinArea { get; set; }
+
+        /// <summary>连通域面积上限（像素）；&lt;=0 表示不设上限。</summary>
+        public double MaxArea { get; set; }
+
+        /// <summary>最多返回的目标数。</summary>
+        public int MaxCount { get; set; }
+
+        /// <summary>是否让原生产出 0/255 掩膜图；false 时结果里 Mask 为 null。</summary>
+        public bool OutputMask { get; set; }
+
+        public static ColorExtractParam Default()
+        {
+            return new ColorExtractParam
+            {
+                Space = ColorSpace.Hsv,
+                Low = new[] { 0, 0, 0 },
+                High = new[] { 179, 255, 255 },
+                MorphOp = ColorMorphOp.None,
+                MorphKsize = 3,
+                MinArea = 10,
+                MaxArea = 0,
+                MaxCount = 50,
+                OutputMask = true
+            };
+        }
+
+        internal VA_ColorParam ToNative()
+        {
+            VA_ColorParam p = new VA_ColorParam();
+            p.space = Space;
+            p.low = new int[4];
+            p.high = new int[4];
+
+            for (int i = 0; i < 3; i++)
+            {
+                p.low[i] = (Low != null && i < Low.Length) ? Low[i] : 0;
+                p.high[i] = (High != null && i < High.Length) ? High[i] : 0;
+            }
+
+            p.morph_op = MorphOp;
+            p.morph_ksize = MorphKsize;
+            return p;
+        }
+    }
+
+    /// <summary>
+    /// 颜色提取结果：命中区域列表 + 命中统计 + 可选掩膜。
+    /// <see cref="Mask"/> 的所有权随结果移交调用方，不用时必须 Dispose。
+    /// </summary>
+    public class ColorExtractResult
+    {
+        /// <summary>命中区域（面积降序，最多 MaxCount 个）。</summary>
+        public List<BlobResult> Blobs { get; private set; }
+
+        /// <summary>命中像素数。</summary>
+        public double PixelCount { get; set; }
+
+        /// <summary>命中像素 / 总像素，0~1。</summary>
+        public double Ratio { get; set; }
+
+        /// <summary>命中区域内的平均颜色（BGR 字节序）。</summary>
+        public double MeanB { get; set; }
+        /// <summary>命中区域内的平均颜色（G）。</summary>
+        public double MeanG { get; set; }
+        /// <summary>命中区域内的平均颜色（R）。</summary>
+        public double MeanR { get; set; }
+
+        /// <summary>0/255 掩膜（8bpp 灰度）；未请求时为 null。调用方负责释放。</summary>
+        public Bitmap Mask { get; set; }
+
+        public ColorExtractResult()
+        {
+            Blobs = new List<BlobResult>();
         }
     }
 

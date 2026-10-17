@@ -67,7 +67,7 @@ namespace VisionPlatform.UI
             this.panelLeft.Dock = System.Windows.Forms.DockStyle.Left;
             this.panelLeft.Location = new System.Drawing.Point(0, 0);
             this.panelLeft.Name = "panelLeft";
-            this.panelLeft.Padding = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.panelLeft.Padding = new System.Windows.Forms.Padding(6);
             this.panelLeft.Size = new System.Drawing.Size(200, 637);
             this.panelLeft.TabIndex = 0;
             // 
@@ -76,9 +76,11 @@ namespace VisionPlatform.UI
             this.treeModules.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
             this.treeModules.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.treeModules.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.treeModules.Font = new System.Drawing.Font("Times New Roman", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.treeModules.ForeColor = System.Drawing.Color.Gainsboro;
             this.treeModules.Location = new System.Drawing.Point(6, 32);
             this.treeModules.Name = "treeModules";
+            this.treeModules.ShowNodeToolTips = true;
             this.treeModules.Size = new System.Drawing.Size(188, 599);
             this.treeModules.TabIndex = 0;
             // 
@@ -103,7 +105,7 @@ namespace VisionPlatform.UI
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Right;
             this.panelRight.Location = new System.Drawing.Point(855, 0);
             this.panelRight.Name = "panelRight";
-            this.panelRight.Padding = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.panelRight.Padding = new System.Windows.Forms.Padding(6);
             this.panelRight.Size = new System.Drawing.Size(300, 637);
             this.panelRight.TabIndex = 1;
             // 

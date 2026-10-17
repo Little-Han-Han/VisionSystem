@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using VisionPlatform.Camera;
+using VisionPlatform.Native;
 using VisionSystem.Controls.Geometry;
 
 namespace VisionPlatform.Flow
@@ -233,6 +234,28 @@ namespace VisionPlatform.Flow
         /// <summary>工作帧相对原始帧的 Y 偏移（图像源 ROI 裁剪累积）。</summary>
         public double OffsetY { get; set; }
 
+        /// <summary>
+        /// <strong>彩色通道</strong>的当前帧（24bpp / 32bpp BGR）；无彩色帧时为 null。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 为什么需要单独一条通道：<see cref="VisionAlgo.GrayInput"/>（原生封装内）无条件把
+        /// 输入位图转成 8bpp 灰度，算法库拿到的永远是 channels=1，颜色信息在进算法前就丢了。
+        /// 颜色提取是首个必须拿彩色像素的算法，因此这里单独保留一个彩色引用。
+        /// </para>
+        /// <para>
+        /// 【所有权】<strong>只持引用，不 Clone、不 Dispose</strong>：它要么就是
+        /// <see cref="Current"/> 本身，要么指向刚被 <see cref="ReplaceFrame"/> 换成 Current 的那张图，
+        /// 生命周期完全跟随 <see cref="Current"/>，由 <see cref="ReplaceFrame"/> / <see cref="Dispose"/>
+        /// 统一释放，本通道不重复释放（否则 double-dispose）。
+        /// </para>
+        /// <para>
+        /// 由 <see cref="SyncColorInput"/> 在<strong>每个节点执行完后</strong>按当前工作帧的
+        /// 像素格式刷新，不依赖各节点自觉汇报 —— 避免漏改某个节点后残留指向已释放位图的野引用。
+        /// </para>
+        /// </remarks>
+        public Bitmap ColorInput { get; set; }
+
         /// <summary>逐节点进度。</summary>
         public List<FlowNodeProgress> Progress { get; private set; }
 
@@ -327,6 +350,22 @@ namespace VisionPlatform.Flow
             if (!object.ReferenceEquals(Current, next) && Current != null)
                 Current.Dispose();
             Current = next;
+        }
+
+        /// <summary>
+        /// 按当前工作帧的像素格式刷新 <see cref="ColorInput"/>（每个节点执行完后调用一次）。
+        /// </summary>
+        /// <remarks>
+        /// 判定规则：<strong>工作帧本身是 24bpp / 32bpp 彩色图 → 它就是彩色通道的当前值；
+        /// 灰度 / 二值图（像素已被改动，颜色不再对应）→ 清空</strong>。
+        /// 这样「图像源出彩色帧」「滤波保持彩色」「二值化 / 预处理后无彩色」都自然成立，
+        /// 且不会出现「指向已被 ReplaceFrame 释放的位图」的野引用。
+        /// </remarks>
+        public void SyncColorInput()
+        {
+            ColorInput = (Current != null && VisionAlgo.IsColorFormat(Current.PixelFormat))
+                ? Current
+                : null;
         }
 
         /// <summary>释放工作帧、原始帧副本与各节点帧副本。</summary>

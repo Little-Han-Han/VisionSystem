@@ -54,6 +54,18 @@
     <ClInclude Include="include\algo\va_caliper.h">
       <Filter>include\algo</Filter>
     </ClInclude>
+    <ClInclude Include="include\algo\va_filter.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_color.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_classify.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_ocr.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
   </ItemGroup>
 
   <!-- 源文件夹 -->
@@ -83,6 +95,18 @@
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_caliper.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_filter.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_color.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_classify.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_ocr.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
   </ItemGroup>

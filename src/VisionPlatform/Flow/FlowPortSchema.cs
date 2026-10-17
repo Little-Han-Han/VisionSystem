@@ -28,7 +28,14 @@ namespace VisionPlatform.Flow
         Geometry,
 
         /// <summary>通配：接受一切，也能连向一切（目前只出现在「结果输出」的输入端）。</summary>
-        Any
+        Any,
+
+        /// <summary>
+        /// 文本摘要（一行结论文本）。
+        /// 追加在末尾，不改既有成员的序号；两个按 Kind 分支的 switch
+        /// （<c>FlowValidator.KindName</c> / <c>FlowForm.PortKindColor</c>）都有 default 分支兜底。
+        /// </summary>
+        Text
     }
 
     /// <summary>端子方向。</summary>
@@ -222,6 +229,28 @@ namespace VisionPlatform.Flow
             Register(FlowNodeType.ResultOutput,
                 new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true) },
                 new List<FlowPortDef>());
+
+            // ---- 本期新增：图像滤波 / 颜色提取 ----
+            // 端子数据与执行器暂不按端子读写（本库的执行器是按节点类型取工作帧的），
+            // 这里的端子表只用于画布绘制、连线兼容性判定与校验器。
+
+            Register(FlowNodeType.ImageFilter,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Text", "处理摘要", FlowPortKind.Text, false)
+                });
+
+            Register(FlowNodeType.ColorExtractor,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "掩膜图像", FlowPortKind.Image, false),
+                    P("Blobs", "命中区域", FlowPortKind.BlobList, false),
+                    P("Ratio", "面积占比", FlowPortKind.Number, false),
+                    P("Text", "处理摘要", FlowPortKind.Text, false)
+                });
         }
 
         // ---------------------- 注册与构造器 ----------------------

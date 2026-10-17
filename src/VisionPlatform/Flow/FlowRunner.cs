@@ -184,6 +184,10 @@ namespace VisionPlatform.Flow
             }
             sw.Stop();
 
+            // 每个节点执行完后刷新彩色通道：节点可能换过工作帧（灰度化 / 保持彩色 / 像素级变换），
+            // 统一在外部按当前帧的实际格式刷新，不依赖各节点自觉汇报，杜绝野引用。
+            session.SyncColorInput();
+
             p.ElapsedMs = (int)sw.ElapsedMilliseconds;
 
             // 节点内部已显式设置 Skipped 时保持原状，不要覆盖成 Ok
@@ -322,6 +326,8 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.FitCircle:    return RunFitCircle(s, node, p);
                 case FlowNodeType.FitLine:      return RunFitLine(s, node, p);
                 case FlowNodeType.ResultOutput: return RunResultOutput(s, node, p);
+                case FlowNodeType.ImageFilter:  return RunImageFilter(s, node, p);
+                case FlowNodeType.ColorExtractor: return RunColorExtractor(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -496,6 +502,200 @@ namespace VisionPlatform.Flow
             }
 
             p.Summary = "预处理完成";
+            return true;
+        }
+
+        // ---------------------- 图像滤波（原生 va_filter）----------------------
+
+        private bool RunImageFilter(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "图像滤波：无输入帧";
+                return true;
+            }
+
+            var fp = new FilterParam
+            {
+                Type = ParseFilterType(node.GetString("FilterType", "Gauss")),
+                Ksize = node.GetInt("KernelSize", 5),
+                Sigma = node.GetDouble("Sigma", 0),
+                Amount = node.GetDouble("Amount", 1.0),
+                MorphOp = ParseFilterMorphOp(node.GetString("MorphOp", "None")),
+                MorphShape = ParseMorphShape(node.GetString("MorphShape", "Rect")),
+                MorphKsize = node.GetInt("MorphKernel", 3),
+                Iterations = node.GetInt("Iterations", 1),
+                KeepColor = node.GetBool("KeepColor", false)
+            };
+
+            // 彩色链路的前置条件：上游到本节点为止仍持有彩色帧（灰度 / 二值化之后就没了）。
+            // 条件不满足时自动退回灰度链路，不判 NG —— 灰度滤波本身是合法用法。
+            bool keepColor = fp.KeepColor && s.ColorInput != null;
+            fp.KeepColor = keepColor;
+
+            Bitmap input = keepColor ? s.ColorInput : s.Current;
+            Rectangle roi = ResolveRoi(s, node, input.Width, input.Height);
+
+            Bitmap output = null;
+            Bitmap processed = null;
+            bool handed = false;
+
+            try
+            {
+                if (!roi.IsEmpty)
+                {
+                    // ROI 模式：只处理 ROI 内的一小块，再把结果按原位置贴回整帧副本
+                    using (Bitmap crop = CropTemplate(input, roi))
+                    {
+                        OpResult<Bitmap> fr = _algo.Filter(crop, fp);
+                        if (!fr.Success)
+                        {
+                            p.Summary = "图像滤波：" + Tail(fr.Message);
+                            return false;
+                        }
+
+                        processed = fr.Value;
+                        output = CloneWorkingFrame(input, keepColor);
+                        BlitPatch(output, processed, roi.X, roi.Y);
+                    }
+                }
+                else
+                {
+                    OpResult<Bitmap> fr = _algo.Filter(input, fp);
+                    if (!fr.Success)
+                    {
+                        p.Summary = "图像滤波：" + Tail(fr.Message);
+                        return false;
+                    }
+                    output = fr.Value;
+                }
+
+                if (output == null) { p.Summary = "图像滤波：输出为空"; return false; }
+
+                s.ReplaceFrame(output);       // 所有权移交会话
+                handed = true;
+
+                // 预览帧：与预处理同款，显式克隆当前帧供流程预览区显示
+                if (s.Current != null)
+                {
+                    if (p.Frame != null) p.Frame.Dispose();
+                    try { p.Frame = (Bitmap)s.Current.Clone(); }
+                    catch (Exception) { p.Frame = null; }
+                }
+
+                if (!roi.IsEmpty) p.Shapes.AddRange(FlowShapes.RoiOutline(roi));
+
+                p.Summary = string.Format(CultureInfo.InvariantCulture, "滤波：{0} 核={1}{2}{3}",
+                    FilterType.Name(fp.Type), fp.Ksize,
+                    fp.MorphOp != FilterMorphOp.None ? " + 形态学" + FilterMorphOp.Name(fp.MorphOp) : "",
+                    keepColor ? "（彩色）" : "");
+                return true;
+            }
+            finally
+            {
+                // 未交出会话的帧由本方法释放；交出去的（Current）归会话释放
+                if (!handed && output != null) output.Dispose();
+                if (processed != null) processed.Dispose();
+            }
+        }
+
+        // ---------------------- 颜色提取（原生 va_color_extract）----------------------
+
+        private bool RunColorExtractor(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "颜色提取：无输入帧";
+                return true;
+            }
+
+            // 【彩色前置检查】颜色提取是全库唯一必须拿彩色像素的算法。
+            // 无彩色帧时不抛异常、也不静默成功 —— 走正常失败路径（判 NG）并给出可操作的中文提示。
+            if (s.ColorInput == null)
+            {
+                p.Summary = "颜色提取：需要彩色输入，请把本节点直接接在图像源之后，"
+                          + "或在上游图像滤波节点勾选「输出彩色」";
+                return false;
+            }
+
+            int space = string.Equals(node.GetString("ColorSpace", "HSV"), "BGR",
+                                      StringComparison.OrdinalIgnoreCase)
+                ? ColorSpace.Bgr : ColorSpace.Hsv;
+
+            var cp = new ColorExtractParam
+            {
+                Space = space,
+                Low = new[]
+                {
+                    node.GetInt("Low1", 0), node.GetInt("Low2", 0), node.GetInt("Low3", 0)
+                },
+                High = new[]
+                {
+                    node.GetInt("High1", space == ColorSpace.Hsv ? 179 : 255),
+                    node.GetInt("High2", 255),
+                    node.GetInt("High3", 255)
+                },
+                MorphOp = ParseColorMorphOp(node.GetString("CleanOp", "None")),
+                MorphKsize = node.GetInt("CleanKernel", 3),
+                MinArea = node.GetDouble("MinArea", 10),
+                MaxArea = node.GetDouble("MaxArea", 0),
+                MaxCount = node.GetInt("MaxCount", 50),
+                OutputMask = node.GetBool("OutputMask", true)
+            };
+
+            OpResult<ColorExtractResult> cr = _algo.ExtractColor(s.ColorInput, cp);
+            if (!cr.Success)
+            {
+                p.Summary = "颜色提取：" + Tail(cr.Message);
+                return false;
+            }
+
+            ColorExtractResult r = cr.Value;
+
+            // 可选 ROI：只保留中心落在 ROI 内的命中区域（与 Blob 的 ROI 口径一致）
+            Rectangle roi = ResolveRoi(s, node, s.ColorInput.Width, s.ColorInput.Height);
+            var kept = new List<BlobResult>();
+            foreach (BlobResult b in r.Blobs)
+            {
+                if (!roi.IsEmpty && !roi.Contains((int)Math.Round(b.Cx), (int)Math.Round(b.Cy))) continue;
+                kept.Add(b);
+            }
+
+            foreach (BlobResult b in kept)
+                p.Shapes.Add(FlowShapes.BlobRect(b.Cx, b.Cy, b.Width, b.Height));
+
+            if (!roi.IsEmpty) p.Shapes.AddRange(FlowShapes.RoiOutline(roi));
+
+            // 输出：默认把 0/255 掩膜作为工作帧传给下游；关闭时保持原彩色帧继续往下传
+            bool handed = false;
+            if (cp.OutputMask && r.Mask != null)
+            {
+                try
+                {
+                    s.ReplaceFrame(r.Mask);
+                    handed = true;
+                }
+                catch (Exception)
+                {
+                    handed = false;
+                }
+            }
+
+            // 预览帧：输出掩膜时显示掩膜，否则显示原彩色帧
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
+            if (!handed && r.Mask != null) r.Mask.Dispose();
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "颜色提取：命中 {0} 个区域，面积占比 {1:F1}%，平均 BGR({2:F0},{3:F0},{4:F0})",
+                kept.Count, r.Ratio * 100.0, r.MeanB, r.MeanG, r.MeanR);
             return true;
         }
 
@@ -1591,6 +1791,125 @@ namespace VisionPlatform.Flow
             p.MorphOp = node.GetInt("MorphOp", 0);
             p.MorphKsize = node.GetInt("MorphKsize", 3);
             return p;
+        }
+
+        // ---------------------- 图像滤波 / 颜色提取的参数解析 ----------------------
+
+        private static bool Eq(string a, string b)
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>枚举参数（存的是 <c>NodeParamOption.Value</c>）→ 原生滤波类型编号。</summary>
+        private static int ParseFilterType(string name)
+        {
+            if (Eq(name, "None")) return FilterType.None;
+            if (Eq(name, "Box")) return FilterType.Box;
+            if (Eq(name, "Median")) return FilterType.Median;
+            if (Eq(name, "Bilateral")) return FilterType.Bilateral;
+            if (Eq(name, "Usm")) return FilterType.Usm;
+            if (Eq(name, "Custom")) return FilterType.Custom;
+            return FilterType.Gauss;
+        }
+
+        /// <summary>枚举参数 → 原生形态学算子编号（va_filter 的 VA_MORPH_* 口径）。</summary>
+        private static int ParseFilterMorphOp(string name)
+        {
+            if (Eq(name, "Dilate")) return FilterMorphOp.Dilate;
+            if (Eq(name, "Erode")) return FilterMorphOp.Erode;
+            if (Eq(name, "Open")) return FilterMorphOp.Open;
+            if (Eq(name, "Close")) return FilterMorphOp.Close;
+            if (Eq(name, "Gradient")) return FilterMorphOp.Gradient;
+            if (Eq(name, "TopHat")) return FilterMorphOp.TopHat;
+            if (Eq(name, "BlackHat")) return FilterMorphOp.BlackHat;
+            return FilterMorphOp.None;
+        }
+
+        private static int ParseMorphShape(string name)
+        {
+            if (Eq(name, "Ellipse")) return FilterMorphShape.Ellipse;
+            if (Eq(name, "Cross")) return FilterMorphShape.Cross;
+            return FilterMorphShape.Rect;
+        }
+
+        private static int ParseColorMorphOp(string name)
+        {
+            if (Eq(name, "Open")) return ColorMorphOp.Open;
+            if (Eq(name, "Close")) return ColorMorphOp.Close;
+            return ColorMorphOp.None;
+        }
+
+        /// <summary>
+        /// 用户按<strong>原始图坐标</strong>填写的 RoiX/Y/W/H → 工作帧坐标矩形，并夹到图像范围内。
+        /// 宽高为 0 或完全落在图外时返回 <see cref="Rectangle.Empty"/>（= 整帧处理）。
+        /// 换算顺序与 Blob 节点一致：减裁剪偏移 → 位置修正变换 → 夹取。
+        /// </summary>
+        private static Rectangle ResolveRoi(FlowRunSession s, FlowNode node, int width, int height)
+        {
+            int roiX = node.GetInt("RoiX", 0);
+            int roiY = node.GetInt("RoiY", 0);
+            int roiW = node.GetInt("RoiW", 0);
+            int roiH = node.GetInt("RoiH", 0);
+            if (roiW <= 0 || roiH <= 0) return Rectangle.Empty;
+
+            int wx = (int)Math.Round(roiX - s.OffsetX);
+            int wy = (int)Math.Round(roiY - s.OffsetY);
+            Rectangle user = s.Transform.ApplyToRect(new Rectangle(wx, wy, roiW, roiH));
+
+            int rx = Math.Max(0, Math.Min(user.X, width - 1));
+            int ry = Math.Max(0, Math.Min(user.Y, height - 1));
+            int rw = Math.Max(0, Math.Min(user.Width, width - rx));
+            int rh = Math.Max(0, Math.Min(user.Height, height - ry));
+            if (rw <= 0 || rh <= 0) return Rectangle.Empty;
+
+            return new Rectangle(rx, ry, rw, rh);
+        }
+
+        /// <summary>
+        /// 按滤波输出通道复制一份整帧底图（供 ROI 结果贴回）：彩色链路出 24bpp，
+        /// 灰度链路出 8bpp 灰度。返回新位图，由调用方释放。
+        /// </summary>
+        private static Bitmap CloneWorkingFrame(Bitmap src, bool keepColor)
+        {
+            if (!keepColor) return ToGrayBitmap(src);
+            if (src.PixelFormat == PixelFormat.Format24bppRgb) return (Bitmap)src.Clone();
+
+            // 32bpp / 索引图等：先经 GDI+ 归一化到 24bpp，保证与滤波输出的像素格式一致
+            var work = new Bitmap(src.Width, src.Height, PixelFormat.Format24bppRgb);
+            using (Graphics g = Graphics.FromImage(work))
+                g.DrawImage(src, 0, 0, src.Width, src.Height);
+            return work;
+        }
+
+        /// <summary>
+        /// 把 <paramref name="patch"/> 按原尺寸逐行拷进 <paramref name="dst"/> 的 (x, y) 处。
+        /// 两者像素格式必须一致（8bpp 或 24bpp）—— 之所以不用 <c>Graphics.DrawImage</c>，
+        /// 是因为 GDI+ <strong>不支持在 8bpp 索引位图上创建 Graphics</strong>，灰度链路会直接抛异常。
+        /// </summary>
+        private static void BlitPatch(Bitmap dst, Bitmap patch, int x, int y)
+        {
+            int w = patch.Width;
+            int h = patch.Height;
+            int bpp = Image.GetPixelFormatSize(patch.PixelFormat) / 8;
+            int rowBytes = w * bpp;
+
+            var srcRect = new Rectangle(0, 0, w, h);
+            BitmapData sd = patch.LockBits(srcRect, ImageLockMode.ReadOnly, patch.PixelFormat);
+            BitmapData dd = dst.LockBits(new Rectangle(x, y, w, h), ImageLockMode.WriteOnly, dst.PixelFormat);
+            try
+            {
+                byte[] row = new byte[rowBytes];
+                for (int r = 0; r < h; r++)
+                {
+                    Marshal.Copy(IntPtr.Add(sd.Scan0, r * sd.Stride), row, 0, rowBytes);
+                    Marshal.Copy(row, 0, IntPtr.Add(dd.Scan0, r * dd.Stride), rowBytes);
+                }
+            }
+            finally
+            {
+                dst.UnlockBits(dd);
+                patch.UnlockBits(sd);
+            }
         }
 
         // =====================================================================

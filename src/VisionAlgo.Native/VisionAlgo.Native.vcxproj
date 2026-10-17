@@ -118,6 +118,10 @@
     <ClInclude Include="include\algo\va_measure.h" />
     <ClInclude Include="include\algo\va_camera.h" />
     <ClInclude Include="include\algo\va_caliper.h" />
+    <ClInclude Include="include\algo\va_filter.h" />
+    <ClInclude Include="include\algo\va_color.h" />
+    <ClInclude Include="include\algo\va_classify.h" />
+    <ClInclude Include="include\algo\va_ocr.h" />
   </ItemGroup>
   <!-- 源文件夹：src 下放实现，其中 algo 子目录对应各算法头文件 -->
   <ItemGroup>
@@ -130,6 +134,10 @@
     <ClCompile Include="src\algo\algo_measure.cpp" />
     <ClCompile Include="src\algo\algo_camera.cpp" />
     <ClCompile Include="src\algo\algo_caliper.cpp" />
+    <ClCompile Include="src\algo\algo_filter.cpp" />
+    <ClCompile Include="src\algo\algo_color.cpp" />
+    <ClCompile Include="src\algo\algo_classify.cpp" />
+    <ClCompile Include="src\algo\algo_ocr.cpp" />
   </ItemGroup>
   <!-- Common 文件夹：导出宏、错误码、公共类型、生命周期与内部工具，
        头文件与源文件同目录，被 include 与 src 共同引用 -->

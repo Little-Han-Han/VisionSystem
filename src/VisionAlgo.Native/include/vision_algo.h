@@ -14,6 +14,10 @@
  *    algo/va_measure.h       清晰度与边缘计数
  *    algo/va_caliper.h       直线 / 圆卡尺（投影找边 + 拟合 + 离群剔除）
  *    algo/va_camera.h        本机摄像头（枚举 / 打开 / 抓帧 / 关闭）
+ *    algo/va_filter.h        图像滤波（平滑 / 锐化 / 形态学后处理）
+ *    algo/va_color.h         颜色提取（BGR / HSV 阈值分割 + 连通域）
+ *    algo/va_classify.h      分类器（轮廓特征 + SVM / KNN，OpenCV ml）
+ *    algo/va_ocr.h           传统算法 OCR（连通域分割 + 模板匹配）
  *
  *  设计约定（C# 侧 P/Invoke 依赖这些约定，改动需同步）：
  *   1. 全部 extern "C" 导出，无名称修饰
@@ -37,5 +41,9 @@
 #include "algo/va_measure.h"
 #include "algo/va_caliper.h"
 #include "algo/va_camera.h"
+#include "algo/va_filter.h"
+#include "algo/va_color.h"
+#include "algo/va_classify.h"
+#include "algo/va_ocr.h"
 
 #endif /* VISION_ALGO_H */

@@ -36,7 +36,15 @@ namespace VisionPlatform.Flow
         LineCaliper,
 
         /// <summary>圆卡尺（原生 va_circle_caliper）：径向投影找边 + 圆拟合 + 圆度 RMS。</summary>
-        CircleCaliper
+        CircleCaliper,
+
+        // ===== 本期追加（同样加在末尾，保证既有序号与字符串不变）=====
+
+        /// <summary>图像滤波（原生 va_filter）：平滑 / 锐化 + 可选形态学，支持灰度与彩色两种链路。</summary>
+        ImageFilter,
+
+        /// <summary>颜色提取（原生 va_color_extract）：BGR / HSV 阈值分割 → 连通域统计。</summary>
+        ColorExtractor
     }
 
     /// <summary>

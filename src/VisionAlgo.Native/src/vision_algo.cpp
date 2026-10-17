@@ -213,6 +213,126 @@ int VA_CALL va_circle_caliper(void* handle,
     return va::CircleCaliper(ctx, gray, param, out_points, max_count, out_count, out_circle, out_rms);
 }
 
+// ---------------------- 图像滤波 ----------------------
+
+int VA_CALL va_filter(void* handle,
+                      const VA_Image* src,
+                      VA_Image* dst,
+                      const VA_FilterParam* param)
+{
+    VA_CTX();
+    return va::Filter(ctx, src, dst, param);
+}
+
+// ---------------------- 颜色提取 ----------------------
+
+int VA_CALL va_color_extract(void* handle,
+                             const VA_Image* src,
+                             VA_Image* dst_mask,
+                             const VA_ColorParam* param,
+                             double min_area,
+                             double max_area,
+                             VA_Blob* out_blobs,
+                             int max_count,
+                             int* out_count,
+                             VA_ColorStat* out_stat)
+{
+    VA_CTX();
+    return va::ColorExtract(ctx, src, dst_mask, param, min_area, max_area,
+                            out_blobs, max_count, out_count, out_stat);
+}
+
+// ---------------------- 分类器（轮廓特征 + SVM / KNN）----------------------
+
+int VA_CALL va_clf_create(void* handle, const VA_ClassParam* param)
+{
+    VA_CTX();
+    return va::ClfCreate(ctx, param);
+}
+
+int VA_CALL va_clf_add_sample(void* handle, const VA_Image* gray, int label)
+{
+    VA_CTX();
+    return va::ClfAddSample(ctx, gray, label);
+}
+
+int VA_CALL va_clf_sample_count(void* handle, int* out_count)
+{
+    VA_CTX();
+    return va::ClfSampleCount(ctx, out_count);
+}
+
+int VA_CALL va_clf_train(void* handle)
+{
+    VA_CTX();
+    return va::ClfTrain(ctx);
+}
+
+int VA_CALL va_clf_predict(void* handle, const VA_Image* gray,
+                           int* out_label, double* out_score)
+{
+    VA_CTX();
+    return va::ClfPredict(ctx, gray, out_label, out_score);
+}
+
+int VA_CALL va_clf_save(void* handle, const char* path)
+{
+    VA_CTX();
+    return va::ClfSave(ctx, path);
+}
+
+int VA_CALL va_clf_load(void* handle, const char* path)
+{
+    VA_CTX();
+    return va::ClfLoad(ctx, path);
+}
+
+int VA_CALL va_clf_clear(void* handle)
+{
+    VA_CTX();
+    return va::ClfClear(ctx);
+}
+
+// ---------------------- 传统算法 OCR ----------------------
+
+int VA_CALL va_ocr_set_param(void* handle, const VA_OcrParam* param)
+{
+    VA_CTX();
+    return va::OcrSetParam(ctx, param);
+}
+
+int VA_CALL va_ocr_add_template(void* handle, const VA_Image* gray, const char* label)
+{
+    VA_CTX();
+    return va::OcrAddTemplate(ctx, gray, label);
+}
+
+int VA_CALL va_ocr_template_count(void* handle, int* out_count)
+{
+    VA_CTX();
+    return va::OcrTemplateCount(ctx, out_count);
+}
+
+int VA_CALL va_ocr_clear_templates(void* handle)
+{
+    VA_CTX();
+    return va::OcrClearTemplates(ctx);
+}
+
+int VA_CALL va_ocr_segment(void* handle, const VA_Image* gray, const VA_OcrParam* param,
+                           VA_OcrChar* out_chars, int max_count, int* out_count)
+{
+    VA_CTX();
+    return va::OcrSegment(ctx, gray, param, out_chars, max_count, out_count);
+}
+
+int VA_CALL va_ocr_recognize(void* handle, const VA_Image* gray, const VA_OcrParam* param,
+                             char* out_text, int text_cap, double* out_mean_score)
+{
+    VA_CTX();
+    return va::OcrRecognize(ctx, gray, param, out_text, text_cap, out_mean_score);
+}
+
 // ---------------------- 摄像头（独立句柄，平行于算法 Context）----------------------
 
 /* 相机句柄取用：空句柄直接返回 VA_ERR_HANDLE */
