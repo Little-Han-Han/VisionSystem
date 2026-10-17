@@ -46,6 +46,9 @@
     <!-- OpenCV 预编译包根目录：只提供 vc14/vc15 的 lib，但 MSVC 2015~2022 ABI 兼容，
          v143 工具集可直接链接 vc15 的库。 -->
     <OpenCVRoot>$(ProjectDir)..\..\ThirdParty\OpenCV</OpenCVRoot>
+    <!-- OpenVINO 2025.4.1 预编译包根目录。发行包解压后是 <根>\runtime\{include,lib,bin}，
+         lib/bin 再按 intel64\{Debug,Release} 分 Debug/Release，下面路径都相对 runtime。 -->
+    <OpenVinoRoot>$(ProjectDir)..\..\ThirdParty\OpenVino2025.4.1\runtime</OpenVinoRoot>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -59,8 +62,9 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_WIN64;_DEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <!-- 形状匹配的粗扫 / 精化按位置与候选并行 -->
       <OpenMPSupport>true</OpenMPSupport>
@@ -70,12 +74,20 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world455d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world455d.lib;openvinod.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if exist "$(OpenCVRoot)\bin\x64\opencv_world455d.dll" xcopy /Y /D "$(OpenCVRoot)\bin\x64\opencv_world455d.dll" "$(OutDir)" || exit /b 0</Command>
-      <Message>Copy OpenCV debug runtime</Message>
+      <Command>set OV=$(OpenVinoRoot)\bin\intel64\Debug
+set TBB=$(OpenVinoRoot)\3rdparty\tbb\bin
+if exist "%OV%\openvinod.dll" xcopy /Y /D "%OV%\openvinod.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_intel_cpu_plugind.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugind.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_ir_frontendd.dll" xcopy /Y /D "%OV%\openvino_ir_frontendd.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_onnx_frontendd.dll" xcopy /Y /D "%OV%\openvino_onnx_frontendd.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbb12_debug.dll" xcopy /Y /D "%TBB%\tbb12_debug.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbbmalloc_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_debug.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_debug.dll" "$(OutDir)" || exit /b 0</Command>
+      <Message>Copy OpenCV + OpenVINO (Debug) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
@@ -86,8 +98,9 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <!-- 形状匹配的粗扫 / 精化按位置与候选并行 -->
       <OpenMPSupport>true</OpenMPSupport>
       <!-- 源文件含中文注释，按 UTF-8 解析，避免 GBK 代码页下出现 C4819 / C2447 -->
@@ -98,12 +111,20 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world455.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world455.lib;openvino.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if exist "$(OpenCVRoot)\bin\x64\opencv_world455.dll" xcopy /Y /D "$(OpenCVRoot)\bin\x64\opencv_world455.dll" "$(OutDir)" || exit /b 0</Command>
-      <Message>Copy OpenCV release runtime</Message>
+      <Command>set OV=$(OpenVinoRoot)\bin\intel64\Release
+set TBB=$(OpenVinoRoot)\3rdparty\tbb\bin
+if exist "%OV%\openvino.dll" xcopy /Y /D "%OV%\openvino.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_intel_cpu_plugin.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugin.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_ir_frontend.dll" xcopy /Y /D "%OV%\openvino_ir_frontend.dll" "$(OutDir)" || exit /b 0
+if exist "%OV%\openvino_onnx_frontend.dll" xcopy /Y /D "%OV%\openvino_onnx_frontend.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbb12.dll" xcopy /Y /D "%TBB%\tbb12.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbbmalloc.dll" xcopy /Y /D "%TBB%\tbbmalloc.dll" "$(OutDir)" || exit /b 0
+if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(OutDir)" || exit /b 0</Command>
+      <Message>Copy OpenCV + OpenVINO (Release) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
@@ -122,6 +143,7 @@
     <ClInclude Include="include\algo\va_color.h" />
     <ClInclude Include="include\algo\va_classify.h" />
     <ClInclude Include="include\algo\va_ocr.h" />
+    <ClInclude Include="include\algo\va_detect.h" />
   </ItemGroup>
   <!-- 源文件夹：src 下放实现，其中 algo 子目录对应各算法头文件 -->
   <ItemGroup>
@@ -138,6 +160,7 @@
     <ClCompile Include="src\algo\algo_color.cpp" />
     <ClCompile Include="src\algo\algo_classify.cpp" />
     <ClCompile Include="src\algo\algo_ocr.cpp" />
+    <ClCompile Include="src\algo\algo_detect.cpp" />
   </ItemGroup>
   <!-- Common 文件夹：导出宏、错误码、公共类型、生命周期与内部工具，
        头文件与源文件同目录，被 include 与 src 共同引用 -->

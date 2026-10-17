@@ -53,6 +53,9 @@ namespace VisionPlatform.Flow
         /// <summary>Blob 标记（橙）。</summary>
         public static readonly Color ColorBlob = Color.Orange;
 
+        /// <summary>目标识别检测框（绿）。</summary>
+        public static readonly Color ColorDetect = Color.FromArgb(0, 230, 118);
+
         /// <summary>位置修正基准十字（青）。</summary>
         public static readonly Color ColorRefCross = Color.Cyan;
 
@@ -275,6 +278,24 @@ namespace VisionPlatform.Flow
             var s = Line(line.X1, line.Y1, line.X2, line.Y2, ColorFit, NormalLine, false);
             s.Name = "FitLine";
             return s;
+        }
+
+        /// <summary>目标识别检测框（轴对齐矩形，左上角 + 宽高，均为图像坐标）。</summary>
+        /// <param name="x">左上角 X（图像坐标）。</param>
+        /// <param name="y">左上角 Y（图像坐标）。</param>
+        /// <param name="width">宽（图像像素）。</param>
+        /// <param name="height">高（图像像素）。</param>
+        /// <param name="primary">是否为置信度最高的目标（用更粗的线）。</param>
+        public static RectangleShape DetectBox(double x, double y, double width, double height, bool primary)
+        {
+            float w = (float)Math.Max(1.0, width);
+            float h = (float)Math.Max(1.0, height);
+            var r = new RectangleShape((float)x, (float)y, w, h);
+            r.StrokeColor = primary ? ColorDetect : Color.FromArgb(150, ColorDetect);
+            r.LineWidth = primary ? BoldLine : ThinLine;
+            r.IsEditable = false;
+            r.Name = "Detection";
+            return r;
         }
     }
 }

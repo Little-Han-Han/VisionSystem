@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "va_types.h"
+// OpenVINO C++ 推理运行时（YOLO 目标检测用）
+#include <openvino/openvino.hpp>
 // 形状匹配的参数与结果结构体声明在对外头文件里，内部实现直接复用
 #include "algo/va_shape.h"
 // 相机对外结构体与接口声明在对外头文件里，内部实现直接复用
@@ -25,6 +27,8 @@
 #include "algo/va_classify.h"
 // OCR 的参数 / 结果结构体（VA_OcrParam / VA_OcrChar）声明在对外头文件里
 #include "algo/va_ocr.h"
+// YOLO 目标检测的参数 / 结果结构体（VA_DetectResult）声明在对外头文件里
+#include "algo/va_detect.h"
 
 namespace va {
 
@@ -62,6 +66,20 @@ struct OcrState {
     OcrState() { std::memset(&param, 0, sizeof(param)); }
 };
 
+// YOLO 目标检测状态：OpenVINO 编译模型 + 类别名表，挂在 Context 上（一个句柄 = 一条流程）
+struct DetectorState {
+    ov::Core                  core;        // OpenVINO 核心（管理设备插件，可跨 create 复用）
+    ov::CompiledModel         compiled;    // 编译后的模型（已绑定设备）
+    ov::InferRequest          infer;       // 推理请求（复用，避免每次重建）
+    int                       input_w;     // 模型输入宽（导出时固定，如 640）
+    int                       input_h;     // 模型输入高
+    int                       num_classes; // 类别数（= 输出通道 - 4，从模型读取）
+    std::vector<std::string>  class_names; // 类别名（COCO 80 或侧车 <model>.txt）
+    bool                      created;     // 已成功加载并编译模型
+
+    DetectorState() : input_w(0), input_h(0), num_classes(0), created(false) {}
+};
+
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
@@ -70,6 +88,7 @@ struct Context {
     ShapeModel  shape;              // 形状匹配模型
     ClassifierState clf;            // 分类器（样本 + 模型）
     OcrState        ocr;            // 传统算法 OCR（模板库）
+    DetectorState   det;             // YOLO 目标检测器
 
     Context() : hasTemplate(false) {}
 };
@@ -176,6 +195,16 @@ int ClfPredict(Context* ctx, const VA_Image* gray, int* outLabel, double* outSco
 int ClfSave(Context* ctx, const char* path);
 int ClfLoad(Context* ctx, const char* path);
 int ClfClear(Context* ctx);
+
+// ---------------------- YOLO 目标检测（OpenVINO 推理）----------------------
+// 加载 Ultralytics 导出的 YOLO ONNX（输出布局 [1, 4+num_classes, anchors]），
+// 编译到指定设备并缓存类别名表。实现见 src/algo/algo_detect.cpp，导出见 va_det_*。
+int DetCreate(Context* ctx, const char* model_path, const char* device);
+int DetRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
+           VA_DetectResult* out_results, int max_count, int* out_count);
+int DetClassCount(Context* ctx, int* out_count);
+int DetClassName(Context* ctx, int idx, char* out_buf, int buf_size);
+int DetClear(Context* ctx);
 
 // ---------------------- 传统算法 OCR ----------------------
 // 连通域分割 + 归一化 + 模板匹配识别（无 contrib，自搭）。

@@ -251,6 +251,20 @@ namespace VisionPlatform.Flow
                     P("Ratio", "面积占比", FlowPortKind.Number, false),
                     P("Text", "处理摘要", FlowPortKind.Text, false)
                 });
+
+            // ---- 本期新增：目标识别（OpenVINO YOLO）----
+            // 输入：彩色图像；输出：原图透传 + 检测数量 + 检测摘要文本。
+            // 检测框以叠加层（FlowShapes）画在画布上，不单独走端子数据（与位置修正同策略：
+            // 复杂结构用叠加层 + 全局状态表达，端子只承载标量 / 图像 / 文本）。
+
+            Register(FlowNodeType.ObjectDetect,
+                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Count", "检测数量", FlowPortKind.Number, false),
+                    P("Text", "检测摘要", FlowPortKind.Text, false)
+                });
         }
 
         // ---------------------- 注册与构造器 ----------------------

@@ -250,6 +250,19 @@ namespace VisionPlatform.Flow
 
                 case FlowNodeType.ResultOutput:
                     break;
+
+                case FlowNodeType.ObjectDetect:
+                    // OpenVINO YOLO 模型路径（.onnx；Ultralytics 导出，输出 [1,4+nc,anchors]）
+                    Add(list, "ModelPath", "models/yolo11n.onnx");
+                    // 推理设备：CPU / GPU（GPU 需 OpenVINO 带对应插件）
+                    Add(list, "Device", "CPU");
+                    // 类别置信度阈值（0~1）
+                    Add(list, "ScoreThresh", "0.25");
+                    // NMS IoU 阈值（0~1）
+                    Add(list, "IouThresh", "0.45");
+                    // 最多保留的目标数
+                    Add(list, "MaxCount", "100");
+                    break;
             }
 
             return list;
@@ -321,7 +334,7 @@ namespace VisionPlatform.Flow
         /// <summary>输出与通信（结果输出）。</summary>
         public const string CatOutput = "Output";
 
-        /// <summary>全部算法模块，按工具箱显示顺序排列（12 项）。</summary>
+        /// <summary>全部算法模块，按工具箱显示顺序排列（13 项）。</summary>
         public static readonly List<FlowModuleInfo> All = new List<FlowModuleInfo>
         {
             new FlowModuleInfo("ImageSource",      "图像源",          FlowNodeType.ImageSource,      CatAcquisition),
@@ -329,6 +342,7 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("PositionCorrect",  "位置修正",        FlowNodeType.PositionCorrect,  CatLocation),
             new FlowModuleInfo("ShapeMatch",       "形状匹配",        FlowNodeType.ShapeMatch,       CatLocation),
             new FlowModuleInfo("TemplateMatch",    "模板匹配(NCC)",   FlowNodeType.TemplateMatch,    CatLocation),
+            new FlowModuleInfo("ObjectDetect",     "目标识别",        FlowNodeType.ObjectDetect,     CatLocation),
             new FlowModuleInfo("Blob",             "Blob 分析",       FlowNodeType.Blob,             CatSegmentation),
             new FlowModuleInfo("LineCaliper",      "直线卡尺",        FlowNodeType.LineCaliper,      CatCaliper),
             new FlowModuleInfo("CircleCaliper",    "圆卡尺",          FlowNodeType.CircleCaliper,    CatCaliper),
@@ -341,7 +355,7 @@ namespace VisionPlatform.Flow
         /// <summary>
         /// 分类目录（6 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
         /// <para>
-        /// 合计 1 + 2 + 3 + 2 + 3 + 1 = 12，与 <see cref="All"/> 一一对应、无遗漏无重复。
+        /// 合计 1 + 2 + 4 + 2 + 3 + 1 = 13，与 <see cref="All"/> 一一对应、无遗漏无重复。
         /// 这是 <see cref="All"/> 的<strong>另一种组织视图</strong>，<see cref="All"/> 本身一字未动
         /// （<c>SmokeParallel</c> 的用例依赖 <see cref="All"/> 的既有顺序）。
         /// </para>

@@ -333,6 +333,39 @@ int VA_CALL va_ocr_recognize(void* handle, const VA_Image* gray, const VA_OcrPar
     return va::OcrRecognize(ctx, gray, param, out_text, text_cap, out_mean_score);
 }
 
+// ---------------------- YOLO 目标检测（OpenVINO 推理）----------------------
+
+int VA_CALL va_det_create(void* handle, const char* model_path, const char* device)
+{
+    VA_CTX();
+    return va::DetCreate(ctx, model_path, device);
+}
+
+int VA_CALL va_det_run(void* handle, const VA_Image* img, float score_thresh, float iou_thresh,
+                      VA_DetectResult* out_results, int max_count, int* out_count)
+{
+    VA_CTX();
+    return va::DetRun(ctx, img, score_thresh, iou_thresh, out_results, max_count, out_count);
+}
+
+int VA_CALL va_det_class_count(void* handle, int* out_count)
+{
+    VA_CTX();
+    return va::DetClassCount(ctx, out_count);
+}
+
+int VA_CALL va_det_class_name(void* handle, int idx, char* out_buf, int buf_size)
+{
+    VA_CTX();
+    return va::DetClassName(ctx, idx, out_buf, buf_size);
+}
+
+int VA_CALL va_det_clear(void* handle)
+{
+    VA_CTX();
+    return va::DetClear(ctx);
+}
+
 // ---------------------- 摄像头（独立句柄，平行于算法 Context）----------------------
 
 /* 相机句柄取用：空句柄直接返回 VA_ERR_HANDLE */

@@ -208,6 +208,22 @@ namespace VisionPlatform.Native
         public double height;
     }
 
+    /// <summary>
+    /// 单个目标检测结果（对应 C 端 VA_DetectResult，见 include/algo/va_detect.h）。
+    /// 字段顺序 / 类型与 C 端严格一一对应：4 个 float（左上角 x,y + 宽高 w,h）→
+    /// int class_id → float score。改动必须同步改 C 端头文件。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_DetectResult
+    {
+        public float x;          /* 左上角 x（原图像素坐标） */
+        public float y;          /* 左上角 y */
+        public float w;          /* 宽 */
+        public float h;          /* 高 */
+        public int   class_id;   /* 类别索引 */
+        public float score;      /* 置信度 0~1 */
+    }
+
     #endregion
 
     /// <summary>算法库返回码。</summary>
@@ -364,6 +380,27 @@ namespace VisionPlatform.Native
                                                    [In, Out] VA_CaliperPoint[] out_points,
                                                    int max_count, out int out_count,
                                                    out VA_Circle out_circle, out double out_rms);
+
+        // ---- 目标识别（OpenVINO YOLO，va_det_*）----
+        // 字符串参数（模型路径 / 设备名）按 UTF-8 字节传，避免默认 ANSI 封送破坏中文路径。
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_det_create(IntPtr handle, byte[] model_path, byte[] device);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_det_run(IntPtr handle, ref VA_Image img,
+                                           float score_thresh, float iou_thresh,
+                                           [In, Out] VA_DetectResult[] out_results,
+                                           int max_count, out int out_count);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_det_class_count(IntPtr handle, out int out_count);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_det_class_name(IntPtr handle, int idx, byte[] out_buf, int buf_size);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_det_clear(IntPtr handle);
     }
 
     /// <summary>
@@ -374,6 +411,12 @@ namespace VisionPlatform.Native
     {
         private IntPtr _handle = IntPtr.Zero;
         private bool _disposed;
+
+        /// <summary>已加载的检测模型路径缓存：同一路径不重复编译，避免连续运行每帧重建模型。</summary>
+        private string _detModelPath = "";
+
+        /// <summary>已加载的检测设备缓存（与 <see cref="_detModelPath"/> 一起决定是否需要重载）。</summary>
+        private string _detDevice = "";
 
         public VisionAlgo()
         {
@@ -1057,6 +1100,125 @@ namespace VisionPlatform.Native
                     return OpResult<CaliperCircleResult>.Fail("圆卡尺失败：" + ex.Message);
                 }
             }
+        }
+
+        /// <summary>
+        /// 目标识别（OpenVINO YOLO）：对彩色帧做深度学习目标检测。
+        /// 模型按路径缓存，同一路径不重复编译；路径 / 设备变化时自动重载。
+        /// <para>输入优先用彩色帧（<see cref="ColorInput"/> 同款链路），灰度帧也会自动转 BGR 后推理。</para>
+        /// </summary>
+        public OpResult<DetectOutput> Detect(Bitmap src, DetectParam param)
+        {
+            if (src == null) return OpResult<DetectOutput>.Fail("输入图像为空");
+            if (param == null) param = DetectParam.Default();
+
+            string mp = ResolveModelPath(param.ModelPath);
+            string dev = string.IsNullOrEmpty(param.Device) ? "CPU" : param.Device;
+
+            // ---- 模型加载 / 重载（按路径 + 设备缓存）----
+            if (string.IsNullOrWhiteSpace(mp))
+            {
+                return OpResult<DetectOutput>.Fail("未指定模型路径");
+            }
+            if (!System.IO.File.Exists(mp))
+            {
+                return OpResult<DetectOutput>.Fail("模型文件不存在：" + mp);
+            }
+            if (!string.Equals(mp, _detModelPath, StringComparison.Ordinal)
+                || !string.Equals(dev, _detDevice, StringComparison.Ordinal))
+            {
+                if (!string.IsNullOrEmpty(_detModelPath))
+                {
+                    try { NativeMethods.va_det_clear(_handle); }
+                    catch (Exception) { /* 忽略清除失败，下面重建会覆盖 */ }
+                }
+
+                byte[] pPath = Utf8NullTerminated(mp);
+                byte[] pDev = Utf8NullTerminated(dev);
+                int rc = NativeMethods.va_det_create(_handle, pPath, pDev);
+                if (rc != VaResult.OK)
+                    return OpResult<DetectOutput>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                _detModelPath = mp;
+                _detDevice = dev;
+            }
+
+            // ---- 推理（彩色输入，与颜色提取同款 ColorInput）----
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    int maxCount = param.MaxCount > 0 ? param.MaxCount : 100;
+                    VA_DetectResult[] raw = new VA_DetectResult[maxCount];
+                    int count = 0;
+
+                    int rc = NativeMethods.va_det_run(_handle, ref img,
+                        param.ScoreThresh, param.IouThresh, raw, maxCount, out count);
+                    if (rc != VaResult.OK && rc != VaResult.ErrSize)
+                        return OpResult<DetectOutput>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    string[] names = LoadClassNames();
+                    int n = (rc == VaResult.ErrSize) ? raw.Length : Math.Min(count, raw.Length);
+
+                    var outp = new DetectOutput { ClassNames = names, Detections = new List<DetectResult>(n) };
+                    for (int i = 0; i < n; i++)
+                        outp.Detections.Add(DetectResult.FromNative(raw[i], names));
+
+                    return OpResult<DetectOutput>.Ok(outp);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<DetectOutput>.Fail("目标识别失败：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>取当前模型的类别名表（索引 = class_id）。</summary>
+        private string[] LoadClassNames()
+        {
+            int cnt = 0;
+            NativeMethods.va_det_class_count(_handle, out cnt);
+            if (cnt <= 0) return new string[0];
+
+            var list = new string[cnt];
+            byte[] buf = new byte[256];
+            for (int i = 0; i < cnt; i++)
+            {
+                int n = NativeMethods.va_det_class_name(_handle, i, buf, buf.Length);
+                list[i] = (n > 0) ? System.Text.Encoding.UTF8.GetString(buf, 0, n) : ("class_" + i);
+            }
+            return list;
+        }
+
+        /// <summary>把字符串转 UTF-8 字节并补 null 结尾（供原生 const char* 参数，支持中文路径）。</summary>
+        private static byte[] Utf8NullTerminated(string s)
+        {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+            byte[] result = new byte[bytes.Length + 1];
+            Array.Copy(bytes, result, bytes.Length);
+            result[bytes.Length] = 0;
+            return result;
+        }
+
+        /// <summary>
+        /// 解析模型路径：原样存在则直接用；否则尝试相对「程序基目录」或「基目录/models」下按文件名查找。
+        /// 都找不到时返回原值（交给上层报出「文件不存在」的可操作提示）。
+        /// </summary>
+        private static string ResolveModelPath(string p)
+        {
+            if (string.IsNullOrWhiteSpace(p)) return p ?? "";
+            if (System.IO.File.Exists(p)) return p;
+
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory ?? "";
+            string cand = System.IO.Path.Combine(baseDir, p);
+            if (System.IO.File.Exists(cand)) return cand;
+
+            string fn = System.IO.Path.GetFileName(p);
+            string cand2 = System.IO.Path.Combine(baseDir, "models", fn);
+            if (System.IO.File.Exists(cand2)) return cand2;
+
+            return p;
         }
 
         /// <summary>把原生卡尺点数组转成托管列表（未命中的也保留，供可视化区分）。</summary>
@@ -2189,6 +2351,114 @@ namespace VisionPlatform.Native
                 AngleStart, AngleEnd, AngleStep,
                 ScaleMin, ScaleMax, ScaleStep,
                 PyramidLevels, MinScore);
+        }
+    }
+
+    /// <summary>目标识别（OpenVINO YOLO）参数（对应原生 va_det_*）。</summary>
+    public class DetectParam
+    {
+        /// <summary>模型路径（.onnx；Ultralytics 导出，输出 [1,4+nc,anchors]）。</summary>
+        public string ModelPath { get; set; }
+
+        /// <summary>推理设备名（"CPU" / "GPU" 等）；空串按 "CPU" 处理。</summary>
+        public string Device { get; set; }
+
+        /// <summary>类别置信度阈值（0~1），低于该值的框被丢弃。</summary>
+        public float ScoreThresh { get; set; }
+
+        /// <summary>NMS IoU 阈值（0~1），同类重叠高于该值则合并。</summary>
+        public float IouThresh { get; set; }
+
+        /// <summary>最多保留的目标数（<=0 视为 100）。</summary>
+        public int MaxCount { get; set; }
+
+        public static DetectParam Default()
+        {
+            return new DetectParam
+            {
+                ModelPath = "models/yolo11n.onnx",
+                Device = "CPU",
+                ScoreThresh = 0.25f,
+                IouThresh = 0.45f,
+                MaxCount = 100
+            };
+        }
+    }
+
+    /// <summary>单个检测结果：原图像素坐标系下的边界框（左上角 + 宽高）+ 类别 + 置信度。</summary>
+    public class DetectResult
+    {
+        /// <summary>左上角 X（原图像素坐标）。</summary>
+        public double X { get; set; }
+
+        /// <summary>左上角 Y（原图像素坐标）。</summary>
+        public double Y { get; set; }
+
+        /// <summary>宽（图像像素）。</summary>
+        public double Width { get; set; }
+
+        /// <summary>高（图像像素）。</summary>
+        public double Height { get; set; }
+
+        /// <summary>类别索引（与 <see cref="DetectOutput.ClassNames"/> 下标对应）。</summary>
+        public int ClassId { get; set; }
+
+        /// <summary>置信度 0~1。</summary>
+        public double Score { get; set; }
+
+        /// <summary>类别名（从 <see cref="DetectOutput.ClassNames"/> 取，缺失时为 "class_N"）。</summary>
+        public string ClassName { get; set; }
+
+        internal static DetectResult FromNative(VA_DetectResult r, string[] names)
+        {
+            string name = (names != null && r.class_id >= 0 && r.class_id < names.Length)
+                ? names[r.class_id]
+                : ("class_" + r.class_id);
+            return new DetectResult
+            {
+                X = r.x, Y = r.y, Width = r.w, Height = r.h,
+                ClassId = r.class_id, Score = r.score, ClassName = name
+            };
+        }
+
+        public override string ToString()
+        {
+            return string.Format("[{0}] ({1:F1},{2:F1}) {3:F0}x{4:F0} score={5:F3}",
+                ClassName, X, Y, Width, Height, Score);
+        }
+    }
+
+    /// <summary>目标识别（OpenVINO YOLO）的一次推理结果：类别名表 + 检测框列表。</summary>
+    public class DetectOutput
+    {
+        /// <summary>类别名表，下标 = class_id。</summary>
+        public string[] ClassNames { get; set; }
+
+        /// <summary>检测到的目标列表（按原生输出顺序，已按 NMS 去重）。</summary>
+        public List<DetectResult> Detections { get; set; }
+
+        public DetectOutput()
+        {
+            ClassNames = new string[0];
+            Detections = new List<DetectResult>();
+        }
+
+        /// <summary>置信度最高的目标（用于画布高亮 + 摘要首条）；无检测时返回 null。</summary>
+        public DetectResult Best
+        {
+            get
+            {
+                DetectResult best = null;
+                if (Detections != null)
+                {
+                    double s = -1.0;
+                    foreach (DetectResult d in Detections)
+                    {
+                        if (d != null && d.Score > s) { s = d.Score; best = d; }
+                    }
+                }
+                return best;
+            }
         }
     }
 

@@ -66,6 +66,9 @@
     <ClInclude Include="include\algo\va_ocr.h">
       <Filter>include\algo</Filter>
     </ClInclude>
+    <ClInclude Include="include\algo\va_detect.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
   </ItemGroup>
 
   <!-- 源文件夹 -->
@@ -109,6 +112,9 @@
     <ClCompile Include="src\algo\algo_ocr.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
+    <ClCompile Include="src\algo\algo_detect.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
   </ItemGroup>
 
   <!-- Common 文件夹：公共头文件与实现 -->
@@ -139,6 +145,9 @@
       <Filter>ThirdParty</Filter>
     </Text>
     <Text Include="..\..\ThirdParty\HikVision\README.md">
+      <Filter>ThirdParty</Filter>
+    </Text>
+    <Text Include="..\..\ThirdParty\OpenVino2025.4.1\runtime\version.txt">
       <Filter>ThirdParty</Filter>
     </Text>
   </ItemGroup>

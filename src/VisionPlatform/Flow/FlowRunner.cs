@@ -99,8 +99,14 @@ namespace VisionPlatform.Flow
         /// <param name="flow">待执行流程。</param>
         /// <param name="camera">取图相机；图像源为「本地图片」时允许为 null。</param>
         /// <param name="captureFrames">是否为每个节点保存输出帧副本（单步预览需要）。</param>
-        public FlowRunSession Begin(FlowDefinition flow, ICamera camera, bool captureFrames = false)
+        public FlowRunSession Begin(FlowDefinition flow, ICamera camera, bool captureFrames = false, bool clearAutoRefs = true)
         {
+            // 每次「运行」开始前清空位置修正 Auto 基准缓存，避免上一轮示教的基准泄漏到
+            // 本轮，造成仿射变换基准错位（图像偏移 / 修正缺失）。
+            // 连续运行由调用方在循环外清空一次、循环内传 false，保证单轮连续运行的
+            // 「首次示教」基准不被每帧清空（见 FlowRunController.LoopCore）。
+            if (clearAutoRefs) ClearAutoReferences();
+
             var s = new FlowRunSession();
             s.Flow = flow;
             s.Camera = camera;
@@ -328,6 +334,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.ResultOutput: return RunResultOutput(s, node, p);
                 case FlowNodeType.ImageFilter:  return RunImageFilter(s, node, p);
                 case FlowNodeType.ColorExtractor: return RunColorExtractor(s, node, p);
+                case FlowNodeType.ObjectDetect:  return RunObjectDetect(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -696,6 +703,74 @@ namespace VisionPlatform.Flow
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "颜色提取：命中 {0} 个区域，面积占比 {1:F1}%，平均 BGR({2:F0},{3:F0},{4:F0})",
                 kept.Count, r.Ratio * 100.0, r.MeanB, r.MeanG, r.MeanR);
+            return true;
+        }
+
+        // ---------------------- 目标识别（OpenVINO YOLO，原生 va_det_*）----------------------
+
+        private bool RunObjectDetect(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "目标识别：无输入帧";
+                return true;
+            }
+
+            // YOLO 需要彩色输入：优先用会话维护的彩色帧（ColorInput，接在图像源后即为原彩图），
+            // 否则退回当前帧（原生侧会自动把灰度 / 4 通道转成 BGR 再推理，但精度不如直接喂彩图）。
+            Bitmap input = (s.ColorInput != null) ? s.ColorInput : s.Current;
+
+            var dp = new DetectParam
+            {
+                ModelPath = node.GetString("ModelPath", "models/yolo11n.onnx"),
+                Device = node.GetString("Device", "CPU"),
+                ScoreThresh = (float)node.GetDouble("ScoreThresh", 0.25),
+                IouThresh = (float)node.GetDouble("IouThresh", 0.45),
+                MaxCount = node.GetInt("MaxCount", 100)
+            };
+
+            OpResult<DetectOutput> dr = _algo.Detect(input, dp);
+            if (!dr.Success)
+            {
+                p.Summary = "目标识别：" + Tail(dr.Message);
+                return false;
+            }
+
+            DetectOutput outp = dr.Value;
+            if (outp == null || outp.Detections == null) outp = new DetectOutput();
+
+            // 画布叠加层：每个检测框（置信度最高的高亮），类别名写入形状 Name 供画布提示
+            int idx = 0;
+            foreach (DetectResult d in outp.Detections)
+            {
+                bool primary = (outp.Best != null) && object.ReferenceEquals(d, outp.Best);
+                IGeometryShape box = FlowShapes.DetectBox(d.X, d.Y, d.Width, d.Height, primary);
+                if (box != null) box.Name = d.ClassName + " " + d.Score.ToString("F2", CultureInfo.InvariantCulture);
+                p.Shapes.Add(box);
+                idx++;
+            }
+
+            // 预览帧：克隆当前工作帧供流程预览区显示（检测不修改原图，叠加层由画布绘制）
+            if (s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
+            // 摘要：检测数量 + 前若干类别（置信度）
+            string top = "";
+            int show = Math.Min(outp.Detections.Count, 5);
+            for (int i = 0; i < show; i++)
+            {
+                DetectResult d = outp.Detections[i];
+                top += (i == 0 ? "" : "、")
+                     + d.ClassName + " " + d.Score.ToString("F2", CultureInfo.InvariantCulture);
+            }
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "目标识别：检测到 {0} 个目标{1}", outp.Detections.Count,
+                show > 0 ? "（" + top + (outp.Detections.Count > show ? "…" : "") + "）" : "");
             return true;
         }
 

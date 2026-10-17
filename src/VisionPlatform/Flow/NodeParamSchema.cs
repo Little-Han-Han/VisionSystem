@@ -226,6 +226,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.Sharpness:       return Sharpness();
                 case FlowNodeType.FitCircle:       return Fit("圆拟合");
                 case FlowNodeType.FitLine:         return Fit("直线拟合");
+                case FlowNodeType.ObjectDetect:    return ObjectDetect();
                 default:                           return null;
             }
         }
@@ -507,6 +508,28 @@ namespace VisionPlatform.Flow
 
             t.Fields.Add(Group("显示"));
             t.Fields.Add(Bool("DrawShape", "绘制拟合结果", "1"));
+            return t;
+        }
+
+        /// <summary>目标识别（OpenVINO YOLO）：模型路径 / 设备 / 阈值 / 最大目标数。</summary>
+        private static NodeParamTable ObjectDetect()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.ObjectDetect, Title = "目标识别" };
+
+            t.Fields.Add(Group("模型"));
+            t.Fields.Add(File("ModelPath", "模型文件(.onnx)",
+                "Ultralytics 导出的 YOLO ONNX；同目录放 &lt;模型名&gt;.txt 可自定义类别名，否则用 COCO 80 类"));
+            t.Fields.Add(Enum("Device", "推理设备", "CPU",
+                new[] { "CPU", "GPU" }, new[] { "CPU", "GPU" },
+                "GPU 需 OpenVINO 带对应设备插件；留空或 CPU 走 CPU 推理"));
+
+            t.Fields.Add(Group("检测参数"));
+            t.Fields.Add(Dbl("ScoreThresh", "置信度阈值", 0, 1, 2, 0.05m, "0.25", "低于该分数的框被丢弃"));
+            t.Fields.Add(Dbl("IouThresh", "NMS IoU 阈值", 0, 1, 2, 0.05m, "0.45", "同类框重叠度高于该值则合并"));
+            t.Fields.Add(Int("MaxCount", "最多目标数", 1, 1000, "100"));
+
+            t.FooterNote = "输入需为彩色图像（直接接图像源之后效果最佳）；检测框以叠加层显示在画布上，"
+                         + "输出图像原样向下传递，可串联 Blob / 卡尺等下游节点。";
             return t;
         }
     }

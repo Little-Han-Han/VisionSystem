@@ -44,7 +44,12 @@ namespace VisionPlatform.Flow
         ImageFilter,
 
         /// <summary>颜色提取（原生 va_color_extract）：BGR / HSV 阈值分割 → 连通域统计。</summary>
-        ColorExtractor
+        ColorExtractor,
+
+        // ===== 本期追加（追加在末尾，保证既有序号与字符串不变）=====
+
+        /// <summary>目标识别（OpenVINO YOLO，原生 va_det_*）：深度学习目标检测，输出检测框（类别 / 分数 / 坐标）。</summary>
+        ObjectDetect
     }
 
     /// <summary>
