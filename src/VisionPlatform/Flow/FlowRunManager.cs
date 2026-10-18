@@ -99,6 +99,16 @@ namespace VisionPlatform.Flow
         /// </summary>
         public static OpResult StartOne(string flowId)
         {
+            return StartOne(flowId, false);
+        }
+
+        /// <summary>
+        /// 启动一条流程。<paramref name="ignoreLimit"/>=true 时跳过并行上限检查——
+        /// 仅供 <see cref="StartAll"/> 使用，确保「当前产品 &amp; Enabled」的全部流程都能并行跑起来
+        /// （满足主界面连续运行「所有流程同步运行」的诉求），而单条启动仍受上限约束。
+        /// </summary>
+        public static OpResult StartOne(string flowId, bool ignoreLimit)
+        {
             FlowDefinition flow = FindFlow(flowId);
             if (flow == null) return OpResult.Fail("流程不存在（Id=" + (flowId ?? "") + "），请刷新流程列表");
 
@@ -133,10 +143,13 @@ namespace VisionPlatform.Flow
                 }
             }
 
-            // 5) 并行上限（超限直接拒绝，不排队）
-            int limit = MaxParallelFlows;
-            if (RunningCount >= limit)
-                return OpResult.Fail("已达最大并行数 " + limit + "，请先停止其它流程");
+            // 5) 并行上限（超限直接拒绝，不排队）；批量 StartAll 显式 ignoreLimit 以"跑全部流程"
+            if (!ignoreLimit)
+            {
+                int limit = MaxParallelFlows;
+                if (RunningCount >= limit)
+                    return OpResult.Fail("已达最大并行数 " + limit + "，请先停止其它流程");
+            }
 
             // 6) 未重复启动
             FlowRunSlot existing = Get(flowId);
@@ -257,7 +270,7 @@ namespace VisionPlatform.Flow
             {
                 if (f == null) continue;
 
-                OpResult r = StartOne(f.Id);
+                OpResult r = StartOne(f.Id, true);
                 if (r != null && r.Success) { started++; continue; }
 
                 string why = r != null ? (r.Message ?? "") : "";
@@ -285,6 +298,19 @@ namespace VisionPlatform.Flow
             {
                 if (s == null) continue;
                 try { s.SetPaused(true); }
+                catch (Exception) { }
+            }
+            RaiseStatusChanged();
+        }
+
+        /// <summary>继续全部已暂停的流程（PauseAll 的逆操作）。</summary>
+        public static void ResumeAll()
+        {
+            List<FlowRunSlot> slots = Snapshot();
+            foreach (FlowRunSlot s in slots)
+            {
+                if (s == null) continue;
+                try { s.SetPaused(false); }
                 catch (Exception) { }
             }
             RaiseStatusChanged();
@@ -388,6 +414,32 @@ namespace VisionPlatform.Flow
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 当前产品过滤后是否存在 Enabled=true 的流程。
+        /// 供主界面「全部启动」按钮可用性判断——无可启动流程时禁用该按钮（共享知识 37）。
+        /// </summary>
+        public static bool HasEnabledFlowsOfCurrentProduct()
+        {
+            try
+            {
+                FlowSettings fs = ConfigStore.Current.Flows;
+                if (fs == null || fs.Flows == null) return false;
+
+                string product = ConfigStore.Current.Ui.CurrentProduct ?? "";
+                List<FlowDefinition> filtered = FlowModule.FilterByProduct(fs.Flows, product);
+                foreach (FlowDefinition f in filtered)
+                {
+                    if (f != null && f.Enabled) return true;
+                }
+            }
+            catch (Exception)
+            {
+                // 读取失败按"无可启动流程"兜底，避免误启用按钮
+            }
+
+            return false;
         }
 
         private static FlowDefinition FindFlow(string flowId)
