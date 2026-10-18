@@ -543,7 +543,7 @@ namespace VisionPlatform.Flow
 
             t.Fields.Add(Group("模型"));
             t.Fields.Add(File("ModelPath", "模型文件(.onnx)",
-                "Ultralytics 导出的 YOLO ONNX；必须在同目录放置 &lt;模型名&gt;.txt（每行一个类别名），缺失将报错"));
+                "Ultralytics 导出的 YOLO ONNX；同目录可放 &lt;模型名&gt;.txt（每行一个类别名）自定义标签，缺省自动回退 COCO-80 / class_N"));
             t.Fields.Add(Enum("Device", "推理设备", "CPU",
                 new[] { "CPU", "GPU" }, new[] { "CPU", "GPU" },
                 "GPU 需 OpenVINO 带对应设备插件；留空或 CPU 走 CPU 推理"));

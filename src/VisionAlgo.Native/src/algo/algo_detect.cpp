@@ -41,6 +41,25 @@ bool LoadNames(const std::string& modelPath, std::vector<std::string>& names)
     return !names.empty();
 }
 
+// 内嵌 COCO-80 类别名（Ultralytics 默认导出顺序）。仅当侧车 .txt 缺失且
+// 模型恰为 80 类时使用，避免「无标签文件即报错」导致插件无法运行。
+const std::vector<std::string>& Coco80()
+{
+    static const std::vector<std::string> kCoco = {
+        "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat",
+        "traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog",
+        "horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella",
+        "handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite",
+        "baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle",
+        "wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange",
+        "broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant",
+        "bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone",
+        "microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors",
+        "teddy bear","hair drier","toothbrush"
+    };
+    return kCoco;
+}
+
 // letterbox 缩放 + BGR→RGB + /255 + HWC→NCHW，写入 blob（容量 3*inW*inH）。
 // 同时回传 scale 与 pad，供推理后把目标框还原到原图坐标。
 void Preprocess(const cv::Mat& bgr, int inW, int inH, std::vector<float>& blob,
@@ -160,12 +179,17 @@ int DetCreate(Context* ctx, const char* model_path, const char* device)
         ov::CompiledModel compiled = ctx->det.core.compile_model(model, dev);
         ov::InferRequest infer = compiled.create_infer_request();
 
-        // 类别名：必须提供与模型同名的 .txt 侧车文件（每行一个类别名）。缺失即报错。
+        // 类别名：优先使用与模型同名的 .txt 侧车文件（每行一个类别名）。
+        // 侧车缺失时不再直接报错：80 类回退内嵌 COCO 名称，其余回退 class_N，
+        // 以保证插件在仅有 .onnx 时也能正常运行（自定义模型仍可放 .txt 覆盖）。
         std::vector<std::string> names;
-        if (!LoadNames(model_path, names)) {
-            SetError(ctx, ("类别文件未找到：请在模型同目录放置 " + std::string(model_path) +
-                           " 去扩展名后的 .txt（每行一个类别名）").c_str());
-            return VA_ERR_ARG;
+        bool usedSidecar = LoadNames(model_path, names);
+        if (!usedSidecar) {
+            if (numClasses == 80) {
+                names = Coco80();
+                usedSidecar = false; // 走内嵌 COCO
+            }
+            // 其余情况 names 为空，下面按 class_N 补齐
         }
         // 类别数不足时按 class_N 补齐，避免越界
         while ((int)names.size() < numClasses)
