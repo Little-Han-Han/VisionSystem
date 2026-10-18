@@ -274,7 +274,13 @@ namespace VisionPlatform.Flow
         public FlowProgressSnapshot TryTakePending(bool selectedNodeMode)
         {
             if (selectedNodeMode && _selectedNodeId != "")
-                return Interlocked.Exchange(ref _nodeSlot, null);
+            {
+                FlowProgressSnapshot sel = Interlocked.Exchange(ref _nodeSlot, null);
+                if (sel != null) return sel;
+                // 连续运行只发布链尾快照、不写节点专用槽：选中节点时回落到链尾帧，
+                // 否则（实测）预览会整帧静止。单帧/单步仍走节点槽，不受影响。
+                return Interlocked.Exchange(ref _pending, null);
+            }
 
             return Interlocked.Exchange(ref _pending, null);
         }

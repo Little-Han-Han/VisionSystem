@@ -1473,8 +1473,8 @@ namespace VisionPlatform.UI
             string sel = _selectedNode != null ? _selectedNode.Id : "";
             if (!string.IsNullOrEmpty(sel) && !string.Equals(snap.NodeId, sel, StringComparison.Ordinal))
             {
-                // 看的是某个节点，但整链跑完了：结论照旧更新到底部
-                if (snap.IsChainEnd) resultPanel.ApplyVerdict(snap);
+                // 看的是某个节点，但整链跑完了：连续运行下仍要实时刷新完整结果（矩形/阈值/类别等）
+                if (snap.IsChainEnd) { resultPanel.Apply(snap); return; }
                 return;
             }
 
@@ -1521,14 +1521,20 @@ namespace VisionPlatform.UI
             }
         }
 
-        /// <summary>流程结果回传：取消时丢弃帧，否则转发给通道（由主界面消费并释放帧）。</summary>
+        /// <summary>
+        /// 流程结果回传：把流程编排页发起的运行（运行 / 单步 / 连续）的最终结果转发到
+        /// <see cref="FlowOutputChannel"/>，使主界面图像视图也能叠加显示矩形框 / 阈值 / 类别等结果。
+        /// 帧释放契约与 MainForm.OnFlowRunnerOutput 完全一致：有订阅者时由主界面 OnFlowOutput
+        /// 克隆帧并显示、在 finally 中释放原帧；无订阅者（主界面已关闭）时由本方法就地释放，避免泄漏。
+        /// 连续运行每周期经此桥接一次，主视图即可实时刷新 YOLO 等节点产出（Issue 2）。
+        /// </summary>
         private void OnRunnerOutput(object sender, FlowOutputEventArgs e)
         {
-            // 流程编排页发起的运行（运行 / 单步 / 单节点）只在预览区展示（快照路径），
-            // 不再发布到 FlowOutputChannel——主界面视图不显示流程编排发起的运行（用户需求）。
-            // 并行引擎（FlowRunSlot）与主界面下拉运行的发布不受影响，仍会显示在主视图。
-            // 本事件无其它消费者，帧就地释放，避免泄漏。
-            if (e != null && e.Frame != null)
+            if (e == null) return;
+
+            // 预览面板走独立快照路径（_pending / _nodeSlot 持有链尾克隆帧），此处只负责把最终结果
+            // 桥接给主视图。主视图会克隆帧、故转发方不可重复释放——与 Publish 的返回值契约一致。
+            if (!FlowOutputChannel.Publish(e) && e.Frame != null)
                 e.Frame.Dispose();
         }
 
