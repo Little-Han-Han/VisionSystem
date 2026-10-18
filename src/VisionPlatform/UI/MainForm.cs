@@ -899,22 +899,18 @@ namespace VisionPlatform.UI
         #region 运行控制
 
         /// <summary>
-        /// 循环运行的前置条件：至少一个相机已打开且处于连接状态；
-        /// 若设置中开启了通讯校验，还要求至少有一条通讯链路可用。
+        /// 循环运行的前置条件（诉求 2 改写）：现在循环运行只启动「当前产品过滤 &amp; Enabled」的
+        /// 全部流程（含本地图片源，无需相机），因此相机不再是硬性要求——流程自身会按需校验相机；
+        /// 若设置中开启了通讯校验，仍要求至少有一条通讯链路可用。
         /// </summary>
         private bool CanRunLoop(out string reason)
         {
             reason = null;
 
-            int opened = 0;
-            foreach (ICamera cam in CameraManager.Instance.OpenedCameras)
+            // 诉求 2：存在可启动（已启用且属于当前产品）的流程才允许启动；本地图片源流程无需相机。
+            if (!FlowRunManager.HasEnabledFlowsOfCurrentProduct())
             {
-                if (cam != null && cam.IsOpen) opened++;
-            }
-
-            if (opened == 0)
-            {
-                reason = "没有已打开的相机，请先在「相机管理」中打开相机，然后再启动循环运行。";
+                reason = "当前产品没有可启动（已启用）的流程，请先在「流程编排」中启用流程，再启动循环运行。";
                 return false;
             }
 
@@ -942,16 +938,32 @@ namespace VisionPlatform.UI
 
             if (_running)
             {
+                // 续跑（之前被暂停）：恢复全部已暂停的流程
                 _paused = false;
-                loopTimer.Start();
-                Logger.Info("继续循环运行");
+                try { FlowRunManager.ResumeAll(); }
+                catch (Exception ex) { Logger.Warn("恢复流程失败：" + ex.Message); }
+                Logger.Info("继续循环运行（全部流程）");
             }
             else
             {
+                // 诉求 2：启动「当前产品 & Enabled」的全部流程，各自独立线程并行运行（≤30fps），
+                // 结果经 FlowOutputChannel 显示到主视图；本地图片源流程无需相机即可运行。
+                // 旧配方检测（SyncGrabCore / loopTimer）已不再使用。
                 _running = true;
                 _paused = false;
-                loopTimer.Start();
-                Logger.Info("开始循环运行");
+                var r = FlowRunManager.StartAll();
+                if (r == null || !r.Success)
+                {
+                    _running = false;
+                    string msg = r != null ? r.Message : "启动流程失败";
+                    Logger.Warn("循环运行启动失败：" + msg);
+                    MessageBox.Show(this, msg, "循环运行启动失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    Logger.Info("开始循环运行（全部流程）：" + (r.Message ?? ""));
+                }
             }
             UpdateStatus();
         }
@@ -961,7 +973,13 @@ namespace VisionPlatform.UI
             if (!_running) return;
 
             _paused = !_paused;
-            if (_paused) loopTimer.Stop(); else loopTimer.Start();
+            // 诉求 2：暂停/继续映射到全部流程的 PauseAll/ResumeAll（旧 loopTimer 已弃用）
+            try
+            {
+                if (_paused) FlowRunManager.PauseAll();
+                else FlowRunManager.ResumeAll();
+            }
+            catch (Exception ex) { Logger.Warn("暂停/继续流程失败：" + ex.Message); }
 
             Logger.Info(_paused ? "已暂停" : "已继续");
             UpdateStatus();
@@ -969,6 +987,9 @@ namespace VisionPlatform.UI
 
         private void OnStop(object sender, EventArgs e)
         {
+            // 诉求 2：停止全部并行流程（并行 Join + 释放各自执行器）；旧 loopTimer 一并停掉
+            try { FlowRunManager.StopAll(); }
+            catch (Exception ex) { Logger.Warn("停止流程失败：" + ex.Message); }
             loopTimer.Stop();
             _running = false;
             _paused = false;
