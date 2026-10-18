@@ -188,8 +188,6 @@ namespace VisionPlatform.Flow
             bool ok;
             try
             {
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] 执行节点 " + p.Index + "/" + p.Total + " " + node.Name + "（" + type + "）");
                 ok = ExecuteNode(session, node, type, p);
             }
             catch (Exception ex)
@@ -468,7 +466,7 @@ namespace VisionPlatform.Flow
 
                 // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
                 // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
-                if (s.Current != null)
+                if (s.CaptureFrames && s.Current != null)
                 {
                     if (p.Frame != null) p.Frame.Dispose();
                     try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -515,7 +513,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -598,7 +596,7 @@ namespace VisionPlatform.Flow
                 handed = true;
 
                 // 预览帧：与预处理同款，显式克隆当前帧供流程预览区显示
-                if (s.Current != null)
+                if (s.CaptureFrames && s.Current != null)
                 {
                     if (p.Frame != null) p.Frame.Dispose();
                     try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -705,7 +703,7 @@ namespace VisionPlatform.Flow
             }
 
             // 预览帧：输出掩膜时显示掩膜，否则显示原彩色帧
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -767,7 +765,7 @@ namespace VisionPlatform.Flow
             }
 
             // 预览帧：克隆当前工作帧供流程预览区显示（检测不修改原图，叠加层由画布绘制）
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -890,10 +888,14 @@ namespace VisionPlatform.Flow
                 if (charCount <= 0 && text.Length > 0)
                     charCount = text.Replace("\n", "").Replace("\r", "").Length;
 
-                // ⑥ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）
-                if (p.Frame != null) p.Frame.Dispose();
-                try { p.Frame = (Bitmap)s.Current.Clone(); }
-                catch (Exception) { p.Frame = null; }
+                // ⑥ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）。
+                // 连续运行（CaptureFrames=false）下预览区不显示单节点帧，跳过以免每周期徒增一张整幅克隆（LOH 压力→卡顿）。
+                if (s.CaptureFrames && s.Current != null)
+                {
+                    if (p.Frame != null) p.Frame.Dispose();
+                    try { p.Frame = (Bitmap)s.Current.Clone(); }
+                    catch (Exception) { p.Frame = null; }
+                }
 
                 // ⑦ 摘要
                 string shown = text.Replace("\r", "").Replace("\n", "⏎");
@@ -1080,9 +1082,13 @@ namespace VisionPlatform.Flow
         {
             if (s.Current == null) return;
 
-            if (p.Frame != null) p.Frame.Dispose();
-            try { p.Frame = (Bitmap)s.Current.Clone(); }
-            catch (Exception) { p.Frame = null; }
+            // 连续运行（CaptureFrames=false）下不克隆单节点预览帧，避免每周期 LOH 压力导致卡顿
+            if (s.CaptureFrames)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
         }
 
         /// <summary>
@@ -1223,7 +1229,7 @@ namespace VisionPlatform.Flow
         {
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -1382,10 +1388,13 @@ namespace VisionPlatform.Flow
                 // 修正已烘进像素：复位坐标重映射，下游 ROI 不做二次变换
                 s.Transform.Reset();
 
-                // 预览帧刷新为修正后的图像
-                if (p.Frame != null) p.Frame.Dispose();
-                try { p.Frame = (Bitmap)s.Current.Clone(); }
-                catch (Exception) { p.Frame = null; }
+                // 预览帧刷新为修正后的图像。连续运行（CaptureFrames=false）下跳过克隆，避免每周期 LOH 压力导致卡顿
+                if (s.CaptureFrames && s.Current != null)
+                {
+                    if (p.Frame != null) p.Frame.Dispose();
+                    try { p.Frame = (Bitmap)s.Current.Clone(); }
+                    catch (Exception) { p.Frame = null; }
+                }
 
                 p.Summary += "（已对齐回基准姿态）";
             }
@@ -1500,7 +1509,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -1622,7 +1631,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -1752,7 +1761,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -1936,7 +1945,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -2034,7 +2043,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -2136,7 +2145,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -2166,7 +2175,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
@@ -2211,7 +2220,7 @@ namespace VisionPlatform.Flow
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该检测节点的结果图。
-            if (s.Current != null)
+            if (s.CaptureFrames && s.Current != null)
             {
                 if (p.Frame != null) p.Frame.Dispose();
                 try { p.Frame = (Bitmap)s.Current.Clone(); }

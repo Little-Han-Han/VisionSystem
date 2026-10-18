@@ -302,8 +302,6 @@ namespace VisionPlatform.Flow
 
             _selectedNodeId = nodeId;
 
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] SetSelectedNode '" + nodeId + "'");
 
             FlowProgressSnapshot old = Interlocked.Exchange(ref _nodeSlot, null);
             if (old != null) old.ReleaseFrame();
@@ -375,8 +373,6 @@ namespace VisionPlatform.Flow
                         _mode = RunMode.Idle;
                     }
 
-                    // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                    Logger.Info("[预览诊断] 运行线程退出");
 
                     EventHandler done = Completed;
                     if (done != null)
@@ -406,9 +402,6 @@ namespace VisionPlatform.Flow
             {
                 s = _runner.Begin(flow, camera, true);
 
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] Begin aborted=" + s.Aborted +
-                            (s.Aborted ? (" msg=" + s.ErrorMessage) : ""));
 
                 if (s.Aborted)
                 {
@@ -420,17 +413,12 @@ namespace VisionPlatform.Flow
                 while ((p = _runner.StepNext(s)) != null)
                 {
                     PublishNode(s, p, false, 0.0, 0.0);
-                    if (_stop) { Logger.Info("[预览诊断] _stop 中途返回"); return; }
+                    if (_stop) { return; }
                 }
 
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] 节点循环结束");
                 FlowRunResult res = _runner.Finish(s);
-                Logger.Info("[预览诊断] Finish 完成 passed=" + res.Passed + " summary='" + res.Summary + "'");
                 Bitmap previewFrame = CloneOrNull(s.Current);
-                Logger.Info("[预览诊断] previewFrame=" + (previewFrame != null));
                 PublishChainEnd(s, res, previewFrame, 0.0, 0.0);
-                Logger.Info("[预览诊断] 链尾已投递");
 
                 // 仅在整链正常收尾时回传主界面（与 FlowRunner.Run 口径一致）；
                 // 帧所有权移交订阅者，无人订阅时由 PublishOutput 释放
@@ -458,9 +446,6 @@ namespace VisionPlatform.Flow
             {
                 s = _runner.Begin(flow, camera, true);
 
-                // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-                Logger.Info("[预览诊断] Begin aborted=" + s.Aborted +
-                            (s.Aborted ? (" msg=" + s.ErrorMessage) : ""));
 
                 if (s.Aborted)
                 {
@@ -740,9 +725,6 @@ namespace VisionPlatform.Flow
                 keep = false;   // 无槽可去（未选中 / 非选中节点）：广播完进度立即释放帧
             }
 
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] PushNode node=" + snap.NodeId + " sel='" + _selectedNodeId +
-                        "' keep=" + keep + " hasFrame=" + (snap.Frame != null));
 
             EventHandler<FlowProgressEventArgs> h = ProgressReady;
             if (h != null)
@@ -762,9 +744,6 @@ namespace VisionPlatform.Flow
             FlowProgressSnapshot old = Interlocked.Exchange(ref _pending, snap);
             if (old != null) old.ReleaseFrame();
 
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] PushChainEnd node=" + snap.NodeId + " chainEnd=" + snap.IsChainEnd +
-                        " hasFrame=" + (snap.Frame != null) + " err='" + snap.ErrorMessage + "'");
 
             EventHandler<FlowProgressEventArgs> h = ProgressReady;
             if (h != null)
