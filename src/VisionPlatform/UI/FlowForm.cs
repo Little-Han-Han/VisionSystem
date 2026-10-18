@@ -1568,7 +1568,11 @@ namespace VisionPlatform.UI
 
         private void SetStatus(string text)
         {
-            if (lblRunStatus != null) lblRunStatus.Text = text;
+            if (lblRunStatus == null) return;
+            lblRunStatus.Text = text ?? "";
+            // 多行报错（如原生 OpenCV 异常）可能很长：滚到顶部并显示完整文本
+            lblRunStatus.SelectionStart = 0;
+            lblRunStatus.ScrollToCaret();
         }
 
         /// <summary>简易文本输入对话框（避免引入额外依赖）。取消返回 null。</summary>

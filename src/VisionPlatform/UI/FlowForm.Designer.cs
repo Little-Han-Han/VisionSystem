@@ -38,7 +38,7 @@ namespace VisionPlatform.UI
             this.btnRunNode = new VisionPlatform.UI.UiButton();
             this.btnStop = new VisionPlatform.UI.UiButton();
             this.btnAutoLayout = new VisionPlatform.UI.UiButton();
-            this.lblRunStatus = new System.Windows.Forms.Label();
+            this.lblRunStatus = new System.Windows.Forms.TextBox();
             this.grpFlows = new System.Windows.Forms.GroupBox();
             this.lstFlows = new System.Windows.Forms.ListBox();
             this.btnNewFlow = new VisionPlatform.UI.UiButton();
@@ -370,7 +370,12 @@ namespace VisionPlatform.UI
             this.lblRunStatus.ForeColor = System.Drawing.Color.Silver;
             this.lblRunStatus.Location = new System.Drawing.Point(12, 104);
             this.lblRunStatus.Name = "lblRunStatus";
-            this.lblRunStatus.Size = new System.Drawing.Size(740, 22);
+            this.lblRunStatus.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.lblRunStatus.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.lblRunStatus.Multiline = true;
+            this.lblRunStatus.ReadOnly = true;
+            this.lblRunStatus.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.lblRunStatus.Size = new System.Drawing.Size(740, 28);
             this.lblRunStatus.TabIndex = 10;
             this.lblRunStatus.Text = "就绪";
             // 
@@ -547,7 +552,7 @@ namespace VisionPlatform.UI
         private VisionPlatform.UI.UiButton btnRunNode;
         private VisionPlatform.UI.UiButton btnStop;
         private VisionPlatform.UI.UiButton btnAutoLayout;
-        private System.Windows.Forms.Label lblRunStatus;
+        private System.Windows.Forms.TextBox lblRunStatus;
 
         private System.Windows.Forms.SplitContainer splitMain;
         private FlowCanvasControl canvas;

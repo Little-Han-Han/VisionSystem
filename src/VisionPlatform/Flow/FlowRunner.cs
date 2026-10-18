@@ -196,6 +196,8 @@ namespace VisionPlatform.Flow
             {
                 ok = false;
                 p.Summary = node.Name + "：执行异常（" + ex.Message + "）";
+                // 完整异常（含原生 OpenCV 报错里的文件:行号与断言内容）写入日志，便于排查「显示不全」的报错
+                Logger.Error("节点「" + node.Name + "」(" + type + ") 执行异常：" + ex);
             }
             sw.Stop();
 
