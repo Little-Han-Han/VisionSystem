@@ -52,6 +52,21 @@ namespace VisionPlatform.UI
 
             foreach (Control c in root.Controls)
             {
+                // TabControl 自身的标签条由 UiTabControl 自绘（或系统绘制），但其分页
+                // （TabPage）内的子控件仍是普通 WinForms 控件（输入框 / 数值框 / 按钮等），
+                // 必须继续下探套用主题，否则分页里的控件会残留系统浅色。
+                // 注意：UiTabControl 被 IsSelfDrawn 整棵跳过，故在此特判，不要让它走到 continue。
+                TabControl tc = c as TabControl;
+                if (tc != null)
+                {
+                    foreach (TabPage page in tc.TabPages)
+                    {
+                        UiTabControl.StylePage(page);
+                        ApplyTree(page);
+                    }
+                    continue;
+                }
+
                 if (IsSelfDrawn(c)) continue;
 
                 ApplyOne(c);

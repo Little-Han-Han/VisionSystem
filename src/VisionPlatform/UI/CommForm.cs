@@ -133,7 +133,7 @@ namespace VisionPlatform.UI
             btnMbRead.Click += OnModbusRead;
             btnMbWrite.Click += OnModbusWrite;
 
-            cboKind.SelectedIndexChanged += OnKindChanged;
+            tabProtocol.SelectedIndexChanged += OnKindChanged;
             chkEnabled.CheckedChanged += OnEnabledChanged;
             chkAutoConnect.CheckedChanged += OnAutoConnectChanged;
 
@@ -208,7 +208,7 @@ namespace VisionPlatform.UI
             {
                 _currentName = cfg.Name;
                 txtName.Text = cfg.Name;
-                cboKind.SelectedIndex = KindIndex(cfg.Kind);
+                tabProtocol.SelectedIndex = KindIndex(cfg.Kind);
                 txtHost.Text = cfg.Host;
                 numPort.Value = cfg.Port;
                 numSlaveId.Value = cfg.SlaveId;
@@ -227,10 +227,7 @@ namespace VisionPlatform.UI
         {
             string kind = SelectedKind();
 
-            // 每种协议只显示自己那一栏操作区（三个面板位置重叠，靠 Visible 互斥）
-            panelTcpClient.Visible = kind == CommKind.TcpClient;
-            panelTcpServer.Visible = kind == CommKind.TcpServer;
-            panelModbus.Visible = kind == CommKind.ModbusTcp;
+            // 三个面板已各自作为 tabProtocol 的一页，由分页自身控制显隐，无需手动切换 Visible
 
             // 服务端监听本地端口，不需要目标主机；从站号只有 Modbus 用得上
             lblHost.Enabled = kind != CommKind.TcpServer;
@@ -250,7 +247,7 @@ namespace VisionPlatform.UI
 
         private string SelectedKind()
         {
-            int idx = cboKind.SelectedIndex;
+            int idx = tabProtocol.SelectedIndex;
             if (idx < 0 || idx >= CommKind.All.Length) return CommKind.TcpClient;
             return CommKind.All[idx];
         }

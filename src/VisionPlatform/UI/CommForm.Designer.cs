@@ -28,8 +28,10 @@ namespace VisionPlatform.UI
             this.groupProps = new System.Windows.Forms.GroupBox();
             this.lblName = new System.Windows.Forms.Label();
             this.txtName = new System.Windows.Forms.TextBox();
-            this.lblKind = new System.Windows.Forms.Label();
-            this.cboKind = new System.Windows.Forms.ComboBox();
+            this.tabProtocol = new VisionPlatform.UI.UiTabControl();
+            this.tabPageTcpClient = new System.Windows.Forms.TabPage();
+            this.tabPageTcpServer = new System.Windows.Forms.TabPage();
+            this.tabPageModbus = new System.Windows.Forms.TabPage();
             this.lblHost = new System.Windows.Forms.Label();
             this.txtHost = new System.Windows.Forms.TextBox();
             this.lblPort = new System.Windows.Forms.Label();
@@ -78,6 +80,7 @@ namespace VisionPlatform.UI
             this.panelRight.SuspendLayout();
             this.groupProps.SuspendLayout();
             this.groupOps.SuspendLayout();
+            this.tabProtocol.SuspendLayout();
             this.panelTcpClient.SuspendLayout();
             this.panelTcpServer.SuspendLayout();
             this.panelModbus.SuspendLayout();
@@ -161,7 +164,6 @@ namespace VisionPlatform.UI
             this.groupProps.Text = "通讯属性";
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
             this.groupProps.Controls.Add(this.txtName);
-            this.groupProps.Controls.Add(this.cboKind);
             this.groupProps.Controls.Add(this.txtHost);
             this.groupProps.Controls.Add(this.numPort);
             this.groupProps.Controls.Add(this.numSlaveId);
@@ -172,7 +174,6 @@ namespace VisionPlatform.UI
             this.groupProps.Controls.Add(this.btnDisconnect);
             this.groupProps.Controls.Add(this.btnTest);
             this.groupProps.Controls.Add(this.lblName);
-            this.groupProps.Controls.Add(this.lblKind);
             this.groupProps.Controls.Add(this.lblHost);
             this.groupProps.Controls.Add(this.lblPort);
             this.groupProps.Controls.Add(this.lblSlaveId);
@@ -190,21 +191,7 @@ namespace VisionPlatform.UI
             this.txtName.Size = new System.Drawing.Size(150, 21);
             this.txtName.TabIndex = 1;
 
-            this.lblKind.AutoSize = true;
-            this.lblKind.Location = new System.Drawing.Point(226, 27);
-            this.lblKind.Name = "lblKind";
-            this.lblKind.Size = new System.Drawing.Size(44, 15);
-            this.lblKind.TabIndex = 2;
-            this.lblKind.Text = "类型：";
-            this.lblKind.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-
-            this.cboKind.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cboKind.FormattingEnabled = true;
-            this.cboKind.Items.AddRange(new object[] { "TCP 客户端", "TCP 服务端", "Modbus TCP" });
-            this.cboKind.Location = new System.Drawing.Point(274, 24);
-            this.cboKind.Name = "cboKind";
-            this.cboKind.Size = new System.Drawing.Size(130, 20);
-            this.cboKind.TabIndex = 3;
+            // 协议类型改用 tabProtocol 分页选择，不再使用 cboKind / lblKind
 
             this.lblHost.AutoSize = true;
             this.lblHost.Location = new System.Drawing.Point(12, 57);
@@ -304,12 +291,10 @@ namespace VisionPlatform.UI
             this.groupOps.TabStop = false;
             this.groupOps.Text = "收发测试";
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
-            this.groupOps.Controls.Add(this.panelModbus);
-            this.groupOps.Controls.Add(this.panelTcpServer);
-            this.groupOps.Controls.Add(this.panelTcpClient);
+            this.groupOps.Controls.Add(this.tabProtocol);
 
-            // ---- panelTcpClient ----
-            this.panelTcpClient.Location = new System.Drawing.Point(12, 24);
+            // ---- panelTcpClient（现为 tabProtocol 的一页内容，填满整页）----
+            this.panelTcpClient.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelTcpClient.Name = "panelTcpClient";
             this.panelTcpClient.Size = new System.Drawing.Size(576, 106);
             this.panelTcpClient.TabIndex = 0;
@@ -338,12 +323,11 @@ namespace VisionPlatform.UI
             this.btnSend.Text = "发送";
             this.btnSend.UseVisualStyleBackColor = true;
 
-            // ---- panelTcpServer ----
-            this.panelTcpServer.Location = new System.Drawing.Point(12, 24);
+            // ---- panelTcpServer（现为 tabProtocol 的一页内容，填满整页）----
+            this.panelTcpServer.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelTcpServer.Name = "panelTcpServer";
             this.panelTcpServer.Size = new System.Drawing.Size(576, 106);
             this.panelTcpServer.TabIndex = 1;
-            this.panelTcpServer.Visible = false;
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
             this.panelTcpServer.Controls.Add(this.txtSrvSend);
             this.panelTcpServer.Controls.Add(this.btnBroadcast);
@@ -385,12 +369,11 @@ namespace VisionPlatform.UI
             this.btnStopListen.Text = "停止监听";
             this.btnStopListen.UseVisualStyleBackColor = true;
 
-            // ---- panelModbus ----
-            this.panelModbus.Location = new System.Drawing.Point(12, 24);
+            // ---- panelModbus（现为 tabProtocol 的一页内容，填满整页）----
+            this.panelModbus.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelModbus.Name = "panelModbus";
             this.panelModbus.Size = new System.Drawing.Size(576, 106);
             this.panelModbus.TabIndex = 2;
-            this.panelModbus.Visible = false;
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
             this.panelModbus.Controls.Add(this.numAddr);
             this.panelModbus.Controls.Add(this.numCount);
@@ -459,6 +442,22 @@ namespace VisionPlatform.UI
             this.btnMbWrite.Text = "写 0x06";
             this.btnMbWrite.UseVisualStyleBackColor = true;
 
+            // ---------- tabProtocol：用分页取代 cboKind + 三个互斥 Panel ----------
+            this.tabProtocol.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tabProtocol.Name = "tabProtocol";
+            this.tabProtocol.SelectedIndex = 0;
+            this.tabProtocol.TabIndex = 0;
+            this.tabPageTcpClient.Text = "TCP 客户端";
+            this.tabPageTcpServer.Text = "TCP 服务端";
+            this.tabPageModbus.Text = "Modbus TCP";
+            this.tabPageTcpClient.Controls.Add(this.panelTcpClient);
+            this.tabPageTcpServer.Controls.Add(this.panelTcpServer);
+            this.tabPageModbus.Controls.Add(this.panelModbus);
+            this.tabProtocol.Controls.Add(this.tabPageTcpClient);
+            this.tabProtocol.Controls.Add(this.tabPageTcpServer);
+            this.tabProtocol.Controls.Add(this.tabPageModbus);
+            this.tabProtocol.StyleAllPages();
+
             // ---------- groupLog：日志 ----------
             this.groupLog.Dock = System.Windows.Forms.DockStyle.Fill;
             this.groupLog.Location = new System.Drawing.Point(8, 332);
@@ -502,6 +501,7 @@ namespace VisionPlatform.UI
             this.panelRight.ResumeLayout(false);
             this.groupProps.ResumeLayout(false);
             this.groupProps.PerformLayout();
+            this.tabProtocol.ResumeLayout(false);
             this.groupOps.ResumeLayout(false);
             this.panelTcpClient.ResumeLayout(false);
             this.panelTcpClient.PerformLayout();
@@ -527,8 +527,10 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.GroupBox groupProps;
         private System.Windows.Forms.Label lblName;
         private System.Windows.Forms.TextBox txtName;
-        private System.Windows.Forms.Label lblKind;
-        private System.Windows.Forms.ComboBox cboKind;
+        private VisionPlatform.UI.UiTabControl tabProtocol;
+        private System.Windows.Forms.TabPage tabPageTcpClient;
+        private System.Windows.Forms.TabPage tabPageTcpServer;
+        private System.Windows.Forms.TabPage tabPageModbus;
         private System.Windows.Forms.Label lblHost;
         private System.Windows.Forms.TextBox txtHost;
         private System.Windows.Forms.Label lblPort;
