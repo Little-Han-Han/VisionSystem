@@ -19,9 +19,33 @@ namespace VisionPlatform.UI
     /// 【不持有连接】窗体本身不再 new 连接对象，全部通过 <see cref="CommRegistry"/> 按名称操作，
     /// 因此窗体关闭不会掉线，流程节点与窗体看到的是同一条链路。
     /// </para>
+    /// <para>
+    /// 【TCP 客户端 / 服务端已整合】<see cref="tabProtocol"/> 只有两页（TCP 通信 / Modbus TCP），
+    /// TCP 页同屏给出「客户端发送」与「服务端广播 + 监听」两组，按「角色」
+    /// （<see cref="cboRole"/>）只改 Enabled，不再靠切换分页来切换协议。
+    /// 协议类型由 <see cref="SelectedKind"/> 显式判定，<strong>不再按分页下标映射</strong>
+    /// <see cref="CommKind.All"/>，避免删页后错位。
+    /// </para>
+    /// <para>
+    /// 【接收显示】<see cref="txtRecv"/> 是 TCP 与 Modbus 共用的只读多行区，
+    /// 由 <see cref="CommRegistry.LastReceived"/> 驱动，带时间戳、限 300 行、150 ms 合流刷新，
+    /// 防止后台高频回传逐条刷 UI 把主线程淹没。
+    /// </para>
     /// </summary>
     public partial class CommForm : Form
     {
+        /// <summary>tabProtocol 里「TCP 通信」页的下标。</summary>
+        private const int TabIndexTcp = 0;
+
+        /// <summary>tabProtocol 里「Modbus TCP」页的下标。</summary>
+        private const int TabIndexModbus = 1;
+
+        /// <summary>接收区最多保留的行数，超出丢弃最旧的（防止无限增长拖垮界面）。</summary>
+        private const int MaxRecvLines = 300;
+
+        /// <summary>接收区合流刷新间隔（毫秒）：高频回传时最多每 150 ms 刷一次界面。</summary>
+        private const int RecvFlushIntervalMs = 150;
+
         /// <summary>当前正在编辑的通讯名（空 = 没有选中任何一条）。</summary>
         private string _currentName = "";
 
@@ -30,6 +54,15 @@ namespace VisionPlatform.UI
 
         /// <summary>注册表变更回调（用于 OnFormClosing 精确退订，避免非模态窗体反复开关后泄漏）。</summary>
         private EventHandler _registryHandler;
+
+        /// <summary>接收区待刷新的文本缓冲（后台事件只入队，UI 线程定时批量刷）。</summary>
+        private readonly StringBuilder _recvPending = new StringBuilder();
+
+        /// <summary>接收区合流刷新定时器（WinForms Timer，Tick 在 UI 线程）。</summary>
+        private Timer _recvTimer;
+
+        /// <summary>上一次已显示的收到文本：注册表事件也会因连接状态变化而触发，用它去重。</summary>
+        private string _lastRecvText = "";
 
         public CommForm()
         {
@@ -41,6 +74,10 @@ namespace VisionPlatform.UI
 
             // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
             UiTitleBar.Attach(this);
+
+            InitRoleCombo();
+            InitModbusCombos();
+            InitRecvTimer();
 
             WireEvents();
 
@@ -55,6 +92,7 @@ namespace VisionPlatform.UI
             if (names.Count > 0) LoadSelected(names[0]);
 
             Log("就绪。每条通讯可自定义名称，流程节点按名称绑定；协议均为自行实现，零第三方依赖。");
+            Log("TCP 客户端与服务端已整合在同一页，用「角色」切换；Modbus 支持字符串/整形/浮点/双精度/布尔。");
         }
 
         // ---------------------- 初始化 ----------------------
@@ -116,6 +154,51 @@ namespace VisionPlatform.UI
 
             UiTheme.StyleGroupTitle(lblListTitle);
             UiTheme.StyleReadonlyBox(listLog);
+
+            // 接收区：等宽字体 + 卡片底色（与日志区同一套只读观感）
+            UiTheme.StyleReadonlyBox(txtRecv);
+            lblRecv.ForeColor = UiTheme.ColorTextSecondary;
+            lblMbTip.ForeColor = UiTheme.ColorTextSecondary;
+        }
+
+        /// <summary>填充「角色」下拉：下标 0 = TCP 客户端，1 = TCP 服务端（与 CommKind 解耦）。</summary>
+        private void InitRoleCombo()
+        {
+            cboRole.Items.Clear();
+            cboRole.Items.Add(CommKind.Display(CommKind.TcpClient));
+            cboRole.Items.Add(CommKind.Display(CommKind.TcpServer));
+            cboRole.SelectedIndex = 0;
+        }
+
+        /// <summary>
+        /// 填充 Modbus 的「数据类型」与「字序」下拉。
+        /// 显示文案直接取 <see cref="ModbusData.DisplayNameOf"/> / <see cref="ModbusData.OrderTextOf"/>，
+        /// 取值按下标回查同一个数组，保证顺序永远一致。
+        /// </summary>
+        private void InitModbusCombos()
+        {
+            ModbusDataType[] types = ModbusData.AllTypes();
+            cboMbType.Items.Clear();
+            foreach (ModbusDataType t in types) cboMbType.Items.Add(ModbusData.DisplayNameOf(t));
+
+            int def = Array.IndexOf(types, ModbusDataType.UInt16);
+            cboMbType.SelectedIndex = def >= 0 ? def : 0;
+
+            ModbusWordOrder[] orders = ModbusData.AllWordOrders();
+            cboMbOrder.Items.Clear();
+            foreach (ModbusWordOrder o in orders) cboMbOrder.Items.Add(ModbusData.OrderTextOf(o));
+            cboMbOrder.SelectedIndex = 0;
+
+            ApplyModbusTypeUi();
+        }
+
+        /// <summary>接收区合流定时器：挂到 components 上，随窗体一起释放。</summary>
+        private void InitRecvTimer()
+        {
+            _recvTimer = new Timer();
+            _recvTimer.Interval = RecvFlushIntervalMs;
+            _recvTimer.Tick += OnRecvFlushTick;
+            components.Add(_recvTimer);
         }
 
         private void WireEvents()
@@ -137,6 +220,8 @@ namespace VisionPlatform.UI
             btnMbWrite.Click += OnModbusWrite;
 
             tabProtocol.SelectedIndexChanged += OnKindChanged;
+            cboRole.SelectedIndexChanged += OnRoleChanged;
+            cboMbType.SelectedIndexChanged += OnMbTypeChanged;
             chkEnabled.CheckedChanged += OnEnabledChanged;
             chkAutoConnect.CheckedChanged += OnAutoConnectChanged;
 
@@ -211,12 +296,15 @@ namespace VisionPlatform.UI
             {
                 _currentName = cfg.Name;
                 txtName.Text = cfg.Name;
-                tabProtocol.SelectedIndex = KindIndex(cfg.Kind);
+                ApplyKindToUi(cfg.Kind);
                 txtHost.Text = cfg.Host;
                 numPort.Value = cfg.Port;
                 numSlaveId.Value = cfg.SlaveId;
                 chkEnabled.Checked = cfg.Enabled;
                 chkAutoConnect.Checked = cfg.AutoConnect;
+
+                // 换了一条通讯，接收去重基准要跟着换，否则新通讯的第一条可能被误判为重复
+                _lastRecvText = "";
             }
             finally
             {
@@ -226,33 +314,67 @@ namespace VisionPlatform.UI
             ApplyKindVisibility();
         }
 
+        /// <summary>
+        /// 按协议类型回填分页与角色（替代原来的 KindIndex + 按下标取 CommKind.All）。
+        /// </summary>
+        /// <param name="kind"><see cref="CommKind"/> 常量。</param>
+        private void ApplyKindToUi(string kind)
+        {
+            string k = CommKind.Normalize(kind);
+
+            if (k == CommKind.ModbusTcp)
+            {
+                tabProtocol.SelectedIndex = TabIndexModbus;
+                return;
+            }
+
+            tabProtocol.SelectedIndex = TabIndexTcp;
+            cboRole.SelectedIndex = k == CommKind.TcpServer ? 1 : 0;
+        }
+
+        /// <summary>
+        /// 按当前界面状态决定两组的启用 / 禁用：只改 Enabled，不改 Visible
+        /// （沿用既有约定，避免切换时布局跳动）。
+        /// </summary>
         private void ApplyKindVisibility()
         {
             string kind = SelectedKind();
-
-            // 三个面板已各自作为 tabProtocol 的一页，由分页自身控制显隐，无需手动切换 Visible
+            bool isServer = kind == CommKind.TcpServer;
+            bool isClient = kind == CommKind.TcpClient;
+            bool isModbus = kind == CommKind.ModbusTcp;
 
             // 服务端监听本地端口，不需要目标主机；从站号只有 Modbus 用得上
-            lblHost.Enabled = kind != CommKind.TcpServer;
-            txtHost.Enabled = kind != CommKind.TcpServer;
-            lblSlaveId.Enabled = kind == CommKind.ModbusTcp;
-            numSlaveId.Enabled = kind == CommKind.ModbusTcp;
+            lblHost.Enabled = !isServer;
+            txtHost.Enabled = !isServer;
+            lblSlaveId.Enabled = isModbus;
+            numSlaveId.Enabled = isModbus;
+
+            // 角色只在 TCP 页有意义
+            lblRole.Enabled = !isModbus;
+            cboRole.Enabled = !isModbus;
+
+            // TCP 页内两组：客户端（发送）与服务端（广播 + 监听），按角色互斥启用
+            lblSend.Enabled = isClient;
+            txtSend.Enabled = isClient;
+            btnSend.Enabled = isClient;
+
+            lblSrvSend.Enabled = isServer;
+            txtSrvSend.Enabled = isServer;
+            btnBroadcast.Enabled = isServer;
+            btnStartListen.Enabled = isServer;
+            btnStopListen.Enabled = isServer;
         }
 
-        private static int KindIndex(string kind)
-        {
-            for (int i = 0; i < CommKind.All.Length; i++)
-            {
-                if (CommKind.All[i] == CommKind.Normalize(kind)) return i;
-            }
-            return 0;
-        }
-
+        /// <summary>
+        /// 当前界面表达的协议类型：<strong>显式判定</strong>，不再用分页下标映射
+        /// <see cref="CommKind.All"/>（分页从 3 页变 2 页后下标会错位）。
+        /// </summary>
         private string SelectedKind()
         {
-            int idx = tabProtocol.SelectedIndex;
-            if (idx < 0 || idx >= CommKind.All.Length) return CommKind.TcpClient;
-            return CommKind.All[idx];
+            if (tabProtocol.SelectedIndex == TabIndexModbus) return CommKind.ModbusTcp;
+
+            bool isServer = cboRole.SelectedIndex == 1;
+            return isServer ? CommKind.TcpServer : CommKind.TcpClient;
         }
 
         // ---------------------- 增删改 ----------------------
@@ -372,17 +494,26 @@ namespace VisionPlatform.UI
 
         // ---------------------- 属性变更 ----------------------
 
+        /// <summary>
+        /// 切分页：只刷新启用状态。
+        /// <para>【与旧实现的差别】旧实现会把端口强制改成默认端口（Modbus 502 / 其它 9000）
+        /// 并立刻 ApplyEdits 落盘 —— 用户手填的端口被悄悄改掉，属于缺陷，这里已去掉。
+        /// 默认端口只在 <see cref="CommEndpointConfig.Create"/> 新建端点时填一次。</para>
+        /// </summary>
         private void OnKindChanged(object sender, EventArgs e)
         {
             if (_loading) return;
 
             ApplyKindVisibility();
+        }
 
-            // 切换协议后端口默认值随之改变（Modbus 502，其余 9000），并即时落盘
-            string kind = SelectedKind();
-            numPort.Value = CommKind.DefaultPort(kind);
+        /// <summary>切「角色」（TCP 客户端 / 服务端）：同样只刷新启用状态，不改端口、不落盘。</summary>
+        private void OnRoleChanged(object sender, EventArgs e)
+        {
+            if (_loading) return;
 
-            if (_currentName.Length > 0) ApplyEdits(false);
+            ApplyKindVisibility();
+            Log("角色已切换为「" + CommKind.Display(SelectedKind()) + "」，点「保存」或「连接」后生效");
         }
 
         private void OnEnabledChanged(object sender, EventArgs e)
@@ -458,11 +589,13 @@ namespace VisionPlatform.UI
             Log("测试 " + CommKind.Display(kind) + "：" + r.Message);
         }
 
-        // ---------------------- TCP 客户端 / 服务端 ----------------------
+        // ---------------------- TCP 客户端 / 服务端（已整合在同一页） ----------------------
 
         private void OnClientSend(object sender, EventArgs e)
         {
             if (_currentName.Length == 0) { Log("请先选中一条通讯"); return; }
+            if (SelectedKind() == CommKind.ModbusTcp) { Log("Modbus TCP 不支持文本发送，请用「Modbus TCP」页读写寄存器"); return; }
+            if (!SyncKindIfChanged()) return;
 
             OpResult r = CommRegistry.SendText(_currentName, txtSend.Text);
             Log(r.Success ? ("「" + _currentName + "」已发送：" + txtSend.Text) : r.Message);
@@ -471,6 +604,8 @@ namespace VisionPlatform.UI
         private void OnServerStart(object sender, EventArgs e)
         {
             if (_currentName.Length == 0) { Log("请先选中一条通讯"); return; }
+
+            // 与「连接」一致：先把编辑区的参数落盘，保证按界面上的端口启动监听
             if (!ApplyEdits(false)) return;
 
             OpResult r = CommRegistry.Connect(_currentName);
@@ -490,45 +625,205 @@ namespace VisionPlatform.UI
         private void OnServerBroadcast(object sender, EventArgs e)
         {
             if (_currentName.Length == 0) { Log("请先选中一条通讯"); return; }
+            if (!SyncKindIfChanged()) return;
 
             OpResult r = CommRegistry.SendText(_currentName, txtSrvSend.Text);
             Log(r.Success ? ("「" + _currentName + "」" + r.Message) : r.Message);
         }
 
+        /// <summary>
+        /// 界面上的协议类型与实际保存的不一致时（例如刚切到服务端 / Modbus 还没保存），
+        /// 先把类型同步落盘再动作，免得底层按旧类型分发。
+        /// </summary>
+        private bool SyncKindIfChanged()
+        {
+            CommEndpointConfig cfg = CommRegistry.Config(_currentName);
+            if (cfg == null) return true;
+            if (CommKind.Normalize(cfg.Kind) == SelectedKind()) return true;
+
+            return ApplyEdits(false);
+        }
+
         // ---------------------- Modbus ----------------------
+
+        /// <summary>当前选中的数据类型（按下标回查，与下拉填充顺序严格一致）。</summary>
+        private ModbusDataType SelectedMbType()
+        {
+            ModbusDataType[] all = ModbusData.AllTypes();
+            int i = cboMbType.SelectedIndex;
+            return (i >= 0 && i < all.Length) ? all[i] : ModbusDataType.UInt16;
+        }
+
+        /// <summary>当前选中的字序（按下标回查，与下拉填充顺序严格一致）。</summary>
+        private ModbusWordOrder SelectedMbOrder()
+        {
+            ModbusWordOrder[] all = ModbusData.AllWordOrders();
+            int i = cboMbOrder.SelectedIndex;
+            return (i >= 0 && i < all.Length) ? all[i] : ModbusWordOrder.ABCD;
+        }
+
+        /// <summary>
+        /// 数据类型改变后同步「数量」的含义与上限：
+        /// String 是字符数（上限 250），其余类型是寄存器个数（上限 125），
+        /// 并把默认值填成单个值所需的寄存器数，避免选了 Float32 却只读 1 个寄存器而报长度不足。
+        /// </summary>
+        private void ApplyModbusTypeUi()
+        {
+            ModbusDataType type = SelectedMbType();
+            bool isString = type == ModbusDataType.String;
+
+            lblCount.Text = isString ? "数量（字符）：" : "数量（寄存器）：";
+
+            // 先放宽上限再收紧下限，最后才设默认值，避免 NumericUpDown 因越界抛异常
+            numCount.Maximum = isString ? ModbusData.MaxStringChars : ModbusData.MaxReadRegisters;
+            numCount.Minimum = 1;
+
+            if (!_loading)
+            {
+                int unit = isString ? 10 : Math.Max(1, ModbusData.RegisterCountOf(type, 1));
+                decimal next = unit;
+                if (next > numCount.Maximum) next = numCount.Maximum;
+                if (numCount.Value != next) numCount.Value = next;
+            }
+
+            lblMbTip.Text = isString
+                ? "地址从 0 开始（非 40001 编号）；String 按字符计，写值最长 246 字符"
+                : "地址从 0 开始（非 40001 编号）；" + ModbusData.DisplayNameOf(type).Split('（')[0]
+                  + " 每值占 " + Math.Max(1, ModbusData.RegisterCountOf(type, 1)) + " 个寄存器";
+        }
+
+        private void OnMbTypeChanged(object sender, EventArgs e)
+        {
+            if (_loading) return;
+
+            ApplyModbusTypeUi();
+        }
 
         private void OnModbusRead(object sender, EventArgs e)
         {
             if (_currentName.Length == 0) { Log("请先选中一条通讯"); return; }
+            if (!SyncKindIfChanged()) return;
 
-            OpResult<ushort[]> r = CommRegistry.ModbusRead(
-                _currentName, (ushort)numAddr.Value, (ushort)numCount.Value);
+            ModbusDataType type = SelectedMbType();
+            ModbusWordOrder order = SelectedMbOrder();
+            ushort address = (ushort)numAddr.Value;
+            int length = (int)numCount.Value;
 
-            if (!r.Success) { Log("读取失败：" + r.Message); return; }
+            OpResult<string> r = CommRegistry.ModbusReadAs(_currentName, type, address, length, order);
 
-            StringBuilder sb = new StringBuilder();
-            sb.Append("「").Append(_currentName).Append("」读取 ").Append(r.Value.Length).Append(" 个寄存器：");
-            foreach (ushort v in r.Value) sb.Append(v).Append(' ');
+            if (!r.Success)
+            {
+                Log("读取失败：" + r.Message);
+                return;
+            }
 
-            Log(sb.ToString());
+            string text = r.Value == null ? "" : r.Value;
+            Log(string.Format("「{0}」读取 {1} 地址 {2} = {3}",
+                _currentName, ModbusData.DisplayNameOf(type), address, text));
+
+            // 读到的值也进接收区，用户不必再去日志里翻
+            PushRecvLine(string.Format("{0:HH:mm:ss}  << {1} @{2} = {3}",
+                DateTime.Now, ModbusData.DisplayNameOf(type), address, text));
+            _recvTimer.Start();
         }
 
         private void OnModbusWrite(object sender, EventArgs e)
         {
             if (_currentName.Length == 0) { Log("请先选中一条通讯"); return; }
+            if (!SyncKindIfChanged()) return;
 
-            OpResult r = CommRegistry.ModbusWrite(_currentName, (ushort)numAddr.Value, (ushort)numValue.Value);
+            ModbusDataType type = SelectedMbType();
+            ModbusWordOrder order = SelectedMbOrder();
+            ushort address = (ushort)numAddr.Value;
+            string text = txtValue.Text == null ? "" : txtValue.Text;
+
+            OpResult r = CommRegistry.ModbusWriteAs(_currentName, type, address, text, order);
+
             Log(r.Success
-                ? string.Format("「{0}」已写入地址 {1} = {2}", _currentName, numAddr.Value, numValue.Value)
+                ? string.Format("「{0}」已写入 {1} 地址 {2} = {3}",
+                    _currentName, ModbusData.DisplayNameOf(type), address, text)
                 : ("写入失败：" + r.Message));
         }
 
-        // ---------------------- 收尾 ----------------------
+        // ---------------------- 接收显示 ----------------------
 
-        /// <summary>注册表事件由后台线程抛出，界面更新必须回到 UI 线程。</summary>
+        /// <summary>
+        /// 注册表事件由后台线程抛出，界面更新必须回到 UI 线程。
+        /// 这里同时把「最近收到的一条」搬进接收区。
+        /// </summary>
         private void OnRegistryChanged(object sender, EventArgs e)
         {
-            Ui(RefreshGrid);
+            Ui(delegate
+            {
+                RefreshGrid();
+                PumpRecv();
+            });
+        }
+
+        /// <summary>
+        /// 取 <see cref="CommRegistry.LastReceived"/> 的当前值并入队（UI 线程执行）。
+        /// 注册表事件也会因连接状态变化触发，故用 <see cref="_lastRecvText"/> 去重。
+        /// </summary>
+        private void PumpRecv()
+        {
+            if (_currentName.Length == 0) return;
+
+            string text = CommRegistry.LastReceived(_currentName);
+            if (string.IsNullOrEmpty(text)) return;
+            if (string.Equals(text, _lastRecvText, StringComparison.Ordinal)) return;
+
+            _lastRecvText = text;
+            PushRecvLine(string.Format("{0:HH:mm:ss}  << {1}", DateTime.Now, text));
+            _recvTimer.Start();
+        }
+
+        /// <summary>把一行文本放进待刷缓冲，并启动合流定时器（不直接刷界面）。</summary>
+        private void PushRecvLine(string line)
+        {
+            lock (_recvPending)
+            {
+                _recvPending.Append(line).Append('\n');
+            }
+        }
+
+        private void OnRecvFlushTick(object sender, EventArgs e)
+        {
+            _recvTimer.Stop();
+            FlushRecv();
+        }
+
+        /// <summary>
+        /// 把缓冲一次性写进接收区。高频回传时多条合一次，
+        /// 界面刷新频率被钳在 150 ms 一次，不会淹没 UI 线程。
+        /// </summary>
+        private void FlushRecv()
+        {
+            string chunk;
+            lock (_recvPending)
+            {
+                if (_recvPending.Length == 0) return;
+                chunk = _recvPending.ToString();
+                _recvPending.Length = 0;
+            }
+
+            if (IsDisposed || txtRecv == null || !txtRecv.IsHandleCreated) return;
+
+            txtRecv.AppendText(chunk);
+            TrimRecvLines();
+
+            txtRecv.SelectionStart = txtRecv.TextLength;
+            txtRecv.ScrollToCaret();
+        }
+
+        /// <summary>接收区超过 <see cref="MaxRecvLines"/> 行时丢弃最旧的。</summary>
+        private void TrimRecvLines()
+        {
+            string[] lines = txtRecv.Lines;
+            if (lines.Length <= MaxRecvLines) return;
+
+            string[] keep = new string[MaxRecvLines];
+            Array.Copy(lines, lines.Length - MaxRecvLines, keep, 0, MaxRecvLines);
+            txtRecv.Lines = keep;
         }
 
         private void Ui(Action action)
@@ -565,6 +860,8 @@ namespace VisionPlatform.UI
                 CommRegistry.Changed -= _registryHandler;
                 _registryHandler = null;
             }
+
+            if (_recvTimer != null) _recvTimer.Stop();
 
             base.OnFormClosing(e);
         }

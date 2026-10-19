@@ -28,9 +28,10 @@ namespace VisionPlatform.UI
             this.groupProps = new System.Windows.Forms.GroupBox();
             this.lblName = new System.Windows.Forms.Label();
             this.txtName = new System.Windows.Forms.TextBox();
+            this.lblRole = new System.Windows.Forms.Label();
+            this.cboRole = new System.Windows.Forms.ComboBox();
             this.tabProtocol = new VisionPlatform.UI.UiTabControl();
-            this.tabPageTcpClient = new System.Windows.Forms.TabPage();
-            this.tabPageTcpServer = new System.Windows.Forms.TabPage();
+            this.tabPageTcp = new System.Windows.Forms.TabPage();
             this.tabPageModbus = new System.Windows.Forms.TabPage();
             this.lblHost = new System.Windows.Forms.Label();
             this.txtHost = new System.Windows.Forms.TextBox();
@@ -46,11 +47,10 @@ namespace VisionPlatform.UI
             this.btnTest = new VisionPlatform.UI.UiButton();
 
             this.groupOps = new System.Windows.Forms.GroupBox();
-            this.panelTcpClient = new System.Windows.Forms.Panel();
+            this.panelTcp = new System.Windows.Forms.Panel();
             this.lblSend = new System.Windows.Forms.Label();
             this.txtSend = new System.Windows.Forms.TextBox();
             this.btnSend = new VisionPlatform.UI.UiButton();
-            this.panelTcpServer = new System.Windows.Forms.Panel();
             this.lblSrvSend = new System.Windows.Forms.Label();
             this.txtSrvSend = new System.Windows.Forms.TextBox();
             this.btnBroadcast = new VisionPlatform.UI.UiButton();
@@ -62,9 +62,18 @@ namespace VisionPlatform.UI
             this.lblCount = new System.Windows.Forms.Label();
             this.numCount = new System.Windows.Forms.NumericUpDown();
             this.lblValue = new System.Windows.Forms.Label();
-            this.numValue = new System.Windows.Forms.NumericUpDown();
+            this.txtValue = new System.Windows.Forms.TextBox();
             this.btnMbRead = new VisionPlatform.UI.UiButton();
             this.btnMbWrite = new VisionPlatform.UI.UiButton();
+            this.lblMbType = new System.Windows.Forms.Label();
+            this.cboMbType = new System.Windows.Forms.ComboBox();
+            this.lblMbOrder = new System.Windows.Forms.Label();
+            this.cboMbOrder = new System.Windows.Forms.ComboBox();
+            this.lblMbTip = new System.Windows.Forms.Label();
+
+            this.panelRecv = new System.Windows.Forms.Panel();
+            this.lblRecv = new System.Windows.Forms.Label();
+            this.txtRecv = new System.Windows.Forms.TextBox();
 
             this.groupLog = new System.Windows.Forms.GroupBox();
             this.listLog = new System.Windows.Forms.ListBox();
@@ -74,16 +83,15 @@ namespace VisionPlatform.UI
             ((System.ComponentModel.ISupportInitialize)(this.numSlaveId)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numAddr)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numCount)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numValue)).BeginInit();
             this.panelLeft.SuspendLayout();
             this.panelListBtns.SuspendLayout();
             this.panelRight.SuspendLayout();
             this.groupProps.SuspendLayout();
             this.groupOps.SuspendLayout();
             this.tabProtocol.SuspendLayout();
-            this.panelTcpClient.SuspendLayout();
-            this.panelTcpServer.SuspendLayout();
+            this.panelTcp.SuspendLayout();
             this.panelModbus.SuspendLayout();
+            this.panelRecv.SuspendLayout();
             this.groupLog.SuspendLayout();
             this.SuspendLayout();
 
@@ -144,6 +152,9 @@ namespace VisionPlatform.UI
             this.btnDelete.UseVisualStyleBackColor = true;
 
             // ---------- panelRight：属性编辑 + 操作 + 日志 ----------
+            // 【高度账】标题栏占 32，panelRight Padding 上下各 8：
+            //   620(ClientSize) - 32(标题栏) - 16(padding) = 572
+            //   groupProps 142 + groupOps 290 + groupLog 140 = 572
             this.panelRight.Controls.Add(this.groupLog);
             this.panelRight.Controls.Add(this.groupOps);
             this.panelRight.Controls.Add(this.groupProps);
@@ -158,11 +169,12 @@ namespace VisionPlatform.UI
             this.groupProps.Dock = System.Windows.Forms.DockStyle.Top;
             this.groupProps.Location = new System.Drawing.Point(8, 8);
             this.groupProps.Name = "groupProps";
-            this.groupProps.Size = new System.Drawing.Size(604, 176);
+            this.groupProps.Size = new System.Drawing.Size(604, 142);
             this.groupProps.TabIndex = 0;
             this.groupProps.TabStop = false;
             this.groupProps.Text = "通讯属性";
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.groupProps.Controls.Add(this.cboRole);
             this.groupProps.Controls.Add(this.txtName);
             this.groupProps.Controls.Add(this.txtHost);
             this.groupProps.Controls.Add(this.numPort);
@@ -174,47 +186,61 @@ namespace VisionPlatform.UI
             this.groupProps.Controls.Add(this.btnDisconnect);
             this.groupProps.Controls.Add(this.btnTest);
             this.groupProps.Controls.Add(this.lblName);
+            this.groupProps.Controls.Add(this.lblRole);
             this.groupProps.Controls.Add(this.lblHost);
             this.groupProps.Controls.Add(this.lblPort);
             this.groupProps.Controls.Add(this.lblSlaveId);
 
             this.lblName.AutoSize = true;
-            this.lblName.Location = new System.Drawing.Point(12, 27);
+            this.lblName.Location = new System.Drawing.Point(12, 25);
             this.lblName.Name = "lblName";
             this.lblName.Size = new System.Drawing.Size(44, 15);
             this.lblName.TabIndex = 0;
             this.lblName.Text = "名称：";
             this.lblName.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtName.Location = new System.Drawing.Point(60, 24);
+            this.txtName.Location = new System.Drawing.Point(60, 22);
             this.txtName.Name = "txtName";
             this.txtName.Size = new System.Drawing.Size(150, 21);
             this.txtName.TabIndex = 1;
 
-            // 协议类型改用 tabProtocol 分页选择，不再使用 cboKind / lblKind
+            // 协议类型改用 tabProtocol 分页选择；TCP 页的「客户端 / 服务端」角色在这里选
+            this.lblRole.AutoSize = true;
+            this.lblRole.Location = new System.Drawing.Point(240, 25);
+            this.lblRole.Name = "lblRole";
+            this.lblRole.Size = new System.Drawing.Size(44, 15);
+            this.lblRole.TabIndex = 2;
+            this.lblRole.Text = "角色：";
+            this.lblRole.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.cboRole.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboRole.Location = new System.Drawing.Point(288, 22);
+            this.cboRole.Name = "cboRole";
+            this.cboRole.Size = new System.Drawing.Size(160, 21);
+            this.cboRole.TabIndex = 3;
 
             this.lblHost.AutoSize = true;
-            this.lblHost.Location = new System.Drawing.Point(12, 57);
+            this.lblHost.Location = new System.Drawing.Point(12, 53);
             this.lblHost.Name = "lblHost";
             this.lblHost.Size = new System.Drawing.Size(56, 15);
             this.lblHost.TabIndex = 4;
             this.lblHost.Text = "IP/主机：";
             this.lblHost.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtHost.Location = new System.Drawing.Point(74, 54);
+            this.txtHost.Location = new System.Drawing.Point(74, 50);
             this.txtHost.Name = "txtHost";
             this.txtHost.Size = new System.Drawing.Size(136, 21);
             this.txtHost.TabIndex = 5;
 
             this.lblPort.AutoSize = true;
-            this.lblPort.Location = new System.Drawing.Point(226, 57);
+            this.lblPort.Location = new System.Drawing.Point(226, 53);
             this.lblPort.Name = "lblPort";
             this.lblPort.Size = new System.Drawing.Size(44, 15);
             this.lblPort.TabIndex = 6;
             this.lblPort.Text = "端口：";
             this.lblPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numPort.Location = new System.Drawing.Point(274, 54);
+            this.numPort.Location = new System.Drawing.Point(274, 50);
             this.numPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numPort.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numPort.Name = "numPort";
@@ -223,14 +249,14 @@ namespace VisionPlatform.UI
             this.numPort.Value = new decimal(new int[] { 9000, 0, 0, 0 });
 
             this.lblSlaveId.AutoSize = true;
-            this.lblSlaveId.Location = new System.Drawing.Point(370, 57);
+            this.lblSlaveId.Location = new System.Drawing.Point(370, 53);
             this.lblSlaveId.Name = "lblSlaveId";
             this.lblSlaveId.Size = new System.Drawing.Size(56, 15);
             this.lblSlaveId.TabIndex = 8;
             this.lblSlaveId.Text = "从站号：";
             this.lblSlaveId.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numSlaveId.Location = new System.Drawing.Point(432, 54);
+            this.numSlaveId.Location = new System.Drawing.Point(432, 50);
             this.numSlaveId.Maximum = new decimal(new int[] { 247, 0, 0, 0 });
             this.numSlaveId.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numSlaveId.Name = "numSlaveId";
@@ -239,7 +265,7 @@ namespace VisionPlatform.UI
             this.numSlaveId.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
             this.chkEnabled.AutoSize = true;
-            this.chkEnabled.Location = new System.Drawing.Point(12, 88);
+            this.chkEnabled.Location = new System.Drawing.Point(12, 80);
             this.chkEnabled.Name = "chkEnabled";
             this.chkEnabled.Size = new System.Drawing.Size(54, 19);
             this.chkEnabled.TabIndex = 10;
@@ -247,166 +273,169 @@ namespace VisionPlatform.UI
             this.chkEnabled.UseVisualStyleBackColor = true;
 
             this.chkAutoConnect.AutoSize = true;
-            this.chkAutoConnect.Location = new System.Drawing.Point(90, 88);
+            this.chkAutoConnect.Location = new System.Drawing.Point(90, 80);
             this.chkAutoConnect.Name = "chkAutoConnect";
             this.chkAutoConnect.Size = new System.Drawing.Size(126, 19);
             this.chkAutoConnect.TabIndex = 11;
             this.chkAutoConnect.Text = "启动时自动连接";
             this.chkAutoConnect.UseVisualStyleBackColor = true;
 
-            this.btnSave.Location = new System.Drawing.Point(12, 122);
+            this.btnSave.Location = new System.Drawing.Point(12, 104);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(92, 32);
             this.btnSave.TabIndex = 12;
             this.btnSave.Text = "保存";
             this.btnSave.UseVisualStyleBackColor = true;
 
-            this.btnConnect.Location = new System.Drawing.Point(112, 122);
+            this.btnConnect.Location = new System.Drawing.Point(112, 104);
             this.btnConnect.Name = "btnConnect";
             this.btnConnect.Size = new System.Drawing.Size(92, 32);
             this.btnConnect.TabIndex = 13;
             this.btnConnect.Text = "连接";
             this.btnConnect.UseVisualStyleBackColor = true;
 
-            this.btnDisconnect.Location = new System.Drawing.Point(212, 122);
+            this.btnDisconnect.Location = new System.Drawing.Point(212, 104);
             this.btnDisconnect.Name = "btnDisconnect";
             this.btnDisconnect.Size = new System.Drawing.Size(92, 32);
             this.btnDisconnect.TabIndex = 14;
             this.btnDisconnect.Text = "断开";
             this.btnDisconnect.UseVisualStyleBackColor = true;
 
-            this.btnTest.Location = new System.Drawing.Point(312, 122);
+            this.btnTest.Location = new System.Drawing.Point(312, 104);
             this.btnTest.Name = "btnTest";
             this.btnTest.Size = new System.Drawing.Size(92, 32);
             this.btnTest.TabIndex = 15;
             this.btnTest.Text = "测试";
             this.btnTest.UseVisualStyleBackColor = true;
 
-            // ---------- groupOps：按类型切换的操作区 ----------
+            // ---------- groupOps：收发测试（TCP 客户端 / 服务端已整合进同一页） ----------
+            // Dock 顺序（自下而上）：先加 panelRecv（Fill，吃剩余），再加 tabProtocol（Top）。
+            // groupOps 290 → 内部约 265；tabProtocol 占 158，接收区约 107。
             this.groupOps.Dock = System.Windows.Forms.DockStyle.Top;
-            this.groupOps.Location = new System.Drawing.Point(8, 184);
+            this.groupOps.Location = new System.Drawing.Point(8, 150);
             this.groupOps.Name = "groupOps";
-            this.groupOps.Size = new System.Drawing.Size(604, 148);
+            this.groupOps.Size = new System.Drawing.Size(604, 290);
             this.groupOps.TabIndex = 1;
             this.groupOps.TabStop = false;
             this.groupOps.Text = "收发测试";
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.groupOps.Controls.Add(this.panelRecv);
             this.groupOps.Controls.Add(this.tabProtocol);
 
-            // ---- panelTcpClient（现为 tabProtocol 的一页内容，填满整页）----
-            this.panelTcpClient.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelTcpClient.Name = "panelTcpClient";
-            this.panelTcpClient.Size = new System.Drawing.Size(576, 106);
-            this.panelTcpClient.TabIndex = 0;
+            // ---- panelTcp：TCP 通信（客户端发送 + 服务端广播 / 监听，按角色启用）----
+            this.panelTcp.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelTcp.Name = "panelTcp";
+            this.panelTcp.Size = new System.Drawing.Size(578, 114);
+            this.panelTcp.TabIndex = 0;
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
-            this.panelTcpClient.Controls.Add(this.txtSend);
-            this.panelTcpClient.Controls.Add(this.btnSend);
-            this.panelTcpClient.Controls.Add(this.lblSend);
+            this.panelTcp.Controls.Add(this.txtSend);
+            this.panelTcp.Controls.Add(this.btnSend);
+            this.panelTcp.Controls.Add(this.txtSrvSend);
+            this.panelTcp.Controls.Add(this.btnBroadcast);
+            this.panelTcp.Controls.Add(this.btnStartListen);
+            this.panelTcp.Controls.Add(this.btnStopListen);
+            this.panelTcp.Controls.Add(this.lblSend);
+            this.panelTcp.Controls.Add(this.lblSrvSend);
 
             this.lblSend.AutoSize = true;
-            this.lblSend.Location = new System.Drawing.Point(0, 4);
+            this.lblSend.Location = new System.Drawing.Point(0, 2);
             this.lblSend.Name = "lblSend";
             this.lblSend.Size = new System.Drawing.Size(68, 15);
             this.lblSend.TabIndex = 0;
             this.lblSend.Text = "发送内容：";
             this.lblSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtSend.Location = new System.Drawing.Point(0, 26);
+            this.txtSend.Location = new System.Drawing.Point(0, 20);
             this.txtSend.Name = "txtSend";
             this.txtSend.Size = new System.Drawing.Size(420, 21);
             this.txtSend.TabIndex = 1;
 
-            this.btnSend.Location = new System.Drawing.Point(432, 22);
+            this.btnSend.Location = new System.Drawing.Point(432, 16);
             this.btnSend.Name = "btnSend";
             this.btnSend.Size = new System.Drawing.Size(96, 32);
             this.btnSend.TabIndex = 2;
             this.btnSend.Text = "发送";
             this.btnSend.UseVisualStyleBackColor = true;
 
-            // ---- panelTcpServer（现为 tabProtocol 的一页内容，填满整页）----
-            this.panelTcpServer.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.panelTcpServer.Name = "panelTcpServer";
-            this.panelTcpServer.Size = new System.Drawing.Size(576, 106);
-            this.panelTcpServer.TabIndex = 1;
-            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
-            this.panelTcpServer.Controls.Add(this.txtSrvSend);
-            this.panelTcpServer.Controls.Add(this.btnBroadcast);
-            this.panelTcpServer.Controls.Add(this.btnStartListen);
-            this.panelTcpServer.Controls.Add(this.btnStopListen);
-            this.panelTcpServer.Controls.Add(this.lblSrvSend);
-
             this.lblSrvSend.AutoSize = true;
-            this.lblSrvSend.Location = new System.Drawing.Point(0, 4);
+            this.lblSrvSend.Location = new System.Drawing.Point(0, 52);
             this.lblSrvSend.Name = "lblSrvSend";
             this.lblSrvSend.Size = new System.Drawing.Size(68, 15);
-            this.lblSrvSend.TabIndex = 0;
+            this.lblSrvSend.TabIndex = 3;
             this.lblSrvSend.Text = "广播内容：";
             this.lblSrvSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtSrvSend.Location = new System.Drawing.Point(0, 26);
+            this.txtSrvSend.Location = new System.Drawing.Point(0, 70);
             this.txtSrvSend.Name = "txtSrvSend";
-            this.txtSrvSend.Size = new System.Drawing.Size(420, 21);
-            this.txtSrvSend.TabIndex = 1;
+            this.txtSrvSend.Size = new System.Drawing.Size(288, 21);
+            this.txtSrvSend.TabIndex = 4;
 
-            this.btnBroadcast.Location = new System.Drawing.Point(432, 22);
+            this.btnBroadcast.Location = new System.Drawing.Point(296, 66);
             this.btnBroadcast.Name = "btnBroadcast";
-            this.btnBroadcast.Size = new System.Drawing.Size(96, 32);
-            this.btnBroadcast.TabIndex = 2;
+            this.btnBroadcast.Size = new System.Drawing.Size(84, 32);
+            this.btnBroadcast.TabIndex = 5;
             this.btnBroadcast.Text = "广播";
             this.btnBroadcast.UseVisualStyleBackColor = true;
 
-            this.btnStartListen.Location = new System.Drawing.Point(0, 66);
+            // 「启动监听 / 停止监听」与「广播」同为服务端能力，放在同一行，
+            // 三者按角色一起启用 / 禁用；页内可用高约 114，98px 的内容不再被裁切。
+            this.btnStartListen.Location = new System.Drawing.Point(388, 66);
             this.btnStartListen.Name = "btnStartListen";
-            this.btnStartListen.Size = new System.Drawing.Size(120, 32);
-            this.btnStartListen.TabIndex = 3;
+            this.btnStartListen.Size = new System.Drawing.Size(84, 32);
+            this.btnStartListen.TabIndex = 6;
             this.btnStartListen.Text = "启动监听";
             this.btnStartListen.UseVisualStyleBackColor = true;
 
-            this.btnStopListen.Location = new System.Drawing.Point(128, 66);
+            this.btnStopListen.Location = new System.Drawing.Point(480, 66);
             this.btnStopListen.Name = "btnStopListen";
-            this.btnStopListen.Size = new System.Drawing.Size(120, 32);
-            this.btnStopListen.TabIndex = 4;
+            this.btnStopListen.Size = new System.Drawing.Size(84, 32);
+            this.btnStopListen.TabIndex = 7;
             this.btnStopListen.Text = "停止监听";
             this.btnStopListen.UseVisualStyleBackColor = true;
 
-            // ---- panelModbus（现为 tabProtocol 的一页内容，填满整页）----
+            // ---- panelModbus：Modbus TCP（多数据类型 + 四种字序）----
             this.panelModbus.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelModbus.Name = "panelModbus";
-            this.panelModbus.Size = new System.Drawing.Size(576, 106);
-            this.panelModbus.TabIndex = 2;
+            this.panelModbus.Size = new System.Drawing.Size(578, 114);
+            this.panelModbus.TabIndex = 1;
             // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.panelModbus.Controls.Add(this.cboMbType);
+            this.panelModbus.Controls.Add(this.cboMbOrder);
             this.panelModbus.Controls.Add(this.numAddr);
             this.panelModbus.Controls.Add(this.numCount);
-            this.panelModbus.Controls.Add(this.numValue);
+            this.panelModbus.Controls.Add(this.txtValue);
             this.panelModbus.Controls.Add(this.btnMbRead);
             this.panelModbus.Controls.Add(this.btnMbWrite);
             this.panelModbus.Controls.Add(this.lblAddr);
             this.panelModbus.Controls.Add(this.lblCount);
             this.panelModbus.Controls.Add(this.lblValue);
+            this.panelModbus.Controls.Add(this.lblMbType);
+            this.panelModbus.Controls.Add(this.lblMbOrder);
+            this.panelModbus.Controls.Add(this.lblMbTip);
 
             this.lblAddr.AutoSize = true;
-            this.lblAddr.Location = new System.Drawing.Point(0, 4);
+            this.lblAddr.Location = new System.Drawing.Point(0, 0);
             this.lblAddr.Name = "lblAddr";
             this.lblAddr.Size = new System.Drawing.Size(44, 15);
             this.lblAddr.TabIndex = 0;
             this.lblAddr.Text = "地址：";
             this.lblAddr.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numAddr.Location = new System.Drawing.Point(0, 26);
+            this.numAddr.Location = new System.Drawing.Point(0, 17);
             this.numAddr.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numAddr.Name = "numAddr";
-            this.numAddr.Size = new System.Drawing.Size(90, 21);
+            this.numAddr.Size = new System.Drawing.Size(80, 21);
             this.numAddr.TabIndex = 1;
 
             this.lblCount.AutoSize = true;
-            this.lblCount.Location = new System.Drawing.Point(104, 4);
+            this.lblCount.Location = new System.Drawing.Point(92, 0);
             this.lblCount.Name = "lblCount";
-            this.lblCount.Size = new System.Drawing.Size(44, 15);
+            this.lblCount.Size = new System.Drawing.Size(80, 15);
             this.lblCount.TabIndex = 2;
-            this.lblCount.Text = "数量：";
+            this.lblCount.Text = "数量（寄存器）：";
             this.lblCount.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numCount.Location = new System.Drawing.Point(104, 26);
+            this.numCount.Location = new System.Drawing.Point(92, 17);
             this.numCount.Maximum = new decimal(new int[] { 125, 0, 0, 0 });
             this.numCount.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numCount.Name = "numCount";
@@ -415,54 +444,120 @@ namespace VisionPlatform.UI
             this.numCount.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
             this.lblValue.AutoSize = true;
-            this.lblValue.Location = new System.Drawing.Point(198, 4);
+            this.lblValue.Location = new System.Drawing.Point(200, 0);
             this.lblValue.Name = "lblValue";
             this.lblValue.Size = new System.Drawing.Size(56, 15);
             this.lblValue.TabIndex = 4;
             this.lblValue.Text = "写入值：";
             this.lblValue.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numValue.Location = new System.Drawing.Point(198, 26);
-            this.numValue.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
-            this.numValue.Name = "numValue";
-            this.numValue.Size = new System.Drawing.Size(90, 21);
-            this.numValue.TabIndex = 5;
+            // 原 numValue 只能输 0~65535 的整数，无法输入 12.5 / HELLO / true，改为文本框。
+            // 246 = 功能码 0x10 单次可写 123 个寄存器 × 每寄存器 2 字符。
+            this.txtValue.Location = new System.Drawing.Point(200, 17);
+            this.txtValue.MaxLength = 246;
+            this.txtValue.Name = "txtValue";
+            this.txtValue.Size = new System.Drawing.Size(110, 21);
+            this.txtValue.TabIndex = 5;
 
-            this.btnMbRead.Location = new System.Drawing.Point(320, 22);
+            this.btnMbRead.Location = new System.Drawing.Point(320, 13);
             this.btnMbRead.Name = "btnMbRead";
-            this.btnMbRead.Size = new System.Drawing.Size(104, 32);
+            this.btnMbRead.Size = new System.Drawing.Size(88, 32);
             this.btnMbRead.TabIndex = 6;
-            this.btnMbRead.Text = "读 0x03";
+            this.btnMbRead.Text = "读取";
             this.btnMbRead.UseVisualStyleBackColor = true;
 
-            this.btnMbWrite.Location = new System.Drawing.Point(432, 22);
+            this.btnMbWrite.Location = new System.Drawing.Point(416, 13);
             this.btnMbWrite.Name = "btnMbWrite";
-            this.btnMbWrite.Size = new System.Drawing.Size(104, 32);
+            this.btnMbWrite.Size = new System.Drawing.Size(88, 32);
             this.btnMbWrite.TabIndex = 7;
-            this.btnMbWrite.Text = "写 0x06";
+            this.btnMbWrite.Text = "写入";
             this.btnMbWrite.UseVisualStyleBackColor = true;
 
-            // ---------- tabProtocol：用分页取代 cboKind + 三个互斥 Panel ----------
-            this.tabProtocol.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblMbType.AutoSize = true;
+            this.lblMbType.Location = new System.Drawing.Point(0, 49);
+            this.lblMbType.Name = "lblMbType";
+            this.lblMbType.Size = new System.Drawing.Size(68, 15);
+            this.lblMbType.TabIndex = 8;
+            this.lblMbType.Text = "数据类型：";
+            this.lblMbType.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.cboMbType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboMbType.Location = new System.Drawing.Point(0, 66);
+            this.cboMbType.Name = "cboMbType";
+            this.cboMbType.Size = new System.Drawing.Size(180, 21);
+            this.cboMbType.TabIndex = 9;
+
+            this.lblMbOrder.AutoSize = true;
+            this.lblMbOrder.Location = new System.Drawing.Point(196, 49);
+            this.lblMbOrder.Name = "lblMbOrder";
+            this.lblMbOrder.Size = new System.Drawing.Size(44, 15);
+            this.lblMbOrder.TabIndex = 10;
+            this.lblMbOrder.Text = "字序：";
+            this.lblMbOrder.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.cboMbOrder.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboMbOrder.Location = new System.Drawing.Point(196, 66);
+            this.cboMbOrder.Name = "cboMbOrder";
+            this.cboMbOrder.Size = new System.Drawing.Size(180, 21);
+            this.cboMbOrder.TabIndex = 11;
+
+            this.lblMbTip.AutoSize = true;
+            this.lblMbTip.Location = new System.Drawing.Point(0, 93);
+            this.lblMbTip.Name = "lblMbTip";
+            this.lblMbTip.Size = new System.Drawing.Size(120, 15);
+            this.lblMbTip.TabIndex = 12;
+            this.lblMbTip.Text = "地址从 0 开始（非 40001 编号）";
+            this.lblMbTip.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            // ---------- tabProtocol：TCP 通信 / Modbus TCP 两页 ----------
+            this.tabProtocol.Dock = System.Windows.Forms.DockStyle.Top;
+            this.tabProtocol.Location = new System.Drawing.Point(3, 22);
             this.tabProtocol.Name = "tabProtocol";
             this.tabProtocol.SelectedIndex = 0;
+            this.tabProtocol.Size = new System.Drawing.Size(598, 158);
             this.tabProtocol.TabIndex = 0;
-            this.tabPageTcpClient.Text = "TCP 客户端";
-            this.tabPageTcpServer.Text = "TCP 服务端";
+            this.tabPageTcp.Text = "TCP 通信";
             this.tabPageModbus.Text = "Modbus TCP";
-            this.tabPageTcpClient.Controls.Add(this.panelTcpClient);
-            this.tabPageTcpServer.Controls.Add(this.panelTcpServer);
+            this.tabPageTcp.Controls.Add(this.panelTcp);
             this.tabPageModbus.Controls.Add(this.panelModbus);
-            this.tabProtocol.Controls.Add(this.tabPageTcpClient);
-            this.tabProtocol.Controls.Add(this.tabPageTcpServer);
+            this.tabProtocol.Controls.Add(this.tabPageTcp);
             this.tabProtocol.Controls.Add(this.tabPageModbus);
             this.tabProtocol.StyleAllPages();
 
+            // ---- panelRecv：接收显示（TCP 与 Modbus 共用）----
+            this.panelRecv.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelRecv.Location = new System.Drawing.Point(3, 180);
+            this.panelRecv.Name = "panelRecv";
+            this.panelRecv.Padding = new System.Windows.Forms.Padding(0, 2, 0, 0);
+            this.panelRecv.Size = new System.Drawing.Size(598, 105);
+            this.panelRecv.TabIndex = 1;
+            // 子控件必须逐个 Add：漏掉的话控件没有 Parent，永不显示也不响应事件
+            this.panelRecv.Controls.Add(this.txtRecv);
+            this.panelRecv.Controls.Add(this.lblRecv);
+
+            this.lblRecv.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblRecv.Location = new System.Drawing.Point(0, 2);
+            this.lblRecv.Name = "lblRecv";
+            this.lblRecv.Size = new System.Drawing.Size(598, 18);
+            this.lblRecv.TabIndex = 0;
+            this.lblRecv.Text = "接收显示：";
+            this.lblRecv.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+
+            this.txtRecv.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtRecv.Location = new System.Drawing.Point(0, 20);
+            this.txtRecv.Multiline = true;
+            this.txtRecv.Name = "txtRecv";
+            this.txtRecv.ReadOnly = true;
+            this.txtRecv.ScrollBars = System.Windows.Forms.ScrollBars.Both;
+            this.txtRecv.Size = new System.Drawing.Size(598, 85);
+            this.txtRecv.TabIndex = 1;
+            this.txtRecv.WordWrap = false;
+
             // ---------- groupLog：日志 ----------
             this.groupLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.groupLog.Location = new System.Drawing.Point(8, 332);
+            this.groupLog.Location = new System.Drawing.Point(8, 440);
             this.groupLog.Name = "groupLog";
-            this.groupLog.Size = new System.Drawing.Size(604, 280);
+            this.groupLog.Size = new System.Drawing.Size(604, 140);
             this.groupLog.TabIndex = 2;
             this.groupLog.TabStop = false;
             this.groupLog.Text = "通讯日志";
@@ -475,7 +570,7 @@ namespace VisionPlatform.UI
             this.listLog.ItemHeight = 15;
             this.listLog.Location = new System.Drawing.Point(3, 18);
             this.listLog.Name = "listLog";
-            this.listLog.Size = new System.Drawing.Size(598, 259);
+            this.listLog.Size = new System.Drawing.Size(598, 119);
             this.listLog.TabIndex = 0;
 
             // ---------- CommForm ----------
@@ -494,7 +589,6 @@ namespace VisionPlatform.UI
             ((System.ComponentModel.ISupportInitialize)(this.numSlaveId)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numAddr)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numCount)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.numValue)).EndInit();
             this.panelLeft.ResumeLayout(false);
             this.panelLeft.PerformLayout();
             this.panelListBtns.ResumeLayout(false);
@@ -503,12 +597,12 @@ namespace VisionPlatform.UI
             this.groupProps.PerformLayout();
             this.tabProtocol.ResumeLayout(false);
             this.groupOps.ResumeLayout(false);
-            this.panelTcpClient.ResumeLayout(false);
-            this.panelTcpClient.PerformLayout();
-            this.panelTcpServer.ResumeLayout(false);
-            this.panelTcpServer.PerformLayout();
+            this.panelTcp.ResumeLayout(false);
+            this.panelTcp.PerformLayout();
             this.panelModbus.ResumeLayout(false);
             this.panelModbus.PerformLayout();
+            this.panelRecv.ResumeLayout(false);
+            this.panelRecv.PerformLayout();
             this.groupLog.ResumeLayout(false);
             this.ResumeLayout(false);
         }
@@ -527,9 +621,10 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.GroupBox groupProps;
         private System.Windows.Forms.Label lblName;
         private System.Windows.Forms.TextBox txtName;
+        private System.Windows.Forms.Label lblRole;
+        private System.Windows.Forms.ComboBox cboRole;
         private VisionPlatform.UI.UiTabControl tabProtocol;
-        private System.Windows.Forms.TabPage tabPageTcpClient;
-        private System.Windows.Forms.TabPage tabPageTcpServer;
+        private System.Windows.Forms.TabPage tabPageTcp;
         private System.Windows.Forms.TabPage tabPageModbus;
         private System.Windows.Forms.Label lblHost;
         private System.Windows.Forms.TextBox txtHost;
@@ -545,11 +640,10 @@ namespace VisionPlatform.UI
         private VisionPlatform.UI.UiButton btnTest;
 
         private System.Windows.Forms.GroupBox groupOps;
-        private System.Windows.Forms.Panel panelTcpClient;
+        private System.Windows.Forms.Panel panelTcp;
         private System.Windows.Forms.Label lblSend;
         private System.Windows.Forms.TextBox txtSend;
         private VisionPlatform.UI.UiButton btnSend;
-        private System.Windows.Forms.Panel panelTcpServer;
         private System.Windows.Forms.Label lblSrvSend;
         private System.Windows.Forms.TextBox txtSrvSend;
         private VisionPlatform.UI.UiButton btnBroadcast;
@@ -561,9 +655,18 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblCount;
         private System.Windows.Forms.NumericUpDown numCount;
         private System.Windows.Forms.Label lblValue;
-        private System.Windows.Forms.NumericUpDown numValue;
+        private System.Windows.Forms.TextBox txtValue;
         private VisionPlatform.UI.UiButton btnMbRead;
         private VisionPlatform.UI.UiButton btnMbWrite;
+        private System.Windows.Forms.Label lblMbType;
+        private System.Windows.Forms.ComboBox cboMbType;
+        private System.Windows.Forms.Label lblMbOrder;
+        private System.Windows.Forms.ComboBox cboMbOrder;
+        private System.Windows.Forms.Label lblMbTip;
+
+        private System.Windows.Forms.Panel panelRecv;
+        private System.Windows.Forms.Label lblRecv;
+        private System.Windows.Forms.TextBox txtRecv;
 
         private System.Windows.Forms.GroupBox groupLog;
         private System.Windows.Forms.ListBox listLog;
