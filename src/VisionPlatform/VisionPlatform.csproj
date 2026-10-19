@@ -55,6 +55,7 @@
     <Compile Include="Camera\SimCamera.cs" />
     <Compile Include="Communication\CommRegistry.cs" />
     <Compile Include="Communication\CommState.cs" />
+    <Compile Include="Communication\ModbusData.cs" />
     <Compile Include="Communication\ModbusTcpClient.cs" />
     <Compile Include="Communication\TcpClientSession.cs" />
     <Compile Include="Communication\TcpServerSession.cs" />
@@ -118,7 +119,9 @@
       <DependentUpon>FlowForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\FlowDrawSpec.cs" />
-    <Compile Include="UI\FlowResultPanel.cs" />
+    <Compile Include="UI\FlowResultPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
     <Compile Include="UI\FlowCanvasTypes.cs" />
     <Compile Include="UI\UiButton.cs">
       <SubType>Component</SubType>

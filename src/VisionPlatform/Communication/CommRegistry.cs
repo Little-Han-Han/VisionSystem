@@ -228,6 +228,62 @@ namespace VisionPlatform.Communication
             return ch.Modbus.WriteSingleRegister(address, value);
         }
 
+        // ==================== Modbus 多数据类型读写（e.g. 12.5 / hello / true） ====================
+
+        /// <summary>
+        /// 按数据类型读保持寄存器并解码成可显示字符串（<see cref="ModbusTcpClient.ReadAs"/> 的转发）。
+        /// 未连接时会自动按配置连接一次。
+        /// </summary>
+        /// <param name="name">通讯名称（见 <see cref="Names"/>）。</param>
+        /// <param name="type">目标数据类型（Int16/UInt16/Int32/UInt32/Float32/Float64/String/Bool）。</param>
+        /// <param name="address">起始寄存器地址。</param>
+        /// <param name="length">String 时为字符数；其余类型为寄存器个数（≤0 表示只取单个值）。</param>
+        /// <param name="order">字序，默认 ABCD。</param>
+        /// <returns>成功带可显示字符串；失败消息可直接显示给用户。</returns>
+        public static OpResult<string> ModbusReadAs(
+            string name, ModbusDataType type, ushort address, int length,
+            ModbusWordOrder order = ModbusWordOrder.ABCD)
+        {
+            EnsureInitialized();
+
+            Channel ch = Find(name);
+            if (ch == null) return OpResult<string>.Fail("没有名为「" + (name ?? "") + "」的通讯");
+            if (ch.Config.Kind != CommKind.ModbusTcp)
+                return OpResult<string>.Fail("通讯「" + ch.Config.Name + "」不是 Modbus TCP");
+
+            if (!EnsureModbusConnected(name, ch))
+                return OpResult<string>.Fail("通讯「" + ch.Config.Name + "」未连接");
+
+            return ch.Modbus.ReadAs(type, address, length, order);
+        }
+
+        /// <summary>
+        /// 把文本按数据类型编码后写入保持寄存器（<see cref="ModbusTcpClient.WriteAs"/> 的转发）。
+        /// 未连接时会自动按配置连接一次。
+        /// </summary>
+        /// <param name="name">通讯名称（见 <see cref="Names"/>）。</param>
+        /// <param name="type">目标数据类型。</param>
+        /// <param name="address">起始寄存器地址。</param>
+        /// <param name="text">用户输入文本，编码规则见 <see cref="ModbusTcpClient.WriteAs"/>。</param>
+        /// <param name="order">字序，默认 ABCD。</param>
+        /// <returns>失败消息可直接显示给用户。</returns>
+        public static OpResult ModbusWriteAs(
+            string name, ModbusDataType type, ushort address, string text,
+            ModbusWordOrder order = ModbusWordOrder.ABCD)
+        {
+            EnsureInitialized();
+
+            Channel ch = Find(name);
+            if (ch == null) return OpResult.Fail("没有名为「" + (name ?? "") + "」的通讯");
+            if (ch.Config.Kind != CommKind.ModbusTcp)
+                return OpResult.Fail("通讯「" + ch.Config.Name + "」不是 Modbus TCP");
+
+            if (!EnsureModbusConnected(name, ch))
+                return OpResult.Fail("通讯「" + ch.Config.Name + "」未连接");
+
+            return ch.Modbus.WriteAs(type, address, text, order);
+        }
+
         /// <summary>程序退出时断开全部通讯（不写配置、不抛事件给已销毁的订阅者）。</summary>
         public static void Shutdown()
         {
