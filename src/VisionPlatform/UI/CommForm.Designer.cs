@@ -192,21 +192,21 @@ namespace VisionPlatform.UI
             this.groupProps.Controls.Add(this.lblSlaveId);
 
             this.lblName.AutoSize = true;
-            this.lblName.Location = new System.Drawing.Point(12, 25);
+            this.lblName.Location = new System.Drawing.Point(12, 23);
             this.lblName.Name = "lblName";
             this.lblName.Size = new System.Drawing.Size(44, 15);
             this.lblName.TabIndex = 0;
             this.lblName.Text = "名称：";
             this.lblName.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtName.Location = new System.Drawing.Point(60, 22);
+            this.txtName.Location = new System.Drawing.Point(60, 20);
             this.txtName.Name = "txtName";
             this.txtName.Size = new System.Drawing.Size(150, 21);
             this.txtName.TabIndex = 1;
 
             // 协议类型改用 tabProtocol 分页选择；TCP 页的「客户端 / 服务端」角色在这里选
             this.lblRole.AutoSize = true;
-            this.lblRole.Location = new System.Drawing.Point(240, 25);
+            this.lblRole.Location = new System.Drawing.Point(240, 23);
             this.lblRole.Name = "lblRole";
             this.lblRole.Size = new System.Drawing.Size(44, 15);
             this.lblRole.TabIndex = 2;
@@ -214,33 +214,33 @@ namespace VisionPlatform.UI
             this.lblRole.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.cboRole.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cboRole.Location = new System.Drawing.Point(288, 22);
+            this.cboRole.Location = new System.Drawing.Point(288, 20);
             this.cboRole.Name = "cboRole";
             this.cboRole.Size = new System.Drawing.Size(160, 21);
             this.cboRole.TabIndex = 3;
 
             this.lblHost.AutoSize = true;
-            this.lblHost.Location = new System.Drawing.Point(12, 53);
+            this.lblHost.Location = new System.Drawing.Point(12, 49);
             this.lblHost.Name = "lblHost";
             this.lblHost.Size = new System.Drawing.Size(56, 15);
             this.lblHost.TabIndex = 4;
             this.lblHost.Text = "IP/主机：";
             this.lblHost.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtHost.Location = new System.Drawing.Point(74, 50);
+            this.txtHost.Location = new System.Drawing.Point(74, 46);
             this.txtHost.Name = "txtHost";
             this.txtHost.Size = new System.Drawing.Size(136, 21);
             this.txtHost.TabIndex = 5;
 
             this.lblPort.AutoSize = true;
-            this.lblPort.Location = new System.Drawing.Point(226, 53);
+            this.lblPort.Location = new System.Drawing.Point(226, 49);
             this.lblPort.Name = "lblPort";
             this.lblPort.Size = new System.Drawing.Size(44, 15);
             this.lblPort.TabIndex = 6;
             this.lblPort.Text = "端口：";
             this.lblPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numPort.Location = new System.Drawing.Point(274, 50);
+            this.numPort.Location = new System.Drawing.Point(274, 46);
             this.numPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numPort.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numPort.Name = "numPort";
@@ -249,14 +249,14 @@ namespace VisionPlatform.UI
             this.numPort.Value = new decimal(new int[] { 9000, 0, 0, 0 });
 
             this.lblSlaveId.AutoSize = true;
-            this.lblSlaveId.Location = new System.Drawing.Point(370, 53);
+            this.lblSlaveId.Location = new System.Drawing.Point(370, 49);
             this.lblSlaveId.Name = "lblSlaveId";
             this.lblSlaveId.Size = new System.Drawing.Size(56, 15);
             this.lblSlaveId.TabIndex = 8;
             this.lblSlaveId.Text = "从站号：";
             this.lblSlaveId.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numSlaveId.Location = new System.Drawing.Point(432, 50);
+            this.numSlaveId.Location = new System.Drawing.Point(432, 46);
             this.numSlaveId.Maximum = new decimal(new int[] { 247, 0, 0, 0 });
             this.numSlaveId.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numSlaveId.Name = "numSlaveId";
@@ -265,7 +265,7 @@ namespace VisionPlatform.UI
             this.numSlaveId.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
             this.chkEnabled.AutoSize = true;
-            this.chkEnabled.Location = new System.Drawing.Point(12, 80);
+            this.chkEnabled.Location = new System.Drawing.Point(12, 74);
             this.chkEnabled.Name = "chkEnabled";
             this.chkEnabled.Size = new System.Drawing.Size(54, 19);
             this.chkEnabled.TabIndex = 10;
@@ -273,35 +273,35 @@ namespace VisionPlatform.UI
             this.chkEnabled.UseVisualStyleBackColor = true;
 
             this.chkAutoConnect.AutoSize = true;
-            this.chkAutoConnect.Location = new System.Drawing.Point(90, 80);
+            this.chkAutoConnect.Location = new System.Drawing.Point(90, 74);
             this.chkAutoConnect.Name = "chkAutoConnect";
             this.chkAutoConnect.Size = new System.Drawing.Size(126, 19);
             this.chkAutoConnect.TabIndex = 11;
             this.chkAutoConnect.Text = "启动时自动连接";
             this.chkAutoConnect.UseVisualStyleBackColor = true;
 
-            this.btnSave.Location = new System.Drawing.Point(12, 104);
+            this.btnSave.Location = new System.Drawing.Point(12, 98);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(92, 32);
             this.btnSave.TabIndex = 12;
             this.btnSave.Text = "保存";
             this.btnSave.UseVisualStyleBackColor = true;
 
-            this.btnConnect.Location = new System.Drawing.Point(112, 104);
+            this.btnConnect.Location = new System.Drawing.Point(112, 98);
             this.btnConnect.Name = "btnConnect";
             this.btnConnect.Size = new System.Drawing.Size(92, 32);
             this.btnConnect.TabIndex = 13;
             this.btnConnect.Text = "连接";
             this.btnConnect.UseVisualStyleBackColor = true;
 
-            this.btnDisconnect.Location = new System.Drawing.Point(212, 104);
+            this.btnDisconnect.Location = new System.Drawing.Point(212, 98);
             this.btnDisconnect.Name = "btnDisconnect";
             this.btnDisconnect.Size = new System.Drawing.Size(92, 32);
             this.btnDisconnect.TabIndex = 14;
             this.btnDisconnect.Text = "断开";
             this.btnDisconnect.UseVisualStyleBackColor = true;
 
-            this.btnTest.Location = new System.Drawing.Point(312, 104);
+            this.btnTest.Location = new System.Drawing.Point(312, 98);
             this.btnTest.Name = "btnTest";
             this.btnTest.Size = new System.Drawing.Size(92, 32);
             this.btnTest.TabIndex = 15;
@@ -345,11 +345,18 @@ namespace VisionPlatform.UI
             this.lblSend.Text = "发送内容：";
             this.lblSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
+            // 输入框锚在左右两边（随窗体变宽而拉伸），按钮锚在右边（与右边界保持固定间距），
+            // 这样窗体被拉宽 / 缩到最小尺寸时都不会互相压盖，也不会被裁掉。
+            this.txtSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                (System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+                | System.Windows.Forms.AnchorStyles.Right));
             this.txtSend.Location = new System.Drawing.Point(0, 20);
             this.txtSend.Name = "txtSend";
             this.txtSend.Size = new System.Drawing.Size(420, 21);
             this.txtSend.TabIndex = 1;
 
+            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
             this.btnSend.Location = new System.Drawing.Point(432, 16);
             this.btnSend.Name = "btnSend";
             this.btnSend.Size = new System.Drawing.Size(96, 32);
@@ -365,11 +372,16 @@ namespace VisionPlatform.UI
             this.lblSrvSend.Text = "广播内容：";
             this.lblSrvSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
+            this.txtSrvSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                (System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+                | System.Windows.Forms.AnchorStyles.Right));
             this.txtSrvSend.Location = new System.Drawing.Point(0, 70);
             this.txtSrvSend.Name = "txtSrvSend";
             this.txtSrvSend.Size = new System.Drawing.Size(288, 21);
             this.txtSrvSend.TabIndex = 4;
 
+            this.btnBroadcast.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
             this.btnBroadcast.Location = new System.Drawing.Point(296, 66);
             this.btnBroadcast.Name = "btnBroadcast";
             this.btnBroadcast.Size = new System.Drawing.Size(84, 32);
@@ -379,6 +391,8 @@ namespace VisionPlatform.UI
 
             // 「启动监听 / 停止监听」与「广播」同为服务端能力，放在同一行，
             // 三者按角色一起启用 / 禁用；页内可用高约 114，98px 的内容不再被裁切。
+            this.btnStartListen.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
             this.btnStartListen.Location = new System.Drawing.Point(388, 66);
             this.btnStartListen.Name = "btnStartListen";
             this.btnStartListen.Size = new System.Drawing.Size(84, 32);
@@ -386,6 +400,8 @@ namespace VisionPlatform.UI
             this.btnStartListen.Text = "启动监听";
             this.btnStartListen.UseVisualStyleBackColor = true;
 
+            this.btnStopListen.Anchor = ((System.Windows.Forms.AnchorStyles)(
+                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
             this.btnStopListen.Location = new System.Drawing.Point(480, 66);
             this.btnStopListen.Name = "btnStopListen";
             this.btnStopListen.Size = new System.Drawing.Size(84, 32);
@@ -574,12 +590,18 @@ namespace VisionPlatform.UI
             this.listLog.TabIndex = 0;
 
             // ---------- CommForm ----------
+            // 【最小尺寸】本窗体的标题栏支持边缘拉伸（WM_NCHITTEST），用户真能把它拖小，
+            // 所以最小尺寸必须保证「一个控件都不被裁、日志区还留得下」：
+            //   宽 1010 → panelRight 550 → 分组 534 → 页内 520
+            //     最宽需求：Modbus 写入按钮 Right=504、从站号 Right=502 → 余量 16 / 22 px
+            //     页内输入框已锚左右、按钮锚右，拉宽时自动伸展，缩到最小也不互相压盖
+            //   高  580 → 572 刻度下 groupProps 142 + groupOps 290，日志区仍有 100（约 6 行）
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1080, 620);
             this.Controls.Add(this.panelRight);
             this.Controls.Add(this.panelLeft);
-            this.MinimumSize = new System.Drawing.Size(940, 520);
+            this.MinimumSize = new System.Drawing.Size(1010, 580);
             this.Name = "CommForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "通讯管理（TCP / Modbus TCP）";
