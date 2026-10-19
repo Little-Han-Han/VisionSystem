@@ -154,10 +154,14 @@ namespace VisionPlatform.UI
             // ---------- panelRight：属性编辑 + 操作 + 日志 ----------
             // 【高度账】标题栏占 32，panelRight Padding 上下各 8：
             //   620(ClientSize) - 32(标题栏) - 16(padding) = 572
-            //   groupProps 142 + groupOps 290 + groupLog 140 = 572
-            this.panelRight.Controls.Add(this.groupLog);
+            //   groupProps 142(Top) + groupOps 290(Fill) + groupLog 140(Bottom) = 572
+            // 【停靠顺序】WinForms 按集合逆序停靠，Fill 的必须最先 Add（最后才布局，才能吃剩余）：
+            //   Add(groupOps=Fill) → Add(groupProps=Top) → Add(groupLog=Bottom)
+            // 这样窗体变高变矮时，伸缩的是「收发测试 + 接收显示」，
+            // 日志区固定 140 稳定不动（改之前日志是 Fill，窗高变小全压在它身上，被压到只剩 40）。
             this.panelRight.Controls.Add(this.groupOps);
             this.panelRight.Controls.Add(this.groupProps);
+            this.panelRight.Controls.Add(this.groupLog);
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelRight.Location = new System.Drawing.Point(460, 0);
             this.panelRight.Name = "panelRight";
@@ -229,38 +233,40 @@ namespace VisionPlatform.UI
 
             this.txtHost.Location = new System.Drawing.Point(74, 46);
             this.txtHost.Name = "txtHost";
-            this.txtHost.Size = new System.Drawing.Size(136, 21);
+            this.txtHost.Size = new System.Drawing.Size(120, 21);
             this.txtHost.TabIndex = 5;
 
             this.lblPort.AutoSize = true;
-            this.lblPort.Location = new System.Drawing.Point(226, 49);
+            this.lblPort.Location = new System.Drawing.Point(202, 49);
             this.lblPort.Name = "lblPort";
             this.lblPort.Size = new System.Drawing.Size(44, 15);
             this.lblPort.TabIndex = 6;
             this.lblPort.Text = "端口：";
             this.lblPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numPort.Location = new System.Drawing.Point(274, 46);
+            this.numPort.Location = new System.Drawing.Point(250, 46);
             this.numPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numPort.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numPort.Name = "numPort";
-            this.numPort.Size = new System.Drawing.Size(80, 21);
+            this.numPort.Size = new System.Drawing.Size(64, 21);
             this.numPort.TabIndex = 7;
             this.numPort.Value = new decimal(new int[] { 9000, 0, 0, 0 });
 
             this.lblSlaveId.AutoSize = true;
-            this.lblSlaveId.Location = new System.Drawing.Point(370, 49);
+            this.lblSlaveId.Location = new System.Drawing.Point(322, 49);
             this.lblSlaveId.Name = "lblSlaveId";
             this.lblSlaveId.Size = new System.Drawing.Size(56, 15);
             this.lblSlaveId.TabIndex = 8;
             this.lblSlaveId.Text = "从站号：";
             this.lblSlaveId.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numSlaveId.Location = new System.Drawing.Point(432, 46);
+            // 从站号右边界 444：GroupBox 不是 ScrollableControl（没有 AutoScroll），
+            // 窄到最小尺寸（分组内宽 458）时也必须整体放得下，故宽度收到 60 并左移。
+            this.numSlaveId.Location = new System.Drawing.Point(384, 46);
             this.numSlaveId.Maximum = new decimal(new int[] { 247, 0, 0, 0 });
             this.numSlaveId.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numSlaveId.Name = "numSlaveId";
-            this.numSlaveId.Size = new System.Drawing.Size(70, 21);
+            this.numSlaveId.Size = new System.Drawing.Size(60, 21);
             this.numSlaveId.TabIndex = 9;
             this.numSlaveId.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
@@ -309,9 +315,10 @@ namespace VisionPlatform.UI
             this.btnTest.UseVisualStyleBackColor = true;
 
             // ---------- groupOps：收发测试（TCP 客户端 / 服务端已整合进同一页） ----------
+            // Dock=Fill：吸收 groupProps(142) 与 groupLog(140) 之外的全部剩余高度，
+            // 默认尺寸下 = 572 - 142 - 140 = 290（与改之前完全一致，观感不变）。
             // Dock 顺序（自下而上）：先加 panelRecv（Fill，吃剩余），再加 tabProtocol（Top）。
-            // groupOps 290 → 内部约 265；tabProtocol 占 158，接收区约 107。
-            this.groupOps.Dock = System.Windows.Forms.DockStyle.Top;
+            this.groupOps.Dock = System.Windows.Forms.DockStyle.Fill;
             this.groupOps.Location = new System.Drawing.Point(8, 150);
             this.groupOps.Name = "groupOps";
             this.groupOps.Size = new System.Drawing.Size(604, 290);
@@ -323,6 +330,9 @@ namespace VisionPlatform.UI
             this.groupOps.Controls.Add(this.tabProtocol);
 
             // ---- panelTcp：TCP 通信（客户端发送 + 服务端广播 / 监听，按角色启用）----
+            // AutoScroll：Panel 是 ScrollableControl，窗口窄于内容时出滚动条，
+            // 绝对定位的按钮仍可滚动触达，而不是被永久裁掉。
+            this.panelTcp.AutoScroll = true;
             this.panelTcp.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelTcp.Name = "panelTcp";
             this.panelTcp.Size = new System.Drawing.Size(578, 114);
@@ -345,19 +355,17 @@ namespace VisionPlatform.UI
             this.lblSend.Text = "发送内容：";
             this.lblSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            // 输入框锚在左右两边（随窗体变宽而拉伸），按钮锚在右边（与右边界保持固定间距），
-            // 这样窗体被拉宽 / 缩到最小尺寸时都不会互相压盖，也不会被裁掉。
-            this.txtSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                (System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
-                | System.Windows.Forms.AnchorStyles.Right));
+            // 【刻意不用 Anchor】Panel 开了 AutoScroll 后，锚定控件的右间距会按「显示矩形」算，
+            // 一旦内容撑大过一次就再也收不回来（实测 txtSend.Right 会停在被撑大的 918 上）。
+            // 因此页内一律绝对定位，窄宽度改由 AutoScroll 兜底（见 panelTcp.AutoScroll）。
+            // 【宽度预算 520】页内最右边界压到 520（原 564），使新最小尺寸（页内 530）下
+            // 不需要横向滚动条也能全部放下：发送按钮 508、停止监听 520、Modbus 写入 504。
             this.txtSend.Location = new System.Drawing.Point(0, 20);
             this.txtSend.Name = "txtSend";
-            this.txtSend.Size = new System.Drawing.Size(420, 21);
+            this.txtSend.Size = new System.Drawing.Size(400, 21);
             this.txtSend.TabIndex = 1;
 
-            this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
-            this.btnSend.Location = new System.Drawing.Point(432, 16);
+            this.btnSend.Location = new System.Drawing.Point(412, 16);
             this.btnSend.Name = "btnSend";
             this.btnSend.Size = new System.Drawing.Size(96, 32);
             this.btnSend.TabIndex = 2;
@@ -372,17 +380,12 @@ namespace VisionPlatform.UI
             this.lblSrvSend.Text = "广播内容：";
             this.lblSrvSend.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtSrvSend.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                (System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
-                | System.Windows.Forms.AnchorStyles.Right));
             this.txtSrvSend.Location = new System.Drawing.Point(0, 70);
             this.txtSrvSend.Name = "txtSrvSend";
-            this.txtSrvSend.Size = new System.Drawing.Size(288, 21);
+            this.txtSrvSend.Size = new System.Drawing.Size(244, 21);
             this.txtSrvSend.TabIndex = 4;
 
-            this.btnBroadcast.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
-            this.btnBroadcast.Location = new System.Drawing.Point(296, 66);
+            this.btnBroadcast.Location = new System.Drawing.Point(252, 66);
             this.btnBroadcast.Name = "btnBroadcast";
             this.btnBroadcast.Size = new System.Drawing.Size(84, 32);
             this.btnBroadcast.TabIndex = 5;
@@ -391,18 +394,14 @@ namespace VisionPlatform.UI
 
             // 「启动监听 / 停止监听」与「广播」同为服务端能力，放在同一行，
             // 三者按角色一起启用 / 禁用；页内可用高约 114，98px 的内容不再被裁切。
-            this.btnStartListen.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
-            this.btnStartListen.Location = new System.Drawing.Point(388, 66);
+            this.btnStartListen.Location = new System.Drawing.Point(344, 66);
             this.btnStartListen.Name = "btnStartListen";
             this.btnStartListen.Size = new System.Drawing.Size(84, 32);
             this.btnStartListen.TabIndex = 6;
             this.btnStartListen.Text = "启动监听";
             this.btnStartListen.UseVisualStyleBackColor = true;
 
-            this.btnStopListen.Anchor = ((System.Windows.Forms.AnchorStyles)(
-                System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right));
-            this.btnStopListen.Location = new System.Drawing.Point(480, 66);
+            this.btnStopListen.Location = new System.Drawing.Point(436, 66);
             this.btnStopListen.Name = "btnStopListen";
             this.btnStopListen.Size = new System.Drawing.Size(84, 32);
             this.btnStopListen.TabIndex = 7;
@@ -410,6 +409,7 @@ namespace VisionPlatform.UI
             this.btnStopListen.UseVisualStyleBackColor = true;
 
             // ---- panelModbus：Modbus TCP（多数据类型 + 四种字序）----
+            this.panelModbus.AutoScroll = true;
             this.panelModbus.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelModbus.Name = "panelModbus";
             this.panelModbus.Size = new System.Drawing.Size(578, 114);
@@ -569,8 +569,8 @@ namespace VisionPlatform.UI
             this.txtRecv.TabIndex = 1;
             this.txtRecv.WordWrap = false;
 
-            // ---------- groupLog：日志 ----------
-            this.groupLog.Dock = System.Windows.Forms.DockStyle.Fill;
+            // ---------- groupLog：日志（Dock=Bottom + 固定 140，不再随窗高萎缩）----------
+            this.groupLog.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.groupLog.Location = new System.Drawing.Point(8, 440);
             this.groupLog.Name = "groupLog";
             this.groupLog.Size = new System.Drawing.Size(604, 140);
@@ -590,18 +590,17 @@ namespace VisionPlatform.UI
             this.listLog.TabIndex = 0;
 
             // ---------- CommForm ----------
-            // 【最小尺寸】本窗体的标题栏支持边缘拉伸（WM_NCHITTEST），用户真能把它拖小，
-            // 所以最小尺寸必须保证「一个控件都不被裁、日志区还留得下」：
-            //   宽 1010 → panelRight 550 → 分组 534 → 页内 520
-            //     最宽需求：Modbus 写入按钮 Right=504、从站号 Right=502 → 余量 16 / 22 px
-            //     页内输入框已锚左右、按钮锚右，拉宽时自动伸展，缩到最小也不互相压盖
-            //   高  580 → 572 刻度下 groupProps 142 + groupOps 290，日志区仍有 100（约 6 行）
+            // 【最小尺寸】标题栏 UiTitleBar 支持边缘拉伸（WM_NCHITTEST），用户真能把它拖小：
+            //   宽 1020 → panelRight 560 → 分组 544 → 页内 530（最宽需求：Modbus 写入按钮 504）
+            //   高  580 → 可用 512，groupProps 142 + groupLog 140 之后，收发区仍有 230
+            //             （其中 tabProtocol 158，接收显示 50，仍可滚动/可用）
+            // 再窄再矮就有控件被裁或接收区归零，故以此为下限。
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1080, 620);
             this.Controls.Add(this.panelRight);
             this.Controls.Add(this.panelLeft);
-            this.MinimumSize = new System.Drawing.Size(1010, 580);
+            this.MinimumSize = new System.Drawing.Size(1020, 580);
             this.Name = "CommForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "通讯管理（TCP / Modbus TCP）";
