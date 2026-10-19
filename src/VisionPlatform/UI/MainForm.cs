@@ -98,6 +98,32 @@ namespace VisionPlatform.UI
         private int _pendingLivePosted;          // 0=无待显示帧；1=已投递一帧待处理
         private bool _liveViewerFitted;          // 首个实时帧做一次 FitToWindow
 
+        // ---- 流程结果合并显示（诉求 2 回归修复）----
+        // 多流程并行后，每条流程每帧都经 FlowOutputChannel 回传；若逐结果一次 BeginInvoke 做
+        // 整幅帧克隆 + 重绘，单 UI 线程会被 N×30fps 的发布淹没，消息队列积压 → 界面卡死/无显示。
+        // 照 OnLiveFrame 的「覆盖式合帧」范式：每个视图只保留最新一帧 + 单个待投递标志，丢弃中间帧。
+        private readonly Dictionary<int, PendingFlowOutput> _pendingOutputs =
+            new Dictionary<int, PendingFlowOutput>();
+        private readonly object _pendingOutputsSync = new object();
+
+        /// <summary>某视图当前待显示的最新结果（覆盖式合帧用）。</summary>
+        private sealed class PendingFlowOutput
+        {
+            public Bitmap Frame;                 // 最新待显示帧（所有权在此，被替换时释放）
+            public List<IGeometryShape> Shapes;  // 最新叠加图形（引用，不克隆）
+            public bool Passed;
+            public string Summary = "";
+            public string CameraName = "";
+            public int Posted;                   // 0=无待处理；1=已投递一次 BeginInvoke
+        }
+
+        // ---- 日志批量拉取（诉求 2 回归修复）----
+        // Logger 在后台线程同步触发 Logged，原 OnLogged 每行一次 BeginInvoke；并行下 RESULT 行可达
+        // 90 行/秒，同样淹没 UI 线程。改为缓冲 + UI 线程定时器批量拉取（与 LogPanel 设计意图一致）。
+        private List<string> _logBuffer = new List<string>();
+        private readonly object _logSync = new object();
+        private System.Windows.Forms.Timer _logTimer;
+
         // ---- 主界面流程下拉运行（选流程 → 选本地图片 → 运行，结果经既有通道显示到主视图）----
         // 与流程编排页(FlowForm) / 并行槽(FlowRunManager) 各自持有独立的 FlowRunner，互不干扰。
         private FlowRunner _flowRunner;          // 流程执行器；算法库不可用时为 null（下拉框降级禁用）
@@ -132,6 +158,12 @@ namespace VisionPlatform.UI
             Logger.Logged += OnLogged;
             RecipeStore.CurrentChanged += OnRecipeChanged;
             CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
+
+            // 日志批量拉取定时器（UI 线程，200ms 一次）：OnLogged 仅入缓冲，由它批量刷到 listLog，
+            // 避免并行运行下海量日志行逐条 BeginInvoke 淹没 UI 线程（见 OnLogged / OnLogTimerTick）。
+            _logTimer = new System.Windows.Forms.Timer { Interval = 200 };
+            _logTimer.Tick += OnLogTimerTick;
+            _logTimer.Start();
             ConfigStore.Changed += OnConfigChanged;
             FlowOutputChannel.OutputReady += OnFlowOutput;
 
@@ -1223,16 +1255,41 @@ namespace VisionPlatform.UI
         private void OnLogged(object sender, string line)
         {
             if (IsDisposed || !IsHandleCreated) return;
+            if (string.IsNullOrEmpty(line)) return;
+
+            // 仅入缓冲，由 UI 线程的 _logTimer 批量拉取（见 OnLogTimerTick）。
+            // 不在后台线程逐行 BeginInvoke —— 并行运行下 RESULT 行可达 90 行/秒，逐条投递会淹没 UI 线程。
+            lock (_logSync)
+            {
+                _logBuffer.Add(line);
+            }
+        }
+
+        /// <summary>
+        /// 日志批量拉取（UI 线程，200ms 一次）：把缓冲中的日志行一次性追加到 listLog 并裁剪到上限，
+        /// 把并行运行下 90+ 行/秒的日志洪流从「逐行 BeginInvoke」压成「每秒约 5 次批量追加」。
+        /// </summary>
+        private void OnLogTimerTick(object sender, EventArgs e)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+
+            List<string> batch;
+            lock (_logSync)
+            {
+                if (_logBuffer.Count == 0) return;
+                batch = _logBuffer;
+                _logBuffer = new List<string>();
+            }
 
             try
             {
-                BeginInvoke((MethodInvoker)delegate
+                foreach (string line in batch)
                 {
                     listLog.Items.Add(line);
                     // FR-UI-09：日志上限 500 行，超出移除最旧一行（控制 5 分钟连续运行的内存增长）
                     while (listLog.Items.Count > UiTheme.LogMaxLines) listLog.Items.RemoveAt(0);
-                    listLog.TopIndex = listLog.Items.Count - 1;
-                });
+                }
+                listLog.TopIndex = listLog.Items.Count - 1;
             }
             catch (Exception)
             {
@@ -1546,45 +1603,97 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            // —— 覆盖式合帧（诉求 2 回归修复）——
+            // 多流程并行时每条流程每帧都回传结果。若逐结果一次 BeginInvoke 做整幅帧克隆 + 重绘，
+            // 单 UI 线程会被 N×30fps 的发布淹没，消息队列积压 → 界面卡死/无显示。
+            // 改为：每个视图只保留最新一帧（中间帧被替换即释放），且同一视图最多投递一次 BeginInvoke；
+            // 渲染跟不上时天然丢弃中间帧（与 OnLiveFrame 同一范式）。
+            PendingFlowOutput slot;
+            lock (_pendingOutputsSync)
+            {
+                if (!_pendingOutputs.TryGetValue(idx, out slot) || slot == null)
+                {
+                    slot = new PendingFlowOutput();
+                    _pendingOutputs[idx] = slot;
+                }
+                if (slot.Frame != null) slot.Frame.Dispose();   // 旧帧被替换，立即释放
+                slot.Frame = e.Frame;            // 取得帧所有权（原事件持有）
+                slot.Shapes = e.Shapes;
+                slot.Passed = e.Passed;
+                slot.Summary = e.Summary ?? "";
+                slot.CameraName = e.CameraName ?? "";
+                e.Frame = null;                  // 所有权已转移，防止重复释放
+            }
+
+            // 已有待处理投递则跳过本次投递（最新帧已留在 slot.Frame 中）
+            if (System.Threading.Interlocked.Exchange(ref slot.Posted, 1) == 1) return;
+
             try
             {
                 BeginInvoke((MethodInvoker)delegate
                 {
+                    PendingFlowOutput s;
+                    Bitmap frame;
+                    List<IGeometryShape> shapes;
+                    bool passed;
+                    string summary;
+                    string cameraName;
+
+                    lock (_pendingOutputsSync)
+                    {
+                        if (!_pendingOutputs.TryGetValue(idx, out s) || s == null) return;
+                        System.Threading.Interlocked.Exchange(ref s.Posted, 0);   // 允许下次投递
+                        // 取出最新快照后释放锁，再操作 UI
+                        frame = s.Frame;
+                        shapes = s.Shapes;
+                        passed = s.Passed;
+                        summary = s.Summary;
+                        cameraName = s.CameraName;
+                        s.Frame = null;   // 取出，下方交由视图或释放处理
+                        s.Shapes = null;
+                    }
+
+                    if (IsDisposed || !IsHandleCreated) { if (frame != null) frame.Dispose(); return; }
+
                     try
                     {
                         ImageViewer view = _views[idx];
-                        Bitmap frame = e.Frame;
-                        if (frame != null)
-                            view.SetImage((Bitmap)frame.Clone(), true);   // 克隆后由控件持有，原帧随后释放
+                        Bitmap disp = frame != null ? (Bitmap)frame.Clone() : null;
+                        if (disp != null) view.SetImage(disp, true);   // 克隆后由控件持有，原帧随后释放
 
                         if (idx < _captions.Count && _captions[idx] != null)
-                            _captions[idx].Text = "  " + (string.IsNullOrEmpty(e.CameraName) ? "流程结果" : e.CameraName)
+                            _captions[idx].Text = "  " + (string.IsNullOrEmpty(cameraName) ? "流程结果" : cameraName)
                                                   + " · " + ActiveFlowName;
 
                         // 流程结论同样驱动右栏徽标、视图角标与状态栏（与配方检测链路同一套口径）
-                        _lastSummary = e.Summary ?? "";
-                        SetVerdict(e.Passed);
-                        SetViewVerdict(idx, e.Passed);
+                        _lastSummary = summary ?? "";
+                        SetVerdict(passed);
+                        SetViewVerdict(idx, passed);
                         UpdateStatus();
 
                         view.ClearShapes();
-                        if (e.Shapes != null)
+                        if (shapes != null)
                         {
-                            foreach (IGeometryShape s in e.Shapes)
-                                if (s != null) view.Shapes.Add(s);
+                            foreach (IGeometryShape sh in shapes)
+                                if (sh != null) view.Shapes.Add(sh);
                         }
                         view.Shapes.NotifyChanged();   // 改几何后必须通知重绘
                     }
                     finally
                     {
-                        if (e.Frame != null) e.Frame.Dispose();
+                        if (frame != null) frame.Dispose();
                     }
                 });
             }
             catch (Exception ex)
             {
+                // BeginInvoke 投递失败：重置标志并释放帧，避免该视图再也无法刷新
+                System.Threading.Interlocked.Exchange(ref slot.Posted, 0);
+                lock (_pendingOutputsSync)
+                {
+                    if (slot.Frame != null) { slot.Frame.Dispose(); slot.Frame = null; }
+                }
                 Logger.Warn("显示流程结果失败：" + ex.Message);
-                if (e.Frame != null) e.Frame.Dispose();
             }
         }
 
@@ -1817,6 +1926,16 @@ namespace VisionPlatform.UI
 
             _closing = true;
             loopTimer.Stop();
+            if (_logTimer != null) { _logTimer.Stop(); _logTimer = null; }
+            // 释放可能残留的待显示帧，避免关窗后 Bitmap 泄漏
+            lock (_pendingOutputsSync)
+            {
+                foreach (var kv in _pendingOutputs)
+                {
+                    if (kv.Value != null && kv.Value.Frame != null) kv.Value.Frame.Dispose();
+                }
+                _pendingOutputs.Clear();
+            }
             // 连续实时预览收尾：退订 FrameReceived + StopGrab，早于 CloseAll，避免关窗后残留处理器
             StopLive();
 
