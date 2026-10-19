@@ -15,7 +15,8 @@ namespace VisionPlatform.UI
     /// </para>
     /// <para>
     /// 【不做的事】自绘控件（<see cref="UiButton"/>、ImageViewer、FlowCanvasControl、
-    /// FlowPreviewPanel、NodeParamPanel）自己管理配色，本类一律跳过，避免覆盖；
+    /// FlowPreviewPanel、NodeParamPanel、<see cref="UiTitleBar"/>）自己管理配色，
+    /// 本类一律跳过，避免覆盖；
     /// 语义色（OK/NG 徽标、统计数值、分组标题）由各窗体在调用之后自行覆盖，
     /// 后写者生效，因此调用点必须放在构造函数末尾、业务样式之前。
     /// </para>
@@ -91,7 +92,8 @@ namespace VisionPlatform.UI
             Type t = c.GetType();
             if (t.Namespace == "VisionPlatform.UI" &&
                 (t.Name == "FlowCanvasControl" || t.Name == "FlowPreviewPanel" ||
-                 t.Name == "NodeParamPanel" || t.Name == "UiTabControl"))
+                 t.Name == "NodeParamPanel" || t.Name == "UiTabControl" ||
+                 t.Name == "UiTitleBar"))
                 return true;
 
             return false;

@@ -129,6 +129,9 @@
     </Compile>
     <Compile Include="UI\UiGrid.cs" />
     <Compile Include="UI\UiStyle.cs" />
+    <Compile Include="UI\UiTitleBar.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="UI\UiTree.cs" />
     <Compile Include="UI\UiThemeManager.cs" />
     <Compile Include="UI\CommForm.cs">

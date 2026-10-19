@@ -129,6 +129,9 @@ namespace VisionPlatform.UI
             flowPreview.ShapePicked += OnShapePicked;
             flowPreview.RoiPickRequested += OnDrawRequested;
             flowPreview.RoiPickCancelled += OnRoiPickCancelled;
+
+            // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
+            UiTitleBar.Attach(this);
         }
 
         #region 初始化

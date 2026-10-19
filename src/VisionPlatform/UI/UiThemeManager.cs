@@ -123,6 +123,10 @@ namespace VisionPlatform.UI
                 NodeParamPanel param = c as NodeParamPanel;
                 if (param != null) { param.ApplyTheme(); continue; }
 
+                // 自绘标题栏：底色 / 文字色取自 UiTheme，换色板后必须重绘取新色
+                UiTitleBar bar = c as UiTitleBar;
+                if (bar != null) { bar.ApplyTheme(); continue; }
+
                 if (c.HasChildren) ReapplySelfDrawn(c);
             }
         }

@@ -39,6 +39,9 @@ namespace VisionPlatform.UI
             UiStyle.ApplyForm(this);
             ApplySemanticColors();
 
+            // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
+            UiTitleBar.Attach(this);
+
             WireEvents();
 
             _registryHandler = OnRegistryChanged;

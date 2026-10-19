@@ -501,7 +501,10 @@ namespace VisionPlatform.UI
             this.Controls.Add(this.panelLeft);
             this.Font = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.ForeColor = System.Drawing.Color.Gainsboro;
-            this.MinimumSize = new System.Drawing.Size(1157, 634);
+            // 【无边框后必须与 ClientSize 对齐】自绘标题栏要求 FormBorderStyle=None，
+            // 此时「整窗尺寸 == 客户区尺寸」，而 MinimumSize 约束的是整窗；
+            // 原值 1157 > ClientSize 1155 会被系统强行拉宽 2 px，故下调到 1155×637。
+            this.MinimumSize = new System.Drawing.Size(1155, 637);
             this.Name = "FlowForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "流程编排";

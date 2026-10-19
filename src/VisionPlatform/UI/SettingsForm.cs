@@ -30,6 +30,10 @@ namespace VisionPlatform.UI
 
             UiStyle.ApplyForm(this);
 
+            // 自绘深色标题栏：本窗体是 FixedDialog，只给拖动热区、不给边缘拉伸。
+            // 三个 GroupBox 是绝对定位，Attach 内部会自动把客户区加高并整体下移避让。
+            UiTitleBar.Attach(this);
+
             // 语义色：确定=绿，清理历史（删除文件）=红；其余中性
             btnOk.Kind = UiButtonKind.Start;
             btnCleanup.Kind = UiButtonKind.Stop;

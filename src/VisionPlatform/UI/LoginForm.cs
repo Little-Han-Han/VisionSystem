@@ -20,6 +20,10 @@ namespace VisionPlatform.UI
             txtUser.SelectAll();
 
             UiStyle.ApplyForm(this);
+
+            // 自绘深色标题栏：本窗体是 FixedDialog，只给拖动热区、不给边缘拉伸。
+            // 全绝对定位（无 Dock），Attach 内部会把客户区加高一个标题栏并把子控件整体下移避让。
+            UiTitleBar.Attach(this);
         }
 
         private void OnLogin(object sender, EventArgs e)

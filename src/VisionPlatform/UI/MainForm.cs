@@ -143,6 +143,10 @@ namespace VisionPlatform.UI
             // 主题在 InitializeComponent 之后统一套用：Designer 只写结构，颜色 / 字体单点来自 UiTheme
             ApplyTheme();
 
+            // 自绘深色标题栏（最小化 / 最大化 / 关闭）：替掉系统原生浅色非客户区，
+            // 拖动 / 双击最大化 / 边缘拉伸由 WM_NCHITTEST 交给系统原生行为。
+            UiTitleBar.Attach(this);
+
             _logCollapsed = ConfigStore.Current.Ui.LogCollapsed;
             ApplyLogCollapsed();
 

@@ -363,6 +363,12 @@ namespace VisionPlatform.UI
         public const int StatusBarHeight = 26;
 
         /// <summary>
+        /// 自绘标题栏高度 32 px（与 <see cref="UiTabControl.TabHeight"/> 同高，
+        /// 视觉上与分页条齐平；比 40 px 工具栏略矮，形成「标题栏 → 工具栏」的层次）。
+        /// </summary>
+        public const int TitleBarHeight = 32;
+
+        /// <summary>
         /// 日志保留上限 2000 行（超出移除最旧一行）。
         /// <para>【为什么从 500 提到 2000】并行后每条流程每帧都会产一行 RESULT：
         /// 4 条流程 × 30 fps ≈ 90 行/秒，500 行只够存 5 秒，排障时看不到历史。

@@ -29,6 +29,9 @@ namespace VisionPlatform.UI
 
             UiStyle.ApplyForm(this);
 
+            // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
+            UiTitleBar.Attach(this);
+
             // 语义色：打开/开始采集=绿，关闭/停止=红，单帧=蓝，刷新=中性
             btnOpen.Kind = UiButtonKind.Start;
             btnStart.Kind = UiButtonKind.Start;
