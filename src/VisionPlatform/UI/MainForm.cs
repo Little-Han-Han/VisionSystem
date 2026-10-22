@@ -68,6 +68,25 @@ namespace VisionPlatform.UI
         /// <summary>连续 NG 计数（≥3 时右栏显示橙色警示条，FR-UI-05）。</summary>
         private int _consecutiveNg;
 
+        /// <summary>
+        /// 按流程归一化的 OK/NG 计数（流程维度隔离，满足「OK/NG 按流程区分」诉求）。
+        /// key = 流程 Id（缺失时回退流程名）；value = 该流程累计 OK/NG。
+        /// </summary>
+        private readonly object _flowStatSync = new object();
+        private Dictionary<string, FlowOkNg> _flowStats = new Dictionary<string, FlowOkNg>(StringComparer.Ordinal);
+
+        /// <summary>当前展示用的流程（最近一次产生输出的流程），用于把 OK/NG 数字归属到具体流程。</summary>
+        private string _activeFlowId = "";
+        private string _activeFlowName = "";
+
+        /// <summary>单流程 OK/NG 累计（仅供 <see cref="_flowStats"/> 使用）。</summary>
+        private sealed class FlowOkNg
+        {
+            public int Ok;
+            public int Ng;
+            public int Total { get { return Ok + Ng; } }
+        }
+
         /// <summary>日志区是否折叠（持久化到 <c>UiSettings.LogCollapsed</c>）。</summary>
         private bool _logCollapsed;
 
@@ -1066,6 +1085,12 @@ namespace VisionPlatform.UI
 
         private void OnResetStats(object sender, EventArgs e)
         {
+            lock (_flowStatSync)
+            {
+                _flowStats.Clear();
+                _activeFlowId = "";
+                _activeFlowName = "";
+            }
             _statTotal = 0;
             _statOk = 0;
             _statNg = 0;
@@ -1124,25 +1149,88 @@ namespace VisionPlatform.UI
         #region 状态与日志
 
         /// <summary>
-        /// 刷新统计卡片（FR-UI-04 / FR-UI-05）。良品率单独一行 28 pt 大数字，
-        /// 低于告警下限转橙、低于下限一半转红；无数据时统一显示 "--"。
+        /// 记录一次流程判定结果到按流程的计数表。每收到一条流程输出事件调用一次
+        /// （独立于帧显示的合帧节流，保证每个运行周期都精确计入 OK/NG）。
+        /// 同时把该流程记为「当前展示流程」，使主界面 OK/NG 数字归属到具体流程。
+        /// </summary>
+        private void RecordFlowVerdict(string flowId, string flowName, bool passed)
+        {
+            string key = string.IsNullOrEmpty(flowId)
+                ? (string.IsNullOrEmpty(flowName) ? "(未命名流程)" : flowName)
+                : flowId;
+            string name = string.IsNullOrEmpty(flowName) ? key : flowName;
+
+            lock (_flowStatSync)
+            {
+                FlowOkNg t;
+                if (!_flowStats.TryGetValue(key, out t))
+                {
+                    t = new FlowOkNg();
+                    _flowStats[key] = t;
+                }
+                if (passed) t.Ok++; else t.Ng++;
+
+                _activeFlowId = key;
+                _activeFlowName = name;
+            }
+        }
+
+        /// <summary>把流程名截断到指定长度（超出加省略号），防止标题栏被撑破。</summary>
+        private static string TrimFlowName(string name, int max)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            if (name.Length <= max) return name;
+            return name.Substring(0, Math.Max(1, max - 1)) + "…";
+        }
+
+        /// <summary>
+        /// 刷新统计卡片（FR-UI-04 / FR-UI-05）。OK/NG 数字按「当前流程」独立统计，
+        /// 标题写清流程名（满足「OK/NG 按流程区分」诉求）；无选中流程时回落全部流程合计。
+        /// 良品率单独一行 28 pt 大数字，低于告警下限转橙、低于下限一半转红；无数据时显示 "--"。
         /// </summary>
         private void UpdateStats()
         {
+            int ok = 0, ng = 0, total = 0;
+            string scope = "";
+
+            lock (_flowStatSync)
+            {
+                if (!string.IsNullOrEmpty(_activeFlowId) && _flowStats.TryGetValue(_activeFlowId, out FlowOkNg t))
+                {
+                    ok = t.Ok; ng = t.Ng; total = t.Total;
+                    scope = _activeFlowName;
+                }
+                else if (_flowStats.Count > 0)
+                {
+                    foreach (FlowOkNg v in _flowStats.Values) { ok += v.Ok; ng += v.Ng; }
+                    total = ok + ng;
+                    scope = (_flowStats.Count > 1) ? "全部流程" : _activeFlowName;
+                }
+            }
+
+            _statTotal = total;
+            _statOk = ok;
+            _statNg = ng;
+
             UiTheme.StyleStatValue(lblTotalValue, UiStatKind.Normal, false);
             UiTheme.StyleStatValue(lblOkValue, UiStatKind.Ok, false);
             UiTheme.StyleStatValue(lblNgValue, UiStatKind.Ng, false);
             UiTheme.StyleStatValue(lblCycleValue, UiStatKind.Normal, false);
 
-            lblTotalValue.Text = _statTotal.ToString();
-            lblOkValue.Text = _statOk.ToString();
-            lblNgValue.Text = _statNg.ToString();
+            lblTotalValue.Text = total.ToString();
+            lblOkValue.Text = ok.ToString();
+            lblNgValue.Text = ng.ToString();
+
+            // 按流程区分：把流程名带进 OK/NG 标题，明确数字归属
+            string tag = string.IsNullOrEmpty(scope) ? "" : (" · " + TrimFlowName(scope, 12));
+            lblOkCap.Text = "OK" + tag;
+            lblNgCap.Text = "NG" + tag;
 
             double alarm = ConfigStore.Current.System.YieldAlarmPercent;
 
-            if (_statTotal > 0)
+            if (total > 0)
             {
-                double yield = _statOk * 100.0 / _statTotal;
+                double yield = ok * 100.0 / total;
                 lblYieldValue.Text = yield.ToString("F1") + " %";
                 UiTheme.StyleStatValue(lblYieldValue, UiStatKind.Yield, true);
                 lblYieldValue.ForeColor = UiTheme.YieldColor(yield, alarm);
@@ -1575,6 +1663,10 @@ namespace VisionPlatform.UI
         {
             if (e == null) return;
 
+            // 每收到一条流程输出即计入对应流程的 OK/NG（独立于下方帧显示节流，保证计数精确，
+            // 且合帧跳过显示时数字仍实时累加）
+            RecordFlowVerdict(e.FlowId, e.FlowName, e.Passed);
+
             int idx = e.ViewIndex - 1;
 
             // 越界：跳过显示 + 可读中文提示（状态栏 + 日志）
@@ -1673,6 +1765,7 @@ namespace VisionPlatform.UI
                         _lastSummary = summary ?? "";
                         SetVerdict(passed);
                         SetViewVerdict(idx, passed);
+                        UpdateStats();       // 按流程刷 OK/NG 数字（节流随帧显示节奏，计数已在事件层完成）
                         UpdateStatus();
 
                         view.ClearShapes();

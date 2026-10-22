@@ -778,7 +778,9 @@ namespace VisionPlatform.Flow
                 Shapes = res != null ? res.Shapes : null,
                 Passed = res != null && res.Success && res.Passed,
                 Summary = res != null ? (res.Summary ?? "") : "",
-                CameraName = (camera != null && camera.Info != null) ? camera.Info.Name : "本地图片"
+                CameraName = (camera != null && camera.Info != null) ? camera.Info.Name : "本地图片",
+                FlowId = flow != null ? flow.Id : "",
+                FlowName = flow != null ? flow.Name : ""
             };
 
             EventHandler<FlowOutputEventArgs> h = OutputReady;
