@@ -42,6 +42,8 @@ namespace VisionPlatform.UI
         private const int HTBOTTOM = 15;
         private const int HTBOTTOMLEFT = 16;
         private const int HTBOTTOMRIGHT = 17;
+        private const int HTCLIENT = 1;
+        private const int HTTRANSPARENT = -1;
 
         /// <summary>拉伸热区宽度（px）：窗体边缘这个范围内命中即为可拉伸边框。</summary>
         private const int ResizeGrip = 6;
@@ -380,6 +382,34 @@ namespace VisionPlatform.UI
             _pressed = BarButton.None;
             if (Cursor != Cursors.Default) Cursor = Cursors.Default;
             Invalidate();
+        }
+
+        /// <summary>
+        /// 命中测试透传：标题栏 Panel 盖在窗体最顶层，鼠标落在标题栏时 <c>WM_NCHITTEST</c>
+        /// 会先发给它。若直接走默认 <c>WndProc</c>，Panel 返回 <c>HTCLIENT</c>，窗体级别的
+        /// <see cref="TitleBarFilter"/> 永远收不到这条命中测试，于是拖动 / 双击最大化 / 边缘拉伸
+        /// 全部失效（这是「所有窗口不可移动」的根因）。
+        /// <para>
+        /// 修复：对非按钮区域返回 <see cref="HTTRANSPARENT"/>，Windows 会把该点的命中测试
+        /// 透传到下层父窗体，由其 <see cref="TitleBarFilter.WndProc"/> 返回 <c>HTCAPTION</c>，
+        /// 系统原生的拖动移动、双击最大化与系统菜单即恢复；位于三个按钮矩形内的点仍走
+        /// <c>base.WndProc</c>（返回 <c>HTCLIENT</c>），保证按钮自身的鼠标逻辑不受影响。
+        /// </para>
+        /// </summary>
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                Point pt = PointToClient(new Point(
+                    (short)(m.LParam.ToInt64() & 0xFFFF),
+                    (short)((m.LParam.ToInt64() >> 16) & 0xFFFF)));
+                if (pt.X >= 0 && pt.X < Width && pt.Y >= 0 && pt.Y < Height && !IsOnButton(pt))
+                {
+                    m.Result = (IntPtr)HTTRANSPARENT;
+                    return;
+                }
+            }
+            base.WndProc(ref m);
         }
 
         // ======================================================================

@@ -224,27 +224,27 @@ namespace VisionPlatform.UI
             this.cboRole.TabIndex = 3;
 
             this.lblHost.AutoSize = true;
-            this.lblHost.Location = new System.Drawing.Point(12, 49);
+            this.lblHost.Location = new System.Drawing.Point(98, 49);
             this.lblHost.Name = "lblHost";
             this.lblHost.Size = new System.Drawing.Size(56, 15);
             this.lblHost.TabIndex = 4;
             this.lblHost.Text = "IP/主机：";
             this.lblHost.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.txtHost.Location = new System.Drawing.Point(74, 46);
+            this.txtHost.Location = new System.Drawing.Point(150, 46);
             this.txtHost.Name = "txtHost";
             this.txtHost.Size = new System.Drawing.Size(120, 21);
             this.txtHost.TabIndex = 5;
 
             this.lblPort.AutoSize = true;
-            this.lblPort.Location = new System.Drawing.Point(202, 49);
+            this.lblPort.Location = new System.Drawing.Point(248, 49);
             this.lblPort.Name = "lblPort";
             this.lblPort.Size = new System.Drawing.Size(44, 15);
             this.lblPort.TabIndex = 6;
             this.lblPort.Text = "端口：";
             this.lblPort.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numPort.Location = new System.Drawing.Point(250, 46);
+            this.numPort.Location = new System.Drawing.Point(300, 46);
             this.numPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numPort.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numPort.Name = "numPort";
@@ -430,28 +430,28 @@ namespace VisionPlatform.UI
             this.panelModbus.Controls.Add(this.lblMbTip);
 
             this.lblAddr.AutoSize = true;
-            this.lblAddr.Location = new System.Drawing.Point(0, 0);
+            this.lblAddr.Location = new System.Drawing.Point(200, 0);
             this.lblAddr.Name = "lblAddr";
             this.lblAddr.Size = new System.Drawing.Size(44, 15);
             this.lblAddr.TabIndex = 0;
             this.lblAddr.Text = "地址：";
             this.lblAddr.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numAddr.Location = new System.Drawing.Point(0, 17);
+            this.numAddr.Location = new System.Drawing.Point(200, 17);
             this.numAddr.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             this.numAddr.Name = "numAddr";
             this.numAddr.Size = new System.Drawing.Size(80, 21);
             this.numAddr.TabIndex = 1;
 
             this.lblCount.AutoSize = true;
-            this.lblCount.Location = new System.Drawing.Point(92, 0);
+            this.lblCount.Location = new System.Drawing.Point(300, 0);
             this.lblCount.Name = "lblCount";
             this.lblCount.Size = new System.Drawing.Size(80, 15);
             this.lblCount.TabIndex = 2;
             this.lblCount.Text = "数量（寄存器）：";
             this.lblCount.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
-            this.numCount.Location = new System.Drawing.Point(92, 17);
+            this.numCount.Location = new System.Drawing.Point(300, 17);
             this.numCount.Maximum = new decimal(new int[] { 125, 0, 0, 0 });
             this.numCount.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             this.numCount.Name = "numCount";
@@ -460,7 +460,7 @@ namespace VisionPlatform.UI
             this.numCount.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
             this.lblValue.AutoSize = true;
-            this.lblValue.Location = new System.Drawing.Point(200, 0);
+            this.lblValue.Location = new System.Drawing.Point(400, 0);
             this.lblValue.Name = "lblValue";
             this.lblValue.Size = new System.Drawing.Size(56, 15);
             this.lblValue.TabIndex = 4;
@@ -469,20 +469,20 @@ namespace VisionPlatform.UI
 
             // 原 numValue 只能输 0~65535 的整数，无法输入 12.5 / HELLO / true，改为文本框。
             // 246 = 功能码 0x10 单次可写 123 个寄存器 × 每寄存器 2 字符。
-            this.txtValue.Location = new System.Drawing.Point(200, 17);
+            this.txtValue.Location = new System.Drawing.Point(400, 17);
             this.txtValue.MaxLength = 246;
             this.txtValue.Name = "txtValue";
             this.txtValue.Size = new System.Drawing.Size(110, 21);
             this.txtValue.TabIndex = 5;
 
-            this.btnMbRead.Location = new System.Drawing.Point(320, 13);
+            this.btnMbRead.Location = new System.Drawing.Point(0, 13);
             this.btnMbRead.Name = "btnMbRead";
             this.btnMbRead.Size = new System.Drawing.Size(88, 32);
             this.btnMbRead.TabIndex = 6;
             this.btnMbRead.Text = "读取";
             this.btnMbRead.UseVisualStyleBackColor = true;
 
-            this.btnMbWrite.Location = new System.Drawing.Point(416, 13);
+            this.btnMbWrite.Location = new System.Drawing.Point(96, 13);
             this.btnMbWrite.Name = "btnMbWrite";
             this.btnMbWrite.Size = new System.Drawing.Size(88, 32);
             this.btnMbWrite.TabIndex = 7;
@@ -490,7 +490,7 @@ namespace VisionPlatform.UI
             this.btnMbWrite.UseVisualStyleBackColor = true;
 
             this.lblMbType.AutoSize = true;
-            this.lblMbType.Location = new System.Drawing.Point(0, 49);
+            this.lblMbType.Location = new System.Drawing.Point(200, 49);
             this.lblMbType.Name = "lblMbType";
             this.lblMbType.Size = new System.Drawing.Size(68, 15);
             this.lblMbType.TabIndex = 8;
@@ -498,13 +498,13 @@ namespace VisionPlatform.UI
             this.lblMbType.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.cboMbType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cboMbType.Location = new System.Drawing.Point(0, 66);
+            this.cboMbType.Location = new System.Drawing.Point(200, 66);
             this.cboMbType.Name = "cboMbType";
             this.cboMbType.Size = new System.Drawing.Size(180, 21);
             this.cboMbType.TabIndex = 9;
 
             this.lblMbOrder.AutoSize = true;
-            this.lblMbOrder.Location = new System.Drawing.Point(196, 49);
+            this.lblMbOrder.Location = new System.Drawing.Point(400, 49);
             this.lblMbOrder.Name = "lblMbOrder";
             this.lblMbOrder.Size = new System.Drawing.Size(44, 15);
             this.lblMbOrder.TabIndex = 10;
@@ -512,13 +512,13 @@ namespace VisionPlatform.UI
             this.lblMbOrder.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
 
             this.cboMbOrder.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cboMbOrder.Location = new System.Drawing.Point(196, 66);
+            this.cboMbOrder.Location = new System.Drawing.Point(400, 66);
             this.cboMbOrder.Name = "cboMbOrder";
-            this.cboMbOrder.Size = new System.Drawing.Size(180, 21);
+            this.cboMbOrder.Size = new System.Drawing.Size(170, 21);
             this.cboMbOrder.TabIndex = 11;
 
             this.lblMbTip.AutoSize = true;
-            this.lblMbTip.Location = new System.Drawing.Point(0, 93);
+            this.lblMbTip.Location = new System.Drawing.Point(200, 93);
             this.lblMbTip.Name = "lblMbTip";
             this.lblMbTip.Size = new System.Drawing.Size(120, 15);
             this.lblMbTip.TabIndex = 12;
@@ -530,7 +530,7 @@ namespace VisionPlatform.UI
             this.tabProtocol.Location = new System.Drawing.Point(3, 22);
             this.tabProtocol.Name = "tabProtocol";
             this.tabProtocol.SelectedIndex = 0;
-            this.tabProtocol.Size = new System.Drawing.Size(598, 158);
+            this.tabProtocol.Size = new System.Drawing.Size(598, 131);
             this.tabProtocol.TabIndex = 0;
             this.tabPageTcp.Text = "TCP 通信";
             this.tabPageModbus.Text = "Modbus TCP";

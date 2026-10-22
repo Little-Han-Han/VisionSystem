@@ -93,6 +93,23 @@ namespace VisionPlatform.UI
 
             Log("就绪。每条通讯可自定义名称，流程节点按名称绑定；协议均为自行实现，零第三方依赖。");
             Log("TCP 客户端与服务端已整合在同一页，用「角色」切换；Modbus 支持字符串/整形/浮点/双精度/布尔。");
+
+            LayoutOps();
+        }
+
+        // 收发区（上，tabProtocol）与 接收区（下，panelRecv）保持 1:1 等高；窗体缩放时同步
+        private void LayoutOps()
+        {
+            if (groupOps == null || tabProtocol == null || panelRecv == null) return;
+            int h = groupOps.DisplayRectangle.Height;
+            if (h <= 0) return;
+            tabProtocol.Height = Math.Max(80, h / 2);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            LayoutOps();
         }
 
         // ---------------------- 初始化 ----------------------
