@@ -75,13 +75,10 @@ namespace VisionPlatform.UI
         private readonly object _flowStatSync = new object();
         private Dictionary<string, FlowOkNg> _flowStats = new Dictionary<string, FlowOkNg>(StringComparer.Ordinal);
 
-        /// <summary>当前展示用的流程（最近一次产生输出的流程），用于把 OK/NG 数字归属到具体流程。</summary>
-        private string _activeFlowId = "";
-        private string _activeFlowName = "";
-
         /// <summary>单流程 OK/NG 累计（仅供 <see cref="_flowStats"/> 使用）。</summary>
         private sealed class FlowOkNg
         {
+            public string Name = "";
             public int Ok;
             public int Ng;
             public int Total { get { return Ok + Ng; } }
@@ -1088,8 +1085,6 @@ namespace VisionPlatform.UI
             lock (_flowStatSync)
             {
                 _flowStats.Clear();
-                _activeFlowId = "";
-                _activeFlowName = "";
             }
             _statTotal = 0;
             _statOk = 0;
@@ -1151,7 +1146,7 @@ namespace VisionPlatform.UI
         /// <summary>
         /// 记录一次流程判定结果到按流程的计数表。每收到一条流程输出事件调用一次
         /// （独立于帧显示的合帧节流，保证每个运行周期都精确计入 OK/NG）。
-        /// 同时把该流程记为「当前展示流程」，使主界面 OK/NG 数字归属到具体流程。
+        /// 按「流程标识」聚合，使主界面能同时列出每个流程各自的 OK/NG/成功率。
         /// </summary>
         private void RecordFlowVerdict(string flowId, string flowName, bool passed)
         {
@@ -1168,10 +1163,8 @@ namespace VisionPlatform.UI
                     t = new FlowOkNg();
                     _flowStats[key] = t;
                 }
+                t.Name = name;
                 if (passed) t.Ok++; else t.Ng++;
-
-                _activeFlowId = key;
-                _activeFlowName = name;
             }
         }
 
@@ -1184,28 +1177,18 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
-        /// 刷新统计卡片（FR-UI-04 / FR-UI-05）。OK/NG 数字按「当前流程」独立统计，
-        /// 标题写清流程名（满足「OK/NG 按流程区分」诉求）；无选中流程时回落全部流程合计。
-        /// 良品率单独一行 28 pt 大数字，低于告警下限转橙、低于下限一半转红；无数据时显示 "--"。
+        /// 刷新统计卡片（FR-UI-04 / FR-UI-05）。顶部「数据统计」卡片汇总全部分支流程的合计
+        /// OK/NG/良率；下方「各流程统计」表再逐流程列出 OK/NG 与成功率（诉求 F：所有流程同时静态显示）。
+        /// 良品率低于告警下限转橙、低于下限一半转红；无数据时显示 "--"。
         /// </summary>
         private void UpdateStats()
         {
             int ok = 0, ng = 0, total = 0;
-            string scope = "";
 
             lock (_flowStatSync)
             {
-                if (!string.IsNullOrEmpty(_activeFlowId) && _flowStats.TryGetValue(_activeFlowId, out FlowOkNg t))
-                {
-                    ok = t.Ok; ng = t.Ng; total = t.Total;
-                    scope = _activeFlowName;
-                }
-                else if (_flowStats.Count > 0)
-                {
-                    foreach (FlowOkNg v in _flowStats.Values) { ok += v.Ok; ng += v.Ng; }
-                    total = ok + ng;
-                    scope = (_flowStats.Count > 1) ? "全部流程" : _activeFlowName;
-                }
+                foreach (FlowOkNg v in _flowStats.Values) { ok += v.Ok; ng += v.Ng; }
+                total = ok + ng;
             }
 
             _statTotal = total;
@@ -1221,10 +1204,8 @@ namespace VisionPlatform.UI
             lblOkValue.Text = ok.ToString();
             lblNgValue.Text = ng.ToString();
 
-            // 按流程区分：把流程名带进 OK/NG 标题，明确数字归属
-            string tag = string.IsNullOrEmpty(scope) ? "" : (" · " + TrimFlowName(scope, 12));
-            lblOkCap.Text = "OK" + tag;
-            lblNgCap.Text = "NG" + tag;
+            lblOkCap.Text = "OK";
+            lblNgCap.Text = "NG";
 
             double alarm = ConfigStore.Current.System.YieldAlarmPercent;
 
@@ -1242,6 +1223,87 @@ namespace VisionPlatform.UI
             }
 
             lblCycleValue.Text = _lastElapsedMs > 0 ? _lastElapsedMs.ToString("F0") + " ms" : "--";
+
+            RefreshFlowStatTable();
+        }
+
+        /// <summary>
+        /// 刷新「各流程统计」表：列出每一个曾产生过输出的流程及其 OK / NG / 成功率，
+        /// 所有流程同时静态常驻显示（满足「把所有流程的 OK/NG 同时显示，不是反复刷新」诉求）。
+        /// 必须在 UI 线程调用（直接操作 tableFlowStats 的子控件）。
+        /// </summary>
+        private void RefreshFlowStatTable()
+        {
+            if (tableFlowStats == null) return;
+
+            // 锁内快照，避免持锁操作 UI
+            var snapshot = new List<KeyValuePair<string, FlowOkNg>>();
+            lock (_flowStatSync)
+            {
+                foreach (var kv in _flowStats)
+                    snapshot.Add(new KeyValuePair<string, FlowOkNg>(kv.Key, kv.Value));
+            }
+
+            // 移除表头(row 0)以外的所有动态行
+            for (int i = tableFlowStats.Controls.Count - 1; i >= 0; i--)
+            {
+                var c = tableFlowStats.Controls[i];
+                if (tableFlowStats.GetRow(c) > 0)
+                    tableFlowStats.Controls.RemoveAt(i);
+            }
+            tableFlowStats.RowCount = 1;
+            while (tableFlowStats.RowStyles.Count > 1)
+                tableFlowStats.RowStyles.RemoveAt(tableFlowStats.RowStyles.Count - 1);
+
+            int r = 1;
+            foreach (var kv in snapshot)
+            {
+                FlowOkNg v = kv.Value;
+                string name = string.IsNullOrEmpty(v.Name) ? kv.Key : v.Name;
+                int total = v.Total;
+                double rate = total > 0 ? (v.Ok * 100.0 / total) : 0.0;
+
+                tableFlowStats.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                var cName = new Label();
+                cName.AutoSize = true;
+                cName.Dock = DockStyle.Fill;
+                cName.Text = TrimFlowName(name, 16);
+                cName.TextAlign = ContentAlignment.MiddleLeft;
+                cName.ForeColor = UiTheme.ColorTextPrimary;
+                cName.UseMnemonic = false;
+
+                var cOk = new Label();
+                cOk.AutoSize = true;
+                cOk.Dock = DockStyle.Fill;
+                cOk.Text = v.Ok.ToString();
+                cOk.TextAlign = ContentAlignment.MiddleRight;
+                cOk.ForeColor = UiTheme.ColorOk;
+
+                var cNg = new Label();
+                cNg.AutoSize = true;
+                cNg.Dock = DockStyle.Fill;
+                cNg.Text = v.Ng.ToString();
+                cNg.TextAlign = ContentAlignment.MiddleRight;
+                cNg.ForeColor = UiTheme.ColorNg;
+
+                var cRate = new Label();
+                cRate.AutoSize = true;
+                cRate.Dock = DockStyle.Fill;
+                cRate.Text = total > 0 ? rate.ToString("F1") + " %" : "--";
+                cRate.TextAlign = ContentAlignment.MiddleRight;
+                cRate.ForeColor = UiTheme.ColorTextSecondary;
+
+                tableFlowStats.Controls.Add(cName, 0, r);
+                tableFlowStats.Controls.Add(cOk, 1, r);
+                tableFlowStats.Controls.Add(cNg, 2, r);
+                tableFlowStats.Controls.Add(cRate, 3, r);
+                r++;
+            }
+
+            tableFlowStats.RowCount = Math.Max(1, r);
+            tableFlowStats.PerformLayout();
+            if (tableFlowStats.Parent != null) tableFlowStats.Parent.PerformLayout();
         }
 
         /// <summary>

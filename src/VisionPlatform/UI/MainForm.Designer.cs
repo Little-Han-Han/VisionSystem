@@ -66,6 +66,12 @@ namespace VisionPlatform.UI
             this.lblYieldValue = new System.Windows.Forms.Label();
             this.lblCycleCap = new System.Windows.Forms.Label();
             this.lblCycleValue = new System.Windows.Forms.Label();
+            this.groupFlowStats = new System.Windows.Forms.GroupBox();
+            this.tableFlowStats = new System.Windows.Forms.TableLayoutPanel();
+            this.lblFlowHdrName = new System.Windows.Forms.Label();
+            this.lblFlowHdrOk = new System.Windows.Forms.Label();
+            this.lblFlowHdrNg = new System.Windows.Forms.Label();
+            this.lblFlowHdrRate = new System.Windows.Forms.Label();
             this.panelRunCtrl = new System.Windows.Forms.Panel();
             this.btnLoop = new VisionPlatform.UI.UiButton();
             this.btnPause = new VisionPlatform.UI.UiButton();
@@ -99,6 +105,8 @@ namespace VisionPlatform.UI
             this.panelVerdict.SuspendLayout();
             this.groupStats.SuspendLayout();
             this.tableStats.SuspendLayout();
+            this.groupFlowStats.SuspendLayout();
+            this.tableFlowStats.SuspendLayout();
             this.panelRunCtrl.SuspendLayout();
             this.panelRunState.SuspendLayout();
             this.tableRunState.SuspendLayout();
@@ -264,9 +272,11 @@ namespace VisionPlatform.UI
             // 最终自上而下为：徽标 → 统计 → 运行控制 → 运行状态（Fill，空间不足时自动收缩）。
             this.panelRight.Controls.Add(this.panelRunState);
             this.panelRight.Controls.Add(this.panelRunCtrl);
+            this.panelRight.Controls.Add(this.groupFlowStats);
             this.panelRight.Controls.Add(this.groupStats);
             this.panelRight.Controls.Add(this.panelVerdict);
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Right;
+            this.panelRight.AutoScroll = true;
             this.panelRight.Location = new System.Drawing.Point(1140, 40);
             this.panelRight.Name = "panelRight";
             this.panelRight.Padding = new System.Windows.Forms.Padding(8);
@@ -327,6 +337,57 @@ namespace VisionPlatform.UI
             this.tableStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 17F));
             this.tableStats.Size = new System.Drawing.Size(278, 131);
             this.tableStats.TabIndex = 0;
+
+            // ---------- 各流程统计（Dock=Top，随流程数自适应高度；父面板 AutoScroll 兜底多流程滚动）----------
+            this.tableFlowStats.ColumnCount = 4;
+            this.tableFlowStats.RowCount = 1;
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 46F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
+            this.tableFlowStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.tableFlowStats.Dock = System.Windows.Forms.DockStyle.Top;
+            this.tableFlowStats.AutoSize = true;
+            this.tableFlowStats.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.tableFlowStats.Name = "tableFlowStats";
+            this.tableFlowStats.TabIndex = 0;
+
+            this.lblFlowHdrName.AutoSize = true;
+            this.lblFlowHdrName.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowHdrName.Name = "lblFlowHdrName";
+            this.lblFlowHdrName.Text = "流程";
+            this.lblFlowHdrName.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lblFlowHdrOk.AutoSize = true;
+            this.lblFlowHdrOk.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowHdrOk.Name = "lblFlowHdrOk";
+            this.lblFlowHdrOk.Text = "OK";
+            this.lblFlowHdrOk.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblFlowHdrNg.AutoSize = true;
+            this.lblFlowHdrNg.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowHdrNg.Name = "lblFlowHdrNg";
+            this.lblFlowHdrNg.Text = "NG";
+            this.lblFlowHdrNg.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblFlowHdrRate.AutoSize = true;
+            this.lblFlowHdrRate.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowHdrRate.Name = "lblFlowHdrRate";
+            this.lblFlowHdrRate.Text = "成功率";
+            this.lblFlowHdrRate.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+
+            this.tableFlowStats.Controls.Add(this.lblFlowHdrName, 0, 0);
+            this.tableFlowStats.Controls.Add(this.lblFlowHdrOk, 1, 0);
+            this.tableFlowStats.Controls.Add(this.lblFlowHdrNg, 2, 0);
+            this.tableFlowStats.Controls.Add(this.lblFlowHdrRate, 3, 0);
+
+            this.groupFlowStats.Controls.Add(this.tableFlowStats);
+            this.groupFlowStats.Dock = System.Windows.Forms.DockStyle.Top;
+            this.groupFlowStats.AutoSize = true;
+            this.groupFlowStats.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.groupFlowStats.Margin = new System.Windows.Forms.Padding(0, 0, 0, 8);
+            this.groupFlowStats.Name = "groupFlowStats";
+            this.groupFlowStats.Padding = new System.Windows.Forms.Padding(3);
+            this.groupFlowStats.TabIndex = 2;
+            this.groupFlowStats.TabStop = false;
+            this.groupFlowStats.Text = "各流程统计";
 
             this.lblTotalCap.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblTotalCap.Text = "总数";
@@ -431,7 +492,7 @@ namespace VisionPlatform.UI
             // ---------- ④ 运行状态（Fill：空间不足时自动收缩，不挤压上面三区）----------
             this.panelRunState.Controls.Add(this.tableRunState);
             this.panelRunState.Controls.Add(this.lblConsecutiveNg);
-            this.panelRunState.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelRunState.Dock = System.Windows.Forms.DockStyle.Top;
             this.panelRunState.Location = new System.Drawing.Point(8, 558);
             this.panelRunState.Name = "panelRunState";
             this.panelRunState.Padding = new System.Windows.Forms.Padding(3);
@@ -574,6 +635,10 @@ namespace VisionPlatform.UI
             this.panelVerdict.ResumeLayout(false);
             this.groupStats.ResumeLayout(false);
             this.tableStats.ResumeLayout(false);
+            this.groupFlowStats.ResumeLayout(false);
+            this.groupFlowStats.PerformLayout();
+            this.tableFlowStats.ResumeLayout(false);
+            this.tableFlowStats.PerformLayout();
             this.panelRunCtrl.ResumeLayout(false);
             this.panelRunState.ResumeLayout(false);
             this.tableRunState.ResumeLayout(false);
@@ -627,6 +692,12 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblYieldValue;
         private System.Windows.Forms.Label lblCycleCap;
         private System.Windows.Forms.Label lblCycleValue;
+        private System.Windows.Forms.GroupBox groupFlowStats;
+        private System.Windows.Forms.TableLayoutPanel tableFlowStats;
+        private System.Windows.Forms.Label lblFlowHdrName;
+        private System.Windows.Forms.Label lblFlowHdrOk;
+        private System.Windows.Forms.Label lblFlowHdrNg;
+        private System.Windows.Forms.Label lblFlowHdrRate;
         private System.Windows.Forms.Panel panelRunCtrl;
         private VisionPlatform.UI.UiButton btnLoop;
         private VisionPlatform.UI.UiButton btnPause;
