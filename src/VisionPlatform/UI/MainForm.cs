@@ -84,6 +84,22 @@ namespace VisionPlatform.UI
             public int Total { get { return Ok + Ng; } }
         }
 
+        /// <summary>「各流程统计」表中某一流程对应的 4 个单元格标签（流程名/OK/NG/成功率）。</summary>
+        private sealed class FlowRowCtl
+        {
+            public Label Name;
+            public Label Ok;
+            public Label Ng;
+            public Label Rate;
+        }
+
+        /// <summary>流程标识 → 该行标签集合的缓存，避免每帧重建控件（连续运行卡死的根因）。</summary>
+        private readonly Dictionary<string, FlowRowCtl> _flowRowLabels =
+            new Dictionary<string, FlowRowCtl>(StringComparer.Ordinal);
+
+        /// <summary>逐流程表格行高（像素）。固定行高可避免数值刷新触发行高重算与布局抖动。</summary>
+        private const int FlowRowHeight = 22;
+
         /// <summary>日志区是否折叠（持久化到 <c>UiSettings.LogCollapsed</c>）。</summary>
         private bool _logCollapsed;
 
@@ -1231,79 +1247,101 @@ namespace VisionPlatform.UI
         /// 刷新「各流程统计」表：列出每一个曾产生过输出的流程及其 OK / NG / 成功率，
         /// 所有流程同时静态常驻显示（满足「把所有流程的 OK/NG 同时显示，不是反复刷新」诉求）。
         /// 必须在 UI 线程调用（直接操作 tableFlowStats 的子控件）。
+        /// <para>性能要点：行结构只在「流程集合」发生变化时重建（新增流程 / 清零），连续运行逐帧
+        /// 只更新既有标签的 Text（且仅在值真正变化时写入），避免每帧重建控件引发的布局风暴与卡死。</para>
         /// </summary>
         private void RefreshFlowStatTable()
         {
             if (tableFlowStats == null) return;
 
-            // 锁内快照，避免持锁操作 UI
-            var snapshot = new List<KeyValuePair<string, FlowOkNg>>();
+            // 锁内快照，不持锁操作 UI
+            var snap = new List<KeyValuePair<string, FlowOkNg>>();
             lock (_flowStatSync)
             {
                 foreach (var kv in _flowStats)
-                    snapshot.Add(new KeyValuePair<string, FlowOkNg>(kv.Key, kv.Value));
+                    snap.Add(new KeyValuePair<string, FlowOkNg>(kv.Key, kv.Value));
             }
 
-            // 移除表头(row 0)以外的所有动态行
-            for (int i = tableFlowStats.Controls.Count - 1; i >= 0; i--)
+            // ① 仅当「流程集合」变化时才重建行结构（新增流程 / 清零后变空）
+            bool structureChanged = snap.Count != _flowRowLabels.Count;
+            if (!structureChanged)
             {
-                var c = tableFlowStats.Controls[i];
-                if (tableFlowStats.GetRow(c) > 0)
-                    tableFlowStats.Controls.RemoveAt(i);
+                foreach (var kv in snap)
+                    if (!_flowRowLabels.ContainsKey(kv.Key)) { structureChanged = true; break; }
             }
-            tableFlowStats.RowCount = 1;
-            while (tableFlowStats.RowStyles.Count > 1)
-                tableFlowStats.RowStyles.RemoveAt(tableFlowStats.RowStyles.Count - 1);
 
-            int r = 1;
-            foreach (var kv in snapshot)
+            if (structureChanged)
             {
+                // 清掉表头(row 0)以外的动态行，并释放旧标签句柄
+                for (int i = tableFlowStats.Controls.Count - 1; i >= 0; i--)
+                {
+                    var c = tableFlowStats.Controls[i];
+                    if (tableFlowStats.GetRow(c) > 0)
+                    {
+                        tableFlowStats.Controls.RemoveAt(i);
+                        c.Dispose();
+                    }
+                }
+                _flowRowLabels.Clear();
+                tableFlowStats.RowCount = 1;
+                while (tableFlowStats.RowStyles.Count > 1)
+                    tableFlowStats.RowStyles.RemoveAt(tableFlowStats.RowStyles.Count - 1);
+
+                int r = 1;
+                foreach (var kv in snap)
+                {
+                    FlowOkNg v = kv.Value;
+                    tableFlowStats.RowStyles.Add(new RowStyle(SizeType.Absolute, FlowRowHeight));
+                    var cName = MakeFlowCell(ContentAlignment.MiddleLeft, UiTheme.ColorTextPrimary);
+                    var cOk = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorOk);
+                    var cNg = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorNg);
+                    var cRate = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorTextSecondary);
+                    tableFlowStats.Controls.Add(cName, 0, r);
+                    tableFlowStats.Controls.Add(cOk, 1, r);
+                    tableFlowStats.Controls.Add(cNg, 2, r);
+                    tableFlowStats.Controls.Add(cRate, 3, r);
+                    _flowRowLabels[kv.Key] = new FlowRowCtl { Name = cName, Ok = cOk, Ng = cNg, Rate = cRate };
+                    r++;
+                }
+                tableFlowStats.RowCount = Math.Max(1, r);
+                tableFlowStats.Height = tableFlowStats.RowCount * FlowRowHeight;
+                tableFlowStats.PerformLayout();
+                if (tableFlowStats.Parent != null) tableFlowStats.Parent.PerformLayout();
+            }
+
+            // ② 数值每次同步；仅「值变化」时才写文本，避免无谓刷新/重绘
+            foreach (var kv in snap)
+            {
+                FlowRowCtl ctl;
+                if (!_flowRowLabels.TryGetValue(kv.Key, out ctl)) continue;
                 FlowOkNg v = kv.Value;
                 string name = string.IsNullOrEmpty(v.Name) ? kv.Key : v.Name;
                 int total = v.Total;
-                double rate = total > 0 ? (v.Ok * 100.0 / total) : 0.0;
-
-                tableFlowStats.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-                var cName = new Label();
-                cName.AutoSize = true;
-                cName.Dock = DockStyle.Fill;
-                cName.Text = TrimFlowName(name, 16);
-                cName.TextAlign = ContentAlignment.MiddleLeft;
-                cName.ForeColor = UiTheme.ColorTextPrimary;
-                cName.UseMnemonic = false;
-
-                var cOk = new Label();
-                cOk.AutoSize = true;
-                cOk.Dock = DockStyle.Fill;
-                cOk.Text = v.Ok.ToString();
-                cOk.TextAlign = ContentAlignment.MiddleRight;
-                cOk.ForeColor = UiTheme.ColorOk;
-
-                var cNg = new Label();
-                cNg.AutoSize = true;
-                cNg.Dock = DockStyle.Fill;
-                cNg.Text = v.Ng.ToString();
-                cNg.TextAlign = ContentAlignment.MiddleRight;
-                cNg.ForeColor = UiTheme.ColorNg;
-
-                var cRate = new Label();
-                cRate.AutoSize = true;
-                cRate.Dock = DockStyle.Fill;
-                cRate.Text = total > 0 ? rate.ToString("F1") + " %" : "--";
-                cRate.TextAlign = ContentAlignment.MiddleRight;
-                cRate.ForeColor = UiTheme.ColorTextSecondary;
-
-                tableFlowStats.Controls.Add(cName, 0, r);
-                tableFlowStats.Controls.Add(cOk, 1, r);
-                tableFlowStats.Controls.Add(cNg, 2, r);
-                tableFlowStats.Controls.Add(cRate, 3, r);
-                r++;
+                string rate = total > 0 ? (v.Ok * 100.0 / total).ToString("F1") + " %" : "--";
+                SetFlowText(ctl.Name, TrimFlowName(name, 16));
+                SetFlowText(ctl.Ok, v.Ok.ToString());
+                SetFlowText(ctl.Ng, v.Ng.ToString());
+                SetFlowText(ctl.Rate, rate);
             }
+        }
 
-            tableFlowStats.RowCount = Math.Max(1, r);
-            tableFlowStats.PerformLayout();
-            if (tableFlowStats.Parent != null) tableFlowStats.Parent.PerformLayout();
+        /// <summary>构造一个固定高度、随单元格填满的表格单元格标签。</summary>
+        private static Label MakeFlowCell(ContentAlignment align, Color color)
+        {
+            return new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                TextAlign = align,
+                ForeColor = color,
+                UseMnemonic = false
+            };
+        }
+
+        /// <summary>仅当文本真正变化时写入，避免每帧重复赋值触发重绘。</summary>
+        private static void SetFlowText(Label label, string text)
+        {
+            if (label != null && label.Text != text) label.Text = text;
         }
 
         /// <summary>

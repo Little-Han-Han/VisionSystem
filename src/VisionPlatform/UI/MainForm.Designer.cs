@@ -67,6 +67,7 @@ namespace VisionPlatform.UI
             this.lblCycleCap = new System.Windows.Forms.Label();
             this.lblCycleValue = new System.Windows.Forms.Label();
             this.groupFlowStats = new System.Windows.Forms.GroupBox();
+            this.flowScroll = new System.Windows.Forms.Panel();
             this.tableFlowStats = new System.Windows.Forms.TableLayoutPanel();
             this.lblFlowHdrName = new System.Windows.Forms.Label();
             this.lblFlowHdrOk = new System.Windows.Forms.Label();
@@ -106,6 +107,7 @@ namespace VisionPlatform.UI
             this.groupStats.SuspendLayout();
             this.tableStats.SuspendLayout();
             this.groupFlowStats.SuspendLayout();
+            this.flowScroll.SuspendLayout();
             this.tableFlowStats.SuspendLayout();
             this.panelRunCtrl.SuspendLayout();
             this.panelRunState.SuspendLayout();
@@ -338,36 +340,44 @@ namespace VisionPlatform.UI
             this.tableStats.Size = new System.Drawing.Size(278, 131);
             this.tableStats.TabIndex = 0;
 
-            // ---------- 各流程统计（Dock=Top，随流程数自适应高度；父面板 AutoScroll 兜底多流程滚动）----------
+            // ---------- 各流程统计（固定高度 GroupBox + 内部滚动面板；行结构仅随流程集合变化重建，避免连续运行逐帧重建/布局风暴）----------
+            this.flowScroll.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.flowScroll.AutoScroll = true;
+            this.flowScroll.Location = new System.Drawing.Point(3, 18);
+            this.flowScroll.Name = "flowScroll";
+            this.flowScroll.Size = new System.Drawing.Size(278, 154);
+            this.flowScroll.TabIndex = 0;
+
             this.tableFlowStats.ColumnCount = 4;
             this.tableFlowStats.RowCount = 1;
             this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 46F));
             this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
             this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
             this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
-            this.tableFlowStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.tableFlowStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
             this.tableFlowStats.Dock = System.Windows.Forms.DockStyle.Top;
-            this.tableFlowStats.AutoSize = true;
-            this.tableFlowStats.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.tableFlowStats.AutoSize = false;
+            this.tableFlowStats.Location = new System.Drawing.Point(0, 0);
             this.tableFlowStats.Name = "tableFlowStats";
+            this.tableFlowStats.Size = new System.Drawing.Size(278, 22);
             this.tableFlowStats.TabIndex = 0;
 
-            this.lblFlowHdrName.AutoSize = true;
+            this.lblFlowHdrName.AutoSize = false;
             this.lblFlowHdrName.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblFlowHdrName.Name = "lblFlowHdrName";
             this.lblFlowHdrName.Text = "流程";
             this.lblFlowHdrName.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.lblFlowHdrOk.AutoSize = true;
+            this.lblFlowHdrOk.AutoSize = false;
             this.lblFlowHdrOk.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblFlowHdrOk.Name = "lblFlowHdrOk";
             this.lblFlowHdrOk.Text = "OK";
             this.lblFlowHdrOk.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            this.lblFlowHdrNg.AutoSize = true;
+            this.lblFlowHdrNg.AutoSize = false;
             this.lblFlowHdrNg.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblFlowHdrNg.Name = "lblFlowHdrNg";
             this.lblFlowHdrNg.Text = "NG";
             this.lblFlowHdrNg.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            this.lblFlowHdrRate.AutoSize = true;
+            this.lblFlowHdrRate.AutoSize = false;
             this.lblFlowHdrRate.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblFlowHdrRate.Name = "lblFlowHdrRate";
             this.lblFlowHdrRate.Text = "成功率";
@@ -378,10 +388,11 @@ namespace VisionPlatform.UI
             this.tableFlowStats.Controls.Add(this.lblFlowHdrNg, 2, 0);
             this.tableFlowStats.Controls.Add(this.lblFlowHdrRate, 3, 0);
 
-            this.groupFlowStats.Controls.Add(this.tableFlowStats);
+            this.flowScroll.Controls.Add(this.tableFlowStats);
+            this.groupFlowStats.Controls.Add(this.flowScroll);
             this.groupFlowStats.Dock = System.Windows.Forms.DockStyle.Top;
-            this.groupFlowStats.AutoSize = true;
-            this.groupFlowStats.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.groupFlowStats.AutoSize = false;
+            this.groupFlowStats.Size = new System.Drawing.Size(284, 178);
             this.groupFlowStats.Margin = new System.Windows.Forms.Padding(0, 0, 0, 8);
             this.groupFlowStats.Name = "groupFlowStats";
             this.groupFlowStats.Padding = new System.Windows.Forms.Padding(3);
@@ -637,6 +648,8 @@ namespace VisionPlatform.UI
             this.tableStats.ResumeLayout(false);
             this.groupFlowStats.ResumeLayout(false);
             this.groupFlowStats.PerformLayout();
+            this.flowScroll.ResumeLayout(false);
+            this.flowScroll.PerformLayout();
             this.tableFlowStats.ResumeLayout(false);
             this.tableFlowStats.PerformLayout();
             this.panelRunCtrl.ResumeLayout(false);
@@ -693,6 +706,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblCycleCap;
         private System.Windows.Forms.Label lblCycleValue;
         private System.Windows.Forms.GroupBox groupFlowStats;
+        private System.Windows.Forms.Panel flowScroll;
         private System.Windows.Forms.TableLayoutPanel tableFlowStats;
         private System.Windows.Forms.Label lblFlowHdrName;
         private System.Windows.Forms.Label lblFlowHdrOk;
