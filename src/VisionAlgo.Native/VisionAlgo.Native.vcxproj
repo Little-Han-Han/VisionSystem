@@ -84,7 +84,10 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <!-- 【勿设 Disabled】Release 曾经写成 Disabled（复制 Debug 配置时的遗留），等于交付的算法库
+           一直没做编译器优化；依赖 /GL 链接期优化只能救回一部分。形状匹配粗扫是纯数值热点，
+           这一项直接影响"匹配时长"。Debug 配置仍保持 Disabled（便于调试）。 -->
+      <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
