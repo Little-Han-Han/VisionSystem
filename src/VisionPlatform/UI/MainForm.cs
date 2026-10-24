@@ -237,6 +237,25 @@ namespace VisionPlatform.UI
             SetVerdict(null);
         }
 
+        /// <summary>
+        /// 窗体首次显示后再刷一次相机下拉。
+        /// <para>【勿删】构造函数里调 <see cref="RefreshCameraList"/> 时句柄尚未创建，
+        /// 该方法首行的 <c>!IsHandleCreated</c> 守卫会直接早退；而启动阶段
+        /// <c>CameraManager.OpenAll()</c> 是在 Splash 里（早于本窗体构造）就已把相机全部打开，
+        /// 之后不会再有 <c>CurrentChanged</c> 触发刷新。缺了这一步，工具栏相机下拉恒为空、
+        /// 状态栏恒显示「相机：--」，用户看不到「启动已打开全部相机」这个效果。</para>
+        /// <para>用 OnShown 而不是 OnHandleCreated：句柄可能被重建（RecreateHandle）导致重复刷新，
+        /// OnShown 只在窗体<strong>首次</strong>显示时触发一次（Hide 后再 Show 不会重触发）。</para>
+        /// <para>这里<strong>不</strong>做任何权限判断：<see cref="RefreshCameraList"/> 内部会调
+        /// <see cref="RefreshBindCombos"/>，后者已按 <c>_fullAccess</c> 决定绑定下拉是否可编辑，
+        /// 权限口径保持单一来源。</para>
+        /// </summary>
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            RefreshCameraList();
+        }
+
         /// <summary>视图绑定下拉框的条目；CameraId 为空表示「自动分配」。</summary>
         private sealed class BindItem
         {
@@ -406,6 +425,7 @@ namespace VisionPlatform.UI
             BuildViews(LayoutPresets[idx, 0], LayoutPresets[idx, 1]);
 
             if (_initializing) return;
+            if (!_fullAccess) return;   // 访客可切视图，但不落盘（与「只能查看日志」自洽，口径同 _bindCombos）
 
             ConfigStore.Current.Ui.LayoutIndex = idx;
             ConfigStore.Save();
