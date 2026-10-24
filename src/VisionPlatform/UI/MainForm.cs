@@ -52,6 +52,16 @@ namespace VisionPlatform.UI
         /// <summary>关窗时「并行流程已收尾」的一次性标志（用于 join 超时后重试一次）。</summary>
         private bool _flowStopRequested;
 
+        /// <summary>
+        /// 当前是否拥有全部权限（唯一权限位，由 <see cref="ApplyPermissions"/> 从
+        /// <see cref="AppContext.HasFullAccess"/> 同步）。
+        /// <para>软件启动不登录 = 访客 = false：界面上只有「日志查看」可用；
+        /// 管理员经工具栏「登录」校验通过后变 true，全部功能解锁。</para>
+        /// <para>运行控制按钮的可用态<b>必须</b>与本位相与（见 <see cref="UpdateRunButtons"/>），
+        /// 否则 <see cref="UpdateStatus"/> 每次刷新都会把它们重新置为启用。</para>
+        /// </summary>
+        private bool _fullAccess;
+
         private bool _running;
         private bool _paused;
         private int _statTotal;
@@ -180,6 +190,11 @@ namespace VisionPlatform.UI
 
             // 主题在 InitializeComponent 之后统一套用：Designer 只写结构，颜色 / 字体单点来自 UiTheme
             ApplyTheme();
+
+            // 权限位必须在主题套用后立刻落一次：启动是访客态，要保证首个可见帧就是「只有日志可用」。
+            // 事件在这里手写绑定（Designer 重序列化会丢手写事件，见 MainForm.Designer.cs 的 tsBtnLogin 段）。
+            tsBtnLogin.Click += OnLoginButton;
+            ApplyPermissions();
 
             // 自绘深色标题栏（最小化 / 最大化 / 关闭）：替掉系统原生浅色非客户区，
             // 拖动 / 双击最大化 / 边缘拉伸由 WM_NCHITTEST 交给系统原生行为。
@@ -447,6 +462,10 @@ namespace VisionPlatform.UI
 
                     SetBindId(cb, current);
                     cb.EndUpdate();
+
+                    // 视图绑定的相机下拉属于「改配置」（OnBindComboChanged 会立即 ConfigStore.Save），
+                    // 访客态必须禁用；BuildViews 新建的 combo 也要在这里吃到权限位，不能只靠 ApplyPermissions。
+                    cb.Enabled = _fullAccess;
                 }
             }
             finally
@@ -474,6 +493,7 @@ namespace VisionPlatform.UI
         private void OnBindComboChanged(object sender, EventArgs e)
         {
             if (_rebinding) return;
+            if (!_fullAccess) return;          // 访客态不可改绑定（双保险，正常路径下拉已被禁用）
             SyncViewBindingsToConfig();
             ConfigStore.Save();
         }
@@ -730,12 +750,16 @@ namespace VisionPlatform.UI
             }
         }
 
-        /// <summary>同步连续预览开关按钮文字（运行中显示「停止预览」，否则「连续预览」）。</summary>
+        /// <summary>
+        /// 同步连续预览开关按钮文字（运行中显示「停止预览」，否则「连续预览」）。
+        /// 可用态与权限位相与：访客（未登录）不可用（本方法被 <see cref="UpdateRunButtons"/> 反复调用，
+        /// 原来是硬编码 <c>= true</c>，会绕过权限位）。
+        /// </summary>
         private void UpdateLiveButton()
         {
             if (tsBtnLive == null) return;
             tsBtnLive.Text = _liveRunning ? "停止预览" : "连续预览";
-            tsBtnLive.Enabled = true;
+            tsBtnLive.Enabled = _fullAccess;
         }
 
         #endregion
@@ -1407,6 +1431,107 @@ namespace VisionPlatform.UI
             BeginInvoke(new System.Action(RefreshFlowStatTable));
         }
 
+        #region 权限（访客低权限 / 管理员解锁）
+
+        /// <summary>
+        /// 按当前登录身份统一刷全部权限位（唯一入口，改权限只改这里）。
+        /// <para>访客（未登录）：只有「日志查看」可用，其余工具栏动作与下拉全部禁用。</para>
+        /// <para>管理员：全部解锁，运行控制按钮再由 <see cref="UpdateRunButtons"/> 按运行三态细分。</para>
+        /// <para>本方法内部会调 <see cref="UpdateRunButtons"/>，因为运行按钮的可用态必须与权限位相与。</para>
+        /// </summary>
+        private void ApplyPermissions()
+        {
+            _fullAccess = AppContext.HasFullAccess;
+
+            // ---- 需要全权限：采集 / 相机 / 流程 / 通讯 / 配方 / 设置 ----
+            tsBtnRefresh.Enabled = _fullAccess;
+            tsBtnGrabOnce.Enabled = _fullAccess;
+            tsBtnLive.Enabled = _fullAccess;
+            tsBtnSyncGrab.Enabled = _fullAccess;
+            tsBtnCameraMgr.Enabled = _fullAccess;
+            tsBtnFlow.Enabled = _fullAccess;
+            tsBtnComm.Enabled = _fullAccess;
+            tsBtnRecipe.Enabled = _fullAccess;
+            tsBtnSettings.Enabled = _fullAccess;
+            tsComboCameras.Enabled = _fullAccess;
+            tsComboFlow.Enabled = _fullAccess;
+
+            // 各视图上的「绑定相机」下拉：属于改配置（切换即 ConfigStore.Save），访客不可动。
+            // 注意 BuildViews 之后新建的 combo 由 RefreshBindCombos 再吃一次权限位。
+            for (int i = 0; i < _bindCombos.Count; i++)
+            {
+                if (_bindCombos[i] != null) _bindCombos[i].Enabled = _fullAccess;
+            }
+
+            // ---- 始终可用：日志（低权限唯一入口）、登录、右栏折叠、布局下拉、各分组标签 ----
+            // tsBtnAlgo 保持 Visible=false 不动（隐藏项不参与权限判定）
+            tsBtnLog.Enabled = true;
+            tsBtnLogin.Enabled = true;
+            tsBtnRightPanel.Enabled = true;
+            tsComboLayout.Enabled = true;
+            tsLabelCamera.Enabled = true;
+            tsLabelLayout.Enabled = true;
+            tsLabelFlow.Enabled = true;
+            tsLabelStatus.Enabled = true;
+
+            tsBtnLogin.Text = _fullAccess
+                ? ("注销 " + (AppContext.CurrentUser != null ? AppContext.CurrentUser.Name : ""))
+                : "登录";
+            tsBtnLogin.ToolTipText = _fullAccess
+                ? "注销并恢复访客低权限（仅可查看日志）"
+                : "管理员登录后解锁全部功能（未登录仅可查看日志）";
+
+            // 运行控制按钮必须一并与权限位同步，否则 UpdateStatus() 每次刷新都会把它们打回启用
+            UpdateRunButtons();
+        }
+
+        /// <summary>
+        /// 工具栏「登录 / 注销」：
+        /// 访客态点击 → 弹登录框，<b>只有管理员</b>校验通过才把当前用户换成管理员并解锁；
+        /// 已是全权限 → 点击即注销，恢复访客低权限（只读日志）。
+        /// </summary>
+        private void OnLoginButton(object sender, EventArgs e)
+        {
+            if (!AppContext.HasFullAccess)
+            {
+                using (var lf = new LoginForm())
+                {
+                    if (lf.ShowDialog(this) == DialogResult.OK)
+                    {
+                        if (lf.User != null && lf.User.IsAdmin)
+                        {
+                            AppContext.CurrentUser = lf.User;
+                            Logger.Info("管理员登录：" + lf.User.Name);
+                        }
+                        else
+                        {
+                            // 内置 operator 账号能通过密码校验，但不是管理员：明确拒绝，不保留该身份
+                            Logger.Warn("非管理员账号登录被拒绝："
+                                        + (lf.User != null ? lf.User.Name : "(空)"));
+                            MessageBox.Show(this,
+                                "该账号无操作权限，仅管理员可解锁全部功能。",
+                                "登录", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                AppContext.CurrentUser = new Models.User
+                {
+                    Name = "访客",
+                    Role = "Guest",
+                    LoginTime = DateTime.Now
+                };
+                Logger.Info("已注销，恢复访客低权限");
+            }
+
+            ApplyPermissions();
+            UpdateStatus();
+        }
+
+        #endregion
+
         /// <summary>
         /// 刷新状态栏 / 工具栏状态位 / 右栏运行状态区，并同步运行控制按钮的可用态
         /// （单一状态源：工具栏与右栏大按钮共用 <see cref="UpdateRunButtons"/>）。
@@ -1453,6 +1578,8 @@ namespace VisionPlatform.UI
         /// <summary>
         /// 运行控制三态互斥（FR-UI-06）：停止态 / 运行态 / 暂停态。
         /// 工具栏按钮与右栏大按钮共用本方法，保证行为严格同步（同一状态源）。
+        /// <para>每个可用态都与权限位 <see cref="_fullAccess"/> 相与：访客（未登录）一律不可用。
+        /// 这一步<b>不能</b>漏，因为 <see cref="UpdateStatus"/> 每次刷新都会调本方法。</para>
         /// </summary>
         private void UpdateRunButtons()
         {
@@ -1460,19 +1587,19 @@ namespace VisionPlatform.UI
             bool running = _running && !_paused;
             bool paused = _running && _paused;
 
-            // 右栏大按钮
-            UiTheme.SetButtonEnabled(btnLoop, stopped, UiButtonKind.Start);
-            UiTheme.SetButtonEnabled(btnPause, !stopped, UiButtonKind.Pause);
-            UiTheme.SetButtonEnabled(btnStop, !stopped, UiButtonKind.Stop);
-            UiTheme.SetButtonEnabled(btnGrabOnce, stopped || paused, UiButtonKind.Grab);
-            UiTheme.SetButtonEnabled(btnResetStats, stopped, UiButtonKind.Reset);
+            // 右栏大按钮（三态互斥 + 权限位）
+            UiTheme.SetButtonEnabled(btnLoop, _fullAccess && stopped, UiButtonKind.Start);
+            UiTheme.SetButtonEnabled(btnPause, _fullAccess && !stopped, UiButtonKind.Pause);
+            UiTheme.SetButtonEnabled(btnStop, _fullAccess && !stopped, UiButtonKind.Stop);
+            UiTheme.SetButtonEnabled(btnGrabOnce, _fullAccess && (stopped || paused), UiButtonKind.Grab);
+            UiTheme.SetButtonEnabled(btnResetStats, _fullAccess && stopped, UiButtonKind.Reset);
 
             // 「暂停」在暂停态显示「继续」：颜色语义不变（橙），仅在文字上区分
             if (btnPause != null && btnPause.Enabled) btnPause.Text = paused ? "继续" : "暂停";
 
             // 工具栏不再重复放「启动 / 暂停」（用户要求：运行控制只在右栏），
-            // 这里只同步工具栏保留的「单帧采集」可用态。
-            tsBtnGrabOnce.Enabled = stopped || paused;
+            // 这里只同步工具栏保留的「单帧采集」可用态（同样与权限位相与）。
+            tsBtnGrabOnce.Enabled = _fullAccess && (stopped || paused);
 
             // 连续预览开关：文字随运行态切换（连续预览 / 停止预览）
             UpdateLiveButton();
@@ -2152,7 +2279,7 @@ namespace VisionPlatform.UI
             {
                 BeginInvoke((MethodInvoker)delegate
                 {
-                    if (!IsDisposed && tsComboFlow != null) tsComboFlow.Enabled = true;
+                    if (!IsDisposed && tsComboFlow != null) tsComboFlow.Enabled = _fullAccess;
                 });
             }
             catch (Exception) { }

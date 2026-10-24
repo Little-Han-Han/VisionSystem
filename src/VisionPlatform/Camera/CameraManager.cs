@@ -101,6 +101,52 @@ namespace VisionPlatform.Camera
             }
         }
 
+        /// <summary>
+        /// 枚举并<strong>打开全部</strong>相机（启动时调用，需求：软件启动时所有相机全部打开）。
+        /// <para>逐台 try/catch：某台打不开只记 WARN，绝不影响其它相机，也绝不阻断启动。</para>
+        /// <para><see cref="Open"/> 对已打开的相机是幂等的（直接返回已有实例），
+        /// 因此重复调用不会重复打开、不会泄漏句柄。</para>
+        /// </summary>
+        /// <returns>本次成功打开的相机台数（已打开的也计入）。</returns>
+        public int OpenAll()
+        {
+            List<CameraInfo> list;
+            try
+            {
+                list = Enumerate();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("启动打开相机失败（枚举异常）：" + ex.Message);
+                return 0;
+            }
+
+            if (list == null || list.Count == 0)
+            {
+                Logger.Warn("启动打开相机：未枚举到任何相机");
+                return 0;
+            }
+
+            int opened = 0;
+            foreach (CameraInfo info in list)
+            {
+                if (info == null || string.IsNullOrEmpty(info.Id)) continue;
+
+                try
+                {
+                    OpResult<ICamera> r = Open(info.Id);
+                    if (r != null && r.Success) opened++;
+                    else Logger.Warn("启动打开相机失败 " + info.Id + "：" + (r != null ? r.Message : "未知原因"));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("启动打开相机异常 " + info.Id + "：" + ex.Message);
+                }
+            }
+
+            return opened;
+        }
+
         /// <summary>关闭指定相机。</summary>
         public OpResult Close(string id)
         {

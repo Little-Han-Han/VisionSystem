@@ -33,14 +33,17 @@ namespace VisionPlatform.UI
             SetProgress(30, "加载 C++ 算法库…");
             LoadAlgo();
 
-            SetProgress(60, "枚举相机…");
+            // 需求：软件启动时所有相机全部打开（不只枚举）。
+            // OpenAll 内部逐台 try/catch，单台失败只记 WARN，不会阻断启动。
+            SetProgress(60, "打开相机…");
             try
             {
-                Camera.CameraManager.Instance.Enumerate();
+                int opened = Camera.CameraManager.Instance.OpenAll();
+                Logger.Info("启动已打开相机 " + opened + " 台");
             }
             catch (Exception ex)
             {
-                Logger.Warn("相机枚举失败：" + ex.Message);
+                Logger.Warn("启动打开相机失败：" + ex.Message);
             }
             Thread.Sleep(120);
 

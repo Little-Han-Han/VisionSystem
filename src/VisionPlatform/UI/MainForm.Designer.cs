@@ -46,6 +46,7 @@ namespace VisionPlatform.UI
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
             this.tsBtnLog = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnLogin = new System.Windows.Forms.ToolStripButton();
             this.tsSep3 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelStatus = new System.Windows.Forms.ToolStripLabel();
 
@@ -146,6 +147,7 @@ namespace VisionPlatform.UI
                 this.tsBtnSettings,
                 this.tsBtnLog,
                 this.tsSep3,
+                this.tsBtnLogin,
                 this.tsLabelStatus});
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
             this.toolStrip.Name = "toolStrip";
@@ -252,6 +254,14 @@ namespace VisionPlatform.UI
             this.tsBtnLog.Click += new System.EventHandler(this.OnOpenLogForm);
 
             this.tsSep3.Name = "tsSep3";
+
+            // 「登录 / 注销」：软件启动为访客低权限，管理员点此登录解锁全部功能。
+            // 事件不在此处绑定（本机型 Designer 重序列化会丢手写事件），改在 MainForm 构造函数里
+            // 写 tsBtnLogin.Click += OnLoginButton;（见 MainForm.ctor）。
+            this.tsBtnLogin.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnLogin.Name = "tsBtnLogin";
+            this.tsBtnLogin.Text = "登录";
+            this.tsBtnLogin.ToolTipText = "管理员登录后解锁全部功能（未登录仅可查看日志）";
 
             this.tsLabelStatus.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
             this.tsLabelStatus.Name = "tsLabelStatus";
@@ -701,6 +711,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
         private System.Windows.Forms.ToolStripButton tsBtnSettings;
         private System.Windows.Forms.ToolStripButton tsBtnLog;
+        private System.Windows.Forms.ToolStripButton tsBtnLogin;
         private System.Windows.Forms.ToolStripSeparator tsSep3;
         private System.Windows.Forms.ToolStripLabel tsLabelStatus;
 

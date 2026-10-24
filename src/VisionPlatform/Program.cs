@@ -14,6 +14,19 @@ namespace VisionPlatform
     {
         public static Models.User CurrentUser { get; set; }
 
+        /// <summary>
+        /// 是否拥有全部权限（唯一判定口径）。
+        /// <para>软件启动不登录，<c>CurrentUser</c> 是「访客 / Guest」→ 本属性 false，
+        /// 界面上只有日志可看；管理员在工具栏点「登录」通过校验后 <c>CurrentUser.IsAdmin</c>
+        /// 为 true → 本属性 true，全部功能解锁。</para>
+        /// <para>判定一律走这里，不要在界面各处重复写 <c>Role == "Admin"</c>，
+        /// 否则以后加角色（如班长 / 工程师）要改一堆地方。</para>
+        /// </summary>
+        public static bool HasFullAccess
+        {
+            get { return CurrentUser != null && CurrentUser.IsAdmin; }
+        }
+
         /// <summary>算法库实例，全局共享（模板训练状态保存在其中）。</summary>
         public static Native.VisionAlgo Algo { get; set; }
     }
@@ -87,19 +100,17 @@ namespace VisionPlatform
                 Logger.Error("初始化异常：" + ex.Message);
             }
 
-            // ---------- 登录 ----------
-            using (LoginForm login = new LoginForm())
+            // ---------- 启动免登录：默认访客低权限（仅可查看日志）----------
+            // 需求：软件启动时不再弹登录框，默认低权限，只能查看日志；
+            // 管理员在工具栏点「登录」通过校验后才解锁全部功能（见 MainForm.ApplyPermissions）。
+            AppContext.CurrentUser = new Models.User
             {
-                if (login.ShowDialog(splash) != DialogResult.OK)
-                {
-                    Logger.Info("用户取消登录，程序退出");
-                    splash.Close();
-                    return;
-                }
-                AppContext.CurrentUser = login.User;
-            }
+                Name = "访客",
+                Role = "Guest",
+                LoginTime = DateTime.Now
+            };
+            Logger.Info("以访客身份启动（低权限，仅可查看日志）");
 
-            Logger.Info("用户登录：" + AppContext.CurrentUser);
             splash.Close();
 
             // ---------- 主界面 ----------
