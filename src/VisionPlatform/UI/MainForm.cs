@@ -95,6 +95,7 @@ namespace VisionPlatform.UI
             public Label Ok;
             public Label Ng;
             public Label Rate;
+            public Label Status;
         }
 
         /// <summary>流程标识 → 该行标签集合的缓存，避免每帧重建控件（连续运行卡死的根因）。</summary>
@@ -206,6 +207,7 @@ namespace VisionPlatform.UI
             _logTimer.Start();
             ConfigStore.Changed += OnConfigChanged;
             FlowOutputChannel.OutputReady += OnFlowOutput;
+            FlowRunManager.StatusChanged += OnFlowManagerStatusChanged;
 
             // 主界面流程下拉：初始化自有执行器/控制器并回填流程列表（算法库不可用时降级禁用）
             InitFlowRunner();
@@ -1036,6 +1038,14 @@ namespace VisionPlatform.UI
                 else
                 {
                     Logger.Info("开始循环运行（全部流程）：" + (r.Message ?? ""));
+
+                    // 部分流程未能启动（相机未打开 / 拓扑校验未过 / 产品不匹配 / 已被占用等）：
+                    // 逐条列出原因，避免「看似没并行」却无从查证。完全成功时 r.Message 不含「失败」。
+                    if (!string.IsNullOrEmpty(r.Message) && r.Message.IndexOf("失败") >= 0)
+                    {
+                        Logger.Warn("循环运行部分启动失败：" + r.Message);
+                        MessageBox.Show(this, r.Message, "部分流程未启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
             }
             UpdateStatus();
@@ -1261,12 +1271,25 @@ namespace VisionPlatform.UI
         {
             if (tableFlowStats == null) return;
 
-            // 锁内快照，不持锁操作 UI
+            // 锁内快照，不持锁操作 UI。合并「已产出判定的流程」与「当前运行槽」，
+            // 保证 运行中 / 已中止 但尚无判定的流程也显示出来（否则 Faulted 流程完全不可见）。
+            var slots = FlowRunManager.Snapshot();
+            var slotById = new Dictionary<string, FlowRunSlot>(StringComparer.Ordinal);
+            foreach (FlowRunSlot s in slots) if (s != null) slotById[s.FlowId] = s;
+
             var snap = new List<KeyValuePair<string, FlowOkNg>>();
             lock (_flowStatSync)
             {
                 foreach (var kv in _flowStats)
                     snap.Add(new KeyValuePair<string, FlowOkNg>(kv.Key, kv.Value));
+            }
+            foreach (FlowRunSlot s in slots)
+            {
+                if (s == null) continue;
+                bool hasStat;
+                lock (_flowStatSync) { hasStat = _flowStats.ContainsKey(s.FlowId); }
+                if (!hasStat)
+                    snap.Add(new KeyValuePair<string, FlowOkNg>(s.FlowId, new FlowOkNg { Name = s.FlowName }));
             }
 
             // ① 仅当「流程集合」变化时才重建行结构（新增流程 / 清零后变空）
@@ -1303,11 +1326,13 @@ namespace VisionPlatform.UI
                     var cOk = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorOk);
                     var cNg = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorNg);
                     var cRate = MakeFlowCell(ContentAlignment.MiddleRight, UiTheme.ColorTextSecondary);
+                    var cStatus = MakeFlowCell(ContentAlignment.MiddleCenter, UiTheme.ColorTextSecondary);
                     tableFlowStats.Controls.Add(cName, 0, r);
                     tableFlowStats.Controls.Add(cOk, 1, r);
                     tableFlowStats.Controls.Add(cNg, 2, r);
                     tableFlowStats.Controls.Add(cRate, 3, r);
-                    _flowRowLabels[kv.Key] = new FlowRowCtl { Name = cName, Ok = cOk, Ng = cNg, Rate = cRate };
+                    tableFlowStats.Controls.Add(cStatus, 4, r);
+                    _flowRowLabels[kv.Key] = new FlowRowCtl { Name = cName, Ok = cOk, Ng = cNg, Rate = cRate, Status = cStatus };
                     r++;
                 }
                 tableFlowStats.RowCount = Math.Max(1, r);
@@ -1329,6 +1354,26 @@ namespace VisionPlatform.UI
                 SetFlowText(ctl.Ok, v.Ok.ToString());
                 SetFlowText(ctl.Ng, v.Ng.ToString());
                 SetFlowText(ctl.Rate, rate);
+
+                // 状态列：优先取运行槽实时状态；无槽（已停止 / 从未启动）显示「已停止」
+                FlowRunSlot slot;
+                slotById.TryGetValue(kv.Key, out slot);
+                string statusText; Color statusColor;
+                if (slot != null)
+                {
+                    switch (slot.Status)
+                    {
+                        case FlowSlotStatus.Running:  statusText = "运行中"; statusColor = UiTheme.ColorOk; break;
+                        case FlowSlotStatus.Paused:   statusText = "已暂停"; statusColor = UiTheme.ColorTextSecondary; break;
+                        case FlowSlotStatus.Starting: statusText = "启动中"; statusColor = UiTheme.ColorTextSecondary; break;
+                        case FlowSlotStatus.Stopping: statusText = "停止中"; statusColor = UiTheme.ColorTextSecondary; break;
+                        case FlowSlotStatus.Faulted:  statusText = "已中止"; statusColor = UiTheme.ColorNg; break;
+                        default:                      statusText = "已停止"; statusColor = UiTheme.ColorTextSecondary; break;
+                    }
+                }
+                else { statusText = "已停止"; statusColor = UiTheme.ColorTextSecondary; }
+                SetFlowText(ctl.Status, statusText);
+                if (ctl.Status != null) ctl.Status.ForeColor = statusColor;
             }
         }
 
@@ -1349,6 +1394,13 @@ namespace VisionPlatform.UI
         private static void SetFlowText(Label label, string text)
         {
             if (label != null && label.Text != text) label.Text = text;
+        }
+
+        /// <summary>FlowRunManager 状态变化 → 刷新各流程状态列。事件可能在非 UI 线程触发，回 UI 线程。</summary>
+        private void OnFlowManagerStatusChanged(object sender, EventArgs e)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            BeginInvoke(new System.Action(RefreshFlowStatTable));
         }
 
         /// <summary>
@@ -2172,6 +2224,7 @@ namespace VisionPlatform.UI
             CameraManager.Instance.CurrentChanged -= OnCameraManagerChanged;
             ConfigStore.Changed -= OnConfigChanged;
             FlowOutputChannel.OutputReady -= OnFlowOutput;
+            FlowRunManager.StatusChanged -= OnFlowManagerStatusChanged;
             CameraManager.Instance.CloseAll();
         }
     }

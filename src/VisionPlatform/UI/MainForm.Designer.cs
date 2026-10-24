@@ -73,6 +73,7 @@ namespace VisionPlatform.UI
             this.lblFlowHdrOk = new System.Windows.Forms.Label();
             this.lblFlowHdrNg = new System.Windows.Forms.Label();
             this.lblFlowHdrRate = new System.Windows.Forms.Label();
+            this.lblFlowHdrStatus = new System.Windows.Forms.Label();
             this.panelRunCtrl = new System.Windows.Forms.Panel();
             this.btnLoop = new VisionPlatform.UI.UiButton();
             this.btnPause = new VisionPlatform.UI.UiButton();
@@ -348,12 +349,13 @@ namespace VisionPlatform.UI
             this.flowScroll.Size = new System.Drawing.Size(278, 154);
             this.flowScroll.TabIndex = 0;
 
-            this.tableFlowStats.ColumnCount = 4;
+            this.tableFlowStats.ColumnCount = 5;
             this.tableFlowStats.RowCount = 1;
-            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 46F));
-            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
-            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
-            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 18F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 40F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 13F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 13F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 13F));
+            this.tableFlowStats.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 21F));
             this.tableFlowStats.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 22F));
             this.tableFlowStats.Dock = System.Windows.Forms.DockStyle.Top;
             this.tableFlowStats.AutoSize = false;
@@ -382,11 +384,17 @@ namespace VisionPlatform.UI
             this.lblFlowHdrRate.Name = "lblFlowHdrRate";
             this.lblFlowHdrRate.Text = "成功率";
             this.lblFlowHdrRate.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblFlowHdrStatus.AutoSize = false;
+            this.lblFlowHdrStatus.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblFlowHdrStatus.Name = "lblFlowHdrStatus";
+            this.lblFlowHdrStatus.Text = "状态";
+            this.lblFlowHdrStatus.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
 
             this.tableFlowStats.Controls.Add(this.lblFlowHdrName, 0, 0);
             this.tableFlowStats.Controls.Add(this.lblFlowHdrOk, 1, 0);
             this.tableFlowStats.Controls.Add(this.lblFlowHdrNg, 2, 0);
             this.tableFlowStats.Controls.Add(this.lblFlowHdrRate, 3, 0);
+            this.tableFlowStats.Controls.Add(this.lblFlowHdrStatus, 4, 0);
 
             this.flowScroll.Controls.Add(this.tableFlowStats);
             this.groupFlowStats.Controls.Add(this.flowScroll);
@@ -712,6 +720,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblFlowHdrOk;
         private System.Windows.Forms.Label lblFlowHdrNg;
         private System.Windows.Forms.Label lblFlowHdrRate;
+        private System.Windows.Forms.Label lblFlowHdrStatus;
         private System.Windows.Forms.Panel panelRunCtrl;
         private VisionPlatform.UI.UiButton btnLoop;
         private VisionPlatform.UI.UiButton btnPause;
