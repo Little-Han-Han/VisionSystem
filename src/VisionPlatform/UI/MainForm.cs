@@ -250,8 +250,8 @@ namespace VisionPlatform.UI
         /// 状态栏恒显示「相机：--」，用户看不到「启动已打开全部相机」这个效果。</para>
         /// <para>用 OnShown 而不是 OnHandleCreated：句柄可能被重建（RecreateHandle）导致重复刷新，
         /// OnShown 只在窗体<strong>首次</strong>显示时触发一次（Hide 后再 Show 不会重触发）。</para>
-        /// <para><b>用缓存，勿改成无参调用</b>：<c>RefreshCameraList(true)</c> 复用 Splash 阶段
-        /// <c>OpenAll()</c> 已经枚举出来的结果；改成 <c>RefreshCameraList()</c> 会在 UI 线程重新做一次
+        /// <para><b>用缓存，勿改成无参调用</b>：<see cref="RefreshCameraListFromCache"/> 复用 Splash 阶段
+        /// <c>OpenAll()</c> 已经枚举出来的结果；改成 <see cref="RefreshCameraList"/> 会在 UI 线程重新做一次
         /// DirectShow 枚举（实测 ≈1.1s），把主窗体首帧冻住。</para>
         /// <para>这里<strong>不</strong>做任何权限判断：<see cref="RefreshCameraList"/> 内部会调
         /// <see cref="RefreshBindCombos"/>，后者已按 <c>_fullAccess</c> 决定绑定下拉是否可编辑，
