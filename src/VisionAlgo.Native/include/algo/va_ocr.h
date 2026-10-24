@@ -4,15 +4,16 @@
  *  本库未链接 opencv_contrib（没有 cv::text、没有 xfeatures2d），因此这里自搭一套
  *  传统流水线：
  *
- *      灰度图 → 二值化（固定阈值或 Otsu，可选反色）
+ *      灰度图 → 二值化（固定阈值或 Otsu，**自动判定极性**使「字=255、底=0」）
  *            → connectedComponentsWithStats 取所有连通域
  *            → 按字符高度 / 宽高比过滤
  *            → 按 max_gap 合并水平相邻过近的框（修复左右结构字符被切成两半）
  *            → 按 y 中心分行、行内按 x 排序
- *            → （识别）逐字符归一化 → 与模板库做 TM_CCOEFF_NORMED 匹配
+ *            → （识别）逐字符紧裁 + 保比例归一化 → 与模板库做 TM_CCOEFF_NORMED 匹配
  *
  *  模板库：由调用方裁剪好单通道灰度字符 ROI，通过 va_ocr_add_template 累积，
- *  内部立即按 norm_w × norm_h 归一化保存；识别时用同样的归一化尺寸比对。
+ *  内部走**与识别完全相同**的二值化 + 归一化流程后按 norm_w × norm_h 保存。
+ *  两边表示一致是相关系数有意义的前提。
  *
  *  无模板时 va_ocr_recognize 仍会完成分割、用 '?' 填充字符、out_mean_score 给 0，
  *  并返回 VA_OK——这是刻意的，方便上层单独调试分割效果。
@@ -41,7 +42,7 @@ extern "C" {
  * -------------------------------------------------------------------------*/
 typedef struct VA_OcrParam {
     int    threshold;                 /* 二值化阈值 0~255；<0 用 Otsu */
-    int    invert;                    /* 1 = 反色（白底黑字时） */
+    int    invert;                    /* 0 = 自动判定极性（推荐）；1 = 强制反色 */
     double min_char_h, max_char_h;    /* 字符高度过滤，px；<=0 不限制 */
     double min_aspect, max_aspect;    /* 宽高比 (w/h) 过滤；<=0 不限制 */
     int    max_gap;                   /* 同行字符最大水平间隙，px；<0 用 3 */
@@ -99,6 +100,34 @@ VA_API int VA_CALL va_ocr_recognize(void* handle,
                                    char* out_text,
                                    int text_cap,
                                    double* out_mean_score);
+
+/* ---------------------------------------------------------------------------
+ * 分割 + 识别，一次调用同时输出整段文本与每个字符的标签 / 置信度。
+ *
+ * 顺序与 va_ocr_recognize 生成的文本严格一致（行优先、行内按 x 升序），
+ * 因此调用方可以按顺序把 out_chars 与文本对齐。
+ * out_chars 可为 NULL（只要文本）；out_text 可为 NULL（只要字符）。
+ *
+ * param          : 可为 NULL，表示用 va_ocr_set_param 设置的默认参数
+ * out_chars      : 调用方分配，容量 >= chars_cap；可为 NULL
+ * chars_cap      : out_chars 容量；不足时按容量截断
+ * out_char_count : 实际字符总数（**截断前**的真实数量），必填
+ * out_text       : UTF-8 输出缓冲；可为 NULL
+ * text_cap       : out_text 的字节容量（含结尾 '\0'）
+ * out_mean_score : 已接受字符的平均置信度；无模板 / 全未接受时为 0
+ *
+ * 标签从同一份匹配结果写入 VA_OcrChar.label，因此「框上的标签」与「文本」
+ * 不会出现两套来源不一致的情况（历史缺陷：框上恒为 "? 0.00"）。
+ * -------------------------------------------------------------------------*/
+VA_API int VA_CALL va_ocr_recognize_ex(void* handle,
+                                       const VA_Image* gray,
+                                       const VA_OcrParam* param,
+                                       VA_OcrChar* out_chars,
+                                       int chars_cap,
+                                       int* out_char_count,
+                                       char* out_text,
+                                       int text_cap,
+                                       double* out_mean_score);
 
 #ifdef __cplusplus
 }

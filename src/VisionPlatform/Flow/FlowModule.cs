@@ -270,7 +270,7 @@ namespace VisionPlatform.Flow
                     Add(list, "TemplateDir", "OCRModel");
                     // 二值化阈值（-1 = Otsu 自适应）
                     Add(list, "Threshold", "-1");
-                    // 极性反转（1 = 白底黑字）
+                    // 极性反转（0 = 自动判定极性（推荐）；1 = 强制反色）
                     Add(list, "Invert", "0");
                     // 字符高度下限 / 上限（像素，0 = 不限制）
                     Add(list, "MinCharH", "0");

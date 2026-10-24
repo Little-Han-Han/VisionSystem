@@ -247,7 +247,7 @@ namespace VisionPlatform.Native
 
     /// <summary>
     /// 单个字符（对应 C 端 VA_OcrChar）。label 为 UTF-8 定长 8 字节（VA_OCR_LABEL_BYTES），
-    /// 支持中文标签（如"中"占 3 字节）。仅 va_ocr_recognize 填 label / score，
+    /// 支持中文标签（如"中"占 3 字节）。va_ocr_recognize_ex 会填 label / score，
     /// va_ocr_segment 只填 x/y/w/h（label 置 "?"、score 置 0）。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -467,6 +467,16 @@ namespace VisionPlatform.Native
                                                   ref VA_OcrParam param,
                                                   byte[] out_text, int text_cap,
                                                   out double out_mean_score);
+
+        // 分割 + 识别一次调用：文本与每个字符的标签 / 置信度同源输出。
+        // out_chars 传 null 表示只要文本；out_text 传 null 表示只要字符。
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_ocr_recognize_ex(IntPtr handle, ref VA_Image gray,
+                                                     ref VA_OcrParam param,
+                                                     [In, Out] VA_OcrChar[] out_chars,
+                                                     int chars_cap, out int out_char_count,
+                                                     byte[] out_text, int text_cap,
+                                                     out double out_mean_score);
     }
 
     /// <summary>
@@ -1402,6 +1412,65 @@ namespace VisionPlatform.Native
             for (int i = 0; i < n; i++)
                 arr[i].label = new byte[8];
             return arr;
+        }
+
+        /// <summary>
+        /// 分割 + 识别**一次调用**：同时返回整段文本、平均置信度，以及每个字符的
+        /// 外接框 + <b>真实标签与置信度</b>。
+        ///
+        /// 与 <see cref="Recognize"/> 的区别：这里 <see cref="OcrResult.Chars"/> 是识别结果
+        /// （label / score 已填），不再是"分割出来的一堆问号"。上层若要画字符框，
+        /// 必须用本方法，否则框上标签会与文本不一致（历史缺陷：框恒为 "? 0.00"）。
+        /// </summary>
+        /// <param name="gray">单通道（或可灰度化的）输入图，内部转灰度。</param>
+        /// <param name="param">OCR 参数；null 用默认值。</param>
+        /// <param name="maxCount">字符数组容量上限；&lt;=0 按 200。超出部分截断，不影响文本。</param>
+        public OpResult<OcrResult> RecognizeEx(Bitmap gray, OcrParam param, int maxCount)
+        {
+            if (gray == null) return OpResult<OcrResult>.Fail("输入图像为空");
+            if (param == null) param = OcrParam.Default();
+            if (maxCount <= 0) maxCount = 200;
+
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_OcrParam p = param.ToNative();
+
+                    byte[] textBuf = new byte[4096];
+                    VA_OcrChar[] raw = NewOcrCharBuffer(maxCount);
+                    int total = 0;
+                    double meanScore = 0.0;
+
+                    int rc = NativeMethods.va_ocr_recognize_ex(_handle, ref img, ref p,
+                                                               raw, raw.Length, out total,
+                                                               textBuf, textBuf.Length,
+                                                               out meanScore);
+                    if (rc != VaResult.OK)
+                        return OpResult<OcrResult>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    // 原生把「截断前的真实总数」写进 total，这里按实际写入的容量取用
+                    int n = (total < raw.Length) ? total : raw.Length;
+                    if (n < 0) n = 0;
+
+                    var chars = new List<OcrChar>(n);
+                    for (int i = 0; i < n; i++)
+                        chars.Add(OcrChar.FromNative(raw[i]));
+
+                    var res = new OcrResult
+                    {
+                        Text = Utf8FromBuffer(textBuf),
+                        MeanScore = meanScore,
+                        Chars = chars
+                    };
+                    return OpResult<OcrResult>.Ok(res);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<OcrResult>.Fail("字符识别失败：" + ex.Message);
+                }
+            }
         }
 
         /// <summary>把字符串转 UTF-8 字节并补 null 结尾（供原生 const char* 参数，支持中文路径）。</summary>
@@ -2661,7 +2730,10 @@ namespace VisionPlatform.Native
         /// <summary>二值化阈值 0~255；负数走 Otsu 自适应（默认 -1）。</summary>
         public int Threshold { get; set; }
 
-        /// <summary>极性反转：白底黑字设 true。</summary>
+        /// <summary>
+        /// 极性控制：false = <b>自动判定极性</b>（推荐，白底黑字 / 黑底白字都能正确分割）；
+        /// true = 强制反色（仅极端成像下需要人工干预时使用）。
+        /// </summary>
         public bool Invert { get; set; }
 
         /// <summary>字符最小高度（像素）；&lt;=0 不限制。</summary>
@@ -2781,7 +2853,11 @@ namespace VisionPlatform.Native
         /// <summary>全体字符的平均置信度 0~1。</summary>
         public double MeanScore { get; set; }
 
-        /// <summary>字符框列表（仅 Segment 填充，Recognize 返回空列表）。</summary>
+        /// <summary>
+        /// 字符框列表。<see cref="VisionAlgo.RecognizeEx"/> 返回带真实 label / score 的识别字符；
+        /// <see cref="VisionAlgo.Segment"/> 返回只有框、标签恒为 "?" 的分割结果；
+        /// <see cref="VisionAlgo.Recognize"/> 返回空列表（它只出文本）。
+        /// </summary>
         public List<OcrChar> Chars { get; set; }
 
         public OcrResult()

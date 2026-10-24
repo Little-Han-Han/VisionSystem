@@ -217,6 +217,10 @@ int OcrSegment(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                VA_OcrChar* outChars, int maxCount, int* outCount);
 int OcrRecognize(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                  char* outText, int textCap, double* outMeanScore);
+// 分割 + 识别一次调用：同时出文本与每个字符的标签 / 置信度（框与标签同源）
+int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
+                   VA_OcrChar* outChars, int charsCap, int* outCharCount,
+                   char* outText, int textCap, double* outMeanScore);
 
 // ---------------------- 卡尺 ----------------------
 // 沿路径等分投放投影卡尺找边 → 最小二乘拟合 → 离群剔除一轮 → RMS。

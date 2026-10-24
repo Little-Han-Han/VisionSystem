@@ -333,6 +333,15 @@ int VA_CALL va_ocr_recognize(void* handle, const VA_Image* gray, const VA_OcrPar
     return va::OcrRecognize(ctx, gray, param, out_text, text_cap, out_mean_score);
 }
 
+int VA_CALL va_ocr_recognize_ex(void* handle, const VA_Image* gray, const VA_OcrParam* param,
+                                VA_OcrChar* out_chars, int chars_cap, int* out_char_count,
+                                char* out_text, int text_cap, double* out_mean_score)
+{
+    VA_CTX();
+    return va::OcrRecognizeEx(ctx, gray, param, out_chars, chars_cap, out_char_count,
+                              out_text, text_cap, out_mean_score);
+}
+
 // ---------------------- YOLO 目标检测（OpenVINO 推理）----------------------
 
 int VA_CALL va_det_create(void* handle, const char* model_path, const char* device)

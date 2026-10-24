@@ -574,7 +574,8 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Group("分割参数"));
             t.Fields.Add(Int("Threshold", "二值化阈值", -1, 255, "-1",
                 "-1 = Otsu 自适应；光照均匀时改固定阈值（如 128）更稳"));
-            t.Fields.Add(Bool("Invert", "极性反转", "0", "白底黑字时开启；深色背景亮字保持关闭"));
+            t.Fields.Add(Bool("Invert", "极性反转", "0",
+                "0 = 自动判定极性（推荐，白底黑字 / 黑底白字都能正确分割）；1 = 强制反色"));
             t.Fields.Add(Dbl("MinCharH", "字符最小高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉噪声点）", true));
             t.Fields.Add(Dbl("MaxCharH", "字符最大高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉大块污渍）", true));
             t.Fields.Add(Dbl("MinAspect", "最小宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制", true));

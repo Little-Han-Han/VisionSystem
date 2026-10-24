@@ -856,8 +856,8 @@ namespace VisionPlatform.Flow
                 }
                 bool hasTemplate = tpl.Value > 0;
 
-                // ④ 识别：拿到整行文本 + 平均置信度
-                OpResult<OcrResult> rr = _algo.Recognize(gray, op);
+                // ④ 识别：一次调用同时拿到整段文本 + 平均置信度 + 每个字符的真实标签
+                OpResult<OcrResult> rr = _algo.RecognizeEx(gray, op, maxCount);
                 if (!rr.Success)
                 {
                     p.Summary = "字符识别：" + Tail(rr.Message);
@@ -866,27 +866,24 @@ namespace VisionPlatform.Flow
 
                 string text = (rr.Value != null) ? (rr.Value.Text ?? "") : "";
                 double meanScore = (rr.Value != null) ? rr.Value.MeanScore : 0.0;
+                List<OcrChar> chars = (rr.Value != null && rr.Value.Chars != null)
+                                    ? rr.Value.Chars : new List<OcrChar>();
 
-                // ⑤ 字符框叠加（图像坐标；ROI 模式下要从 ROI 局部坐标还原到整帧坐标）
-                int charCount = 0;
+                // ⑤ 字符框：数据源与文本同源（不再单独调 Segment，否则框上标签恒为 "? 0.00"）。
+                //    ShowBoxes 只控制「是否绘制」，不影响统计口径。
+                //    图像坐标：ROI 模式下要从 ROI 局部坐标还原到整帧坐标。
+                int charCount = chars.Count;
                 if (showBoxes)
                 {
-                    OpResult<List<OcrChar>> sr = _algo.Segment(gray, op, maxCount);
-                    if (sr.Success && sr.Value != null)
+                    foreach (OcrChar c in chars)
                     {
-                        charCount = sr.Value.Count;
-                        foreach (OcrChar c in sr.Value)
-                        {
-                            string label = (string.IsNullOrEmpty(c.Label) ? "?" : c.Label)
-                                         + " " + c.Score.ToString("F2", CultureInfo.InvariantCulture);
-                            var box = FlowShapes.OcrBox(c.X + roi.X, c.Y + roi.Y, c.W, c.H, label);
-                            if (box != null) box.Name = "OcrChar";
-                            p.Shapes.Add(box);
-                        }
+                        string label = (string.IsNullOrEmpty(c.Label) ? "?" : c.Label)
+                                     + " " + c.Score.ToString("F2", CultureInfo.InvariantCulture);
+                        var box = FlowShapes.OcrBox(c.X + roi.X, c.Y + roi.Y, c.W, c.H, label);
+                        if (box != null) box.Name = "OcrChar";
+                        p.Shapes.Add(box);
                     }
                 }
-                if (charCount <= 0 && text.Length > 0)
-                    charCount = text.Replace("\n", "").Replace("\r", "").Length;
 
                 // ⑥ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）。
                 // 连续运行（CaptureFrames=false）下预览区不显示单节点帧，跳过以免每周期徒增一张整幅克隆（LOH 压力→卡顿）。
