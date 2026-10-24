@@ -260,7 +260,7 @@ namespace VisionPlatform.UI
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            RefreshCameraList(true);   // 走枚举缓存：不要在首帧同步重新枚举（见方法注释）
+            RefreshCameraListFromCache();   // 走枚举缓存：不要在首帧同步重新枚举（见方法注释）
         }
 
         /// <summary>视图绑定下拉框的条目；CameraId 为空表示「自动分配」。</summary>
@@ -530,15 +530,33 @@ namespace VisionPlatform.UI
         #region 相机
 
         /// <summary>
-        /// 刷新工具栏相机下拉（并连带刷新各视图的绑定下拉）。
+        /// 真实重新枚举并刷新工具栏相机下拉（并连带刷新各视图的绑定下拉）。
+        /// <para>「刷新」按钮、相机管理器变更等<b>需要看到最新硬件</b>的场合用这个无参版本。</para>
+        /// <para>启动首帧请不要用本方法，改用 <see cref="RefreshCameraListFromCache"/>：
+        /// DirectShow 枚举实测单台相机 ≈1.1s，会冻住主窗体首帧。</para>
+        /// </summary>
+        private void RefreshCameraList()
+        {
+            RefreshCameraListCore(false);
+        }
+
+        /// <summary>
+        /// 优先复用 <see cref="CameraManager.LastEnumerated"/> 刷新下拉；缓存未就绪才回落到真实枚举。
+        /// <para>【专供启动首帧（<see cref="OnShown"/>）】启动期 Splash 的 <c>OpenAll()</c> 已经付过
+        /// 一次枚举代价（≈1.1s），这里复用那份结果即可，不必在 UI 线程再冻一次。</para>
+        /// </summary>
+        private void RefreshCameraListFromCache()
+        {
+            RefreshCameraListCore(true);
+        }
+
+        /// <summary>
+        /// 刷新相机下拉的公共实现。
         /// </summary>
         /// <param name="preferCachedEnumeration">
-        /// true = 优先复用 <see cref="CameraManager.LastEnumerated"/>（启动补刷用）；
-        /// 缓存未就绪才回落到真实枚举。<b>其它调用点一律用无参调用</b>（= 真实枚举）。
-        /// <para>【为什么要有这个开关】DirectShow 枚举实测单台相机 ≈1.1s，
-        /// 启动期 Splash 的 <c>OpenAll()</c> 已经付过这份代价，主窗体首帧不该在 UI 线程再冻 1.1s。</para>
+        /// true = 优先用 <see cref="CameraManager.LastEnumerated"/>；false = 真实枚举。
         /// </param>
-        private void RefreshCameraList(bool preferCachedEnumeration = false)
+        private void RefreshCameraListCore(bool preferCachedEnumeration)
         {
             if (_closing || IsDisposed || !IsHandleCreated) return;
 
