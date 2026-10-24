@@ -29,7 +29,7 @@ namespace VisionPlatform.Core
 
         public static void Error(string message, Exception ex)
         {
-            Write(LogLevel.Error, "", message + (ex != null ? (" | " + ex.Message) : ""));
+            Write(LogLevel.Error, "", message, ex != null ? ex.ToString() : null);
         }
 
         // ---------------------- 本轮新增：带流程名 ----------------------
@@ -43,10 +43,10 @@ namespace VisionPlatform.Core
         /// <summary>带归属流程名的 ERROR。</summary>
         public static void Error(string flowName, string message) { Write(LogLevel.Error, flowName, message); }
 
-        /// <summary>带归属流程名的 ERROR（附异常）。</summary>
+        /// <summary>带归属流程名的 ERROR（附异常，完整堆栈写入 Detail 供日志库排查）。</summary>
         public static void Error(string flowName, string message, Exception ex)
         {
-            Write(LogLevel.Error, flowName, message + (ex != null ? (" | " + ex.Message) : ""));
+            Write(LogLevel.Error, flowName, message, ex != null ? ex.ToString() : null);
         }
 
         /// <summary>
@@ -64,7 +64,12 @@ namespace VisionPlatform.Core
 
         private static void Write(LogLevel level, string flowName, string message)
         {
-            var entry = new LogEntry(level, flowName, message);
+            Write(level, flowName, message, null);
+        }
+
+        private static void Write(LogLevel level, string flowName, string message, string detail)
+        {
+            var entry = new LogEntry(level, flowName, message, detail);
             string line = entry.Format();
 
             try

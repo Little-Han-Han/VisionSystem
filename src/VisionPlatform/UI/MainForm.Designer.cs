@@ -45,6 +45,7 @@ namespace VisionPlatform.UI
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnLog = new System.Windows.Forms.ToolStripButton();
             this.tsSep3 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelStatus = new System.Windows.Forms.ToolStripLabel();
 
@@ -143,6 +144,7 @@ namespace VisionPlatform.UI
                 this.tsBtnComm,
                 this.tsBtnRecipe,
                 this.tsBtnSettings,
+                this.tsBtnLog,
                 this.tsSep3,
                 this.tsLabelStatus});
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
@@ -242,6 +244,12 @@ namespace VisionPlatform.UI
             this.tsBtnSettings.Text = "系统设置";
             this.tsBtnSettings.ToolTipText = "图片保存路径 / 格式 / 保留天数、良率告警下限，以及运行前置条件";
             this.tsBtnSettings.Click += new System.EventHandler(this.OnOpenSettings);
+
+            this.tsBtnLog.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnLog.Name = "tsBtnLog";
+            this.tsBtnLog.Text = "日志查看";
+            this.tsBtnLog.ToolTipText = "按日期查看 NG 与软件报错、良率汇总";
+            this.tsBtnLog.Click += new System.EventHandler(this.OnOpenLogForm);
 
             this.tsSep3.Name = "tsSep3";
 
@@ -692,6 +700,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnComm;
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
         private System.Windows.Forms.ToolStripButton tsBtnSettings;
+        private System.Windows.Forms.ToolStripButton tsBtnLog;
         private System.Windows.Forms.ToolStripSeparator tsSep3;
         private System.Windows.Forms.ToolStripLabel tsLabelStatus;
 

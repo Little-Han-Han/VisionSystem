@@ -43,12 +43,16 @@ namespace VisionPlatform.Core
         /// <summary>正文。</summary>
         public string Message { get; set; }
 
+        /// <summary>扩展详情（如软件报错的完整异常堆栈）。可由 <see cref="Logger"/> 的带异常重载自动填入。</summary>
+        public string Detail { get; set; }
+
         public LogEntry()
         {
             Time = DateTime.Now;
             Level = LogLevel.Info;
             FlowName = "";
             Message = "";
+            Detail = "";
         }
 
         public LogEntry(LogLevel level, string flowName, string message)
@@ -57,6 +61,17 @@ namespace VisionPlatform.Core
             Level = level;
             FlowName = flowName ?? "";
             Message = message ?? "";
+            Detail = "";
+        }
+
+        /// <summary>带详情的构造（异常堆栈等）。</summary>
+        public LogEntry(LogLevel level, string flowName, string message, string detail)
+        {
+            Time = DateTime.Now;
+            Level = level;
+            FlowName = flowName ?? "";
+            Message = message ?? "";
+            Detail = detail ?? "";
         }
 
         /// <summary>级别的固定文本（INFO / WARN / ERROR / OK / NG），用于显示与导出。</summary>

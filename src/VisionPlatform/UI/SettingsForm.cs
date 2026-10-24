@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Windows.Forms;
 using VisionPlatform.Communication;
 using VisionPlatform.Core;
+using VisionPlatform.Data;
 
 namespace VisionPlatform.UI
 {
@@ -23,6 +25,8 @@ namespace VisionPlatform.UI
             // 【项目铁律】VS 重序列化 Designer 会悄悄丢掉手写的 `xxx.Event += handler`，
             // 本项目因此出过一次严重 bug，故 InitializeComponent 里不放动态代码。
             cmbTheme.SelectedIndexChanged += OnThemeChanged;
+            btnBrowseDb.Click += OnBrowseDb;
+            btnCleanupLog.Click += OnCleanupLog;
 
             LoadFrom(ConfigStore.Current.System);
             _themeOnOpen = UiTheme.Mode;
@@ -37,6 +41,7 @@ namespace VisionPlatform.UI
             // 语义色：确定=绿，清理历史（删除文件）=红；其余中性
             btnOk.Kind = UiButtonKind.Start;
             btnCleanup.Kind = UiButtonKind.Stop;
+            btnCleanupLog.Kind = UiButtonKind.Stop;
         }
 
         // ---------- 界面 ↔ 设置 ----------
@@ -57,6 +62,10 @@ namespace VisionPlatform.UI
             chkNgOnly.Checked = s.SaveNgOnly;
             chkRequireComm.Checked = s.RequireCommBeforeRun;
             numYieldAlarm.Value = ClampPercent(s.YieldAlarmPercent);
+
+            // 日志数据库：路径为空表示使用默认（AppPaths.LogDbFile）；保留天数 0 = 不清理
+            txtDbPath.Text = s.DbPath ?? "";
+            numLogDays.Value = ClampDays(s.LogRetentionDays);
         }
 
         private SystemSettings CollectFromUi()
@@ -70,6 +79,9 @@ namespace VisionPlatform.UI
             s.SaveNgOnly = chkNgOnly.Checked;
             s.RequireCommBeforeRun = chkRequireComm.Checked;
             s.YieldAlarmPercent = (double)numYieldAlarm.Value;
+
+            s.DbPath = txtDbPath.Text.Trim();
+            s.LogRetentionDays = (int)numLogDays.Value;
 
             return s;
         }
@@ -164,6 +176,61 @@ namespace VisionPlatform.UI
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                     txtSavePath.Text = dlg.SelectedPath;
             }
+        }
+
+        /// <summary>选择日志数据库文件路径（SQLite）。留空表示使用默认路径（AppPaths.LogDbFile）。
+        /// 注意：改变路径需重启软件后才对新库生效——启动时会按新路径重新打开数据库。</summary>
+        private void OnBrowseDb(object sender, EventArgs e)
+        {
+            using (var dlg = new SaveFileDialog())
+            {
+                dlg.Filter = "SQLite 数据库 (*.db)|*.db|所有文件 (*.*)|*.*";
+                dlg.Title = "选择日志数据库文件路径";
+                dlg.AddExtension = true;
+                dlg.DefaultExt = "db";
+                dlg.CheckFileExists = false;
+                dlg.OverwritePrompt = false;
+
+                string current = txtDbPath.Text.Trim();
+                if (!string.IsNullOrEmpty(current))
+                {
+                    try
+                    {
+                        string dir = Path.GetDirectoryName(current);
+                        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                            dlg.InitialDirectory = dir;
+                        dlg.FileName = Path.GetFileName(current);
+                    }
+                    catch { }
+                }
+                else
+                {
+                    dlg.InitialDirectory = AppPaths.LogDir;
+                }
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    txtDbPath.Text = dlg.FileName;
+            }
+        }
+
+        /// <summary>按界面上当前的保留天数，立即清理过期日志（不改动界面其它设置）。</summary>
+        private void OnCleanupLog(object sender, EventArgs e)
+        {
+            ApplyToConfig();
+            int days = ConfigStore.Current.System.LogRetentionDays;
+            if (days <= 0)
+            {
+                MessageBox.Show(this, "日志保留天数为 0（不清理），无需清理。", "日志清理",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            LogDb.CleanupRetention(days);
+            MessageBox.Show(this,
+                "已按保留天数（" + days + " 天）清理过期日志。",
+                "清理完成",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private void OnCleanupNow(object sender, EventArgs e)

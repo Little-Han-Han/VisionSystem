@@ -42,6 +42,15 @@ namespace VisionPlatform.UI
             this.lblTheme = new System.Windows.Forms.Label();
             this.cmbTheme = new System.Windows.Forms.ComboBox();
 
+            this.groupLog = new System.Windows.Forms.GroupBox();
+            this.lblLogDbPath = new System.Windows.Forms.Label();
+            this.txtDbPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseDb = new VisionPlatform.UI.UiButton();
+            this.lblLogDays = new System.Windows.Forms.Label();
+            this.numLogDays = new System.Windows.Forms.NumericUpDown();
+            this.lblLogDaysUnit = new System.Windows.Forms.Label();
+            this.btnCleanupLog = new VisionPlatform.UI.UiButton();
+
             this.panelButtons = new System.Windows.Forms.Panel();
             this.btnDefault = new VisionPlatform.UI.UiButton();
             this.btnOk = new VisionPlatform.UI.UiButton();
@@ -49,6 +58,7 @@ namespace VisionPlatform.UI
 
             ((System.ComponentModel.ISupportInitialize)(this.numDays)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numYieldAlarm)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numLogDays)).BeginInit();
             this.groupSave.SuspendLayout();
             this.groupRun.SuspendLayout();
             this.groupTheme.SuspendLayout();
@@ -234,14 +244,85 @@ namespace VisionPlatform.UI
             this.lblYieldAlarmUnit.TabIndex = 4;
             this.lblYieldAlarmUnit.Text = "%（低于此值良率转橙，低于一半转红；0 = 不告警）";
 
+            // ---------- groupLog ----------
+            this.groupLog.Controls.Add(this.btnCleanupLog);
+            this.groupLog.Controls.Add(this.lblLogDaysUnit);
+            this.groupLog.Controls.Add(this.numLogDays);
+            this.groupLog.Controls.Add(this.lblLogDays);
+            this.groupLog.Controls.Add(this.btnBrowseDb);
+            this.groupLog.Controls.Add(this.txtDbPath);
+            this.groupLog.Controls.Add(this.lblLogDbPath);
+            this.groupLog.ForeColor = System.Drawing.Color.DeepSkyBlue;
+            this.groupLog.Location = new System.Drawing.Point(12, 342);
+            this.groupLog.Name = "groupLog";
+            this.groupLog.Size = new System.Drawing.Size(496, 110);
+            this.groupLog.TabIndex = 2;
+            this.groupLog.TabStop = false;
+            this.groupLog.Text = "日志数据库";
+
+            this.lblLogDbPath.AutoSize = true;
+            this.lblLogDbPath.ForeColor = System.Drawing.Color.Silver;
+            this.lblLogDbPath.Location = new System.Drawing.Point(14, 28);
+            this.lblLogDbPath.Name = "lblLogDbPath";
+            this.lblLogDbPath.Size = new System.Drawing.Size(80, 15);
+            this.lblLogDbPath.TabIndex = 0;
+            this.lblLogDbPath.Text = "数据库路径：";
+
+            this.txtDbPath.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.txtDbPath.ForeColor = System.Drawing.Color.Gainsboro;
+            this.txtDbPath.Location = new System.Drawing.Point(100, 25);
+            this.txtDbPath.Name = "txtDbPath";
+            this.txtDbPath.Size = new System.Drawing.Size(286, 23);
+            this.txtDbPath.TabIndex = 1;
+
+            this.btnBrowseDb.Location = new System.Drawing.Point(392, 23);
+            this.btnBrowseDb.Name = "btnBrowseDb";
+            this.btnBrowseDb.Size = new System.Drawing.Size(94, 26);
+            this.btnBrowseDb.TabIndex = 2;
+            this.btnBrowseDb.Text = "浏览...";
+            this.btnBrowseDb.UseVisualStyleBackColor = true;
+            this.btnBrowseDb.Click += new System.EventHandler(this.OnBrowseDb);
+
+            this.lblLogDays.AutoSize = true;
+            this.lblLogDays.ForeColor = System.Drawing.Color.Silver;
+            this.lblLogDays.Location = new System.Drawing.Point(14, 62);
+            this.lblLogDays.Name = "lblLogDays";
+            this.lblLogDays.Size = new System.Drawing.Size(80, 15);
+            this.lblLogDays.TabIndex = 3;
+            this.lblLogDays.Text = "日志保留：";
+
+            this.numLogDays.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.numLogDays.ForeColor = System.Drawing.Color.Gainsboro;
+            this.numLogDays.Location = new System.Drawing.Point(88, 59);
+            this.numLogDays.Maximum = new decimal(new int[] { 3650, 0, 0, 0 });
+            this.numLogDays.Name = "numLogDays";
+            this.numLogDays.Size = new System.Drawing.Size(70, 23);
+            this.numLogDays.TabIndex = 4;
+
+            this.lblLogDaysUnit.AutoSize = true;
+            this.lblLogDaysUnit.ForeColor = System.Drawing.Color.Gray;
+            this.lblLogDaysUnit.Location = new System.Drawing.Point(164, 62);
+            this.lblLogDaysUnit.Name = "lblLogDaysUnit";
+            this.lblLogDaysUnit.Size = new System.Drawing.Size(180, 15);
+            this.lblLogDaysUnit.TabIndex = 5;
+            this.lblLogDaysUnit.Text = "天（0 = 不清理，默认 90）";
+
+            this.btnCleanupLog.Location = new System.Drawing.Point(100, 84);
+            this.btnCleanupLog.Name = "btnCleanupLog";
+            this.btnCleanupLog.Size = new System.Drawing.Size(180, 28);
+            this.btnCleanupLog.TabIndex = 6;
+            this.btnCleanupLog.Text = "立即清理过期日志";
+            this.btnCleanupLog.UseVisualStyleBackColor = true;
+            this.btnCleanupLog.Click += new System.EventHandler(this.OnCleanupLog);
+
             // ---------- groupTheme ----------
             this.groupTheme.Controls.Add(this.cmbTheme);
             this.groupTheme.Controls.Add(this.lblTheme);
             this.groupTheme.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.groupTheme.Location = new System.Drawing.Point(12, 342);
+            this.groupTheme.Location = new System.Drawing.Point(12, 458);
             this.groupTheme.Name = "groupTheme";
             this.groupTheme.Size = new System.Drawing.Size(496, 64);
-            this.groupTheme.TabIndex = 2;
+            this.groupTheme.TabIndex = 3;
             this.groupTheme.TabStop = false;
             this.groupTheme.Text = "界面主题";
 
@@ -268,10 +349,10 @@ namespace VisionPlatform.UI
             this.panelButtons.Controls.Add(this.btnOk);
             this.panelButtons.Controls.Add(this.btnDefault);
             this.panelButtons.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.panelButtons.Location = new System.Drawing.Point(0, 410);
+            this.panelButtons.Location = new System.Drawing.Point(0, 526);
             this.panelButtons.Name = "panelButtons";
             this.panelButtons.Size = new System.Drawing.Size(520, 60);
-            this.panelButtons.TabIndex = 3;
+            this.panelButtons.TabIndex = 4;
 
             this.btnDefault.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnDefault.Location = new System.Drawing.Point(12, 16);
@@ -306,7 +387,7 @@ namespace VisionPlatform.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(520, 470);
+            this.ClientSize = new System.Drawing.Size(520, 586);
             this.Controls.Add(this.groupSave);
             this.Controls.Add(this.groupRun);
             this.Controls.Add(this.groupTheme);
@@ -322,6 +403,7 @@ namespace VisionPlatform.UI
 
             ((System.ComponentModel.ISupportInitialize)(this.numDays)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.numYieldAlarm)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.numLogDays)).EndInit();
             this.groupSave.ResumeLayout(false);
             this.groupSave.PerformLayout();
             this.groupRun.ResumeLayout(false);
@@ -358,6 +440,15 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.GroupBox groupTheme;
         private System.Windows.Forms.Label lblTheme;
         private System.Windows.Forms.ComboBox cmbTheme;
+
+        private System.Windows.Forms.GroupBox groupLog;
+        private System.Windows.Forms.Label lblLogDbPath;
+        private System.Windows.Forms.TextBox txtDbPath;
+        private VisionPlatform.UI.UiButton btnBrowseDb;
+        private System.Windows.Forms.Label lblLogDays;
+        private System.Windows.Forms.NumericUpDown numLogDays;
+        private System.Windows.Forms.Label lblLogDaysUnit;
+        private VisionPlatform.UI.UiButton btnCleanupLog;
 
         private System.Windows.Forms.Panel panelButtons;
         private VisionPlatform.UI.UiButton btnDefault;

@@ -124,6 +124,7 @@ namespace VisionPlatform.UI
         private FlowForm _flowForm;
         private CommForm _commForm;
         private RecipeForm _recipeForm;
+        private LogForm _logForm;
 
         // ---- 连续实时预览（主界面 live preview）----
         // 复用 CameraForm / LocalCamera 的成熟链路：StartGrab → FrameReceived → 覆盖式合帧 →
@@ -1141,6 +1142,9 @@ namespace VisionPlatform.UI
         }
         private void OnOpenCommForm(object sender, EventArgs e) { ShowChild(ref _commForm); }
         private void OnOpenRecipeForm(object sender, EventArgs e) { ShowChild(ref _recipeForm); }
+
+        /// <summary>打开日志查看窗体（按日期查看 NG 与软件报错）。</summary>
+        private void OnOpenLogForm(object sender, EventArgs e) { ShowChild(ref _logForm); }
 
         private void OnOpenSettings(object sender, EventArgs e)
         {

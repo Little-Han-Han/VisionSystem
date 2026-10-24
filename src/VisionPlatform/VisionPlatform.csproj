@@ -66,6 +66,8 @@
     <Compile Include="Core\Lang.cs" />
     <Compile Include="Core\LogEntry.cs" />
     <Compile Include="Core\Logger.cs" />
+    <Compile Include="Data\LogDb.cs" />
+    <Compile Include="Data\Sqlite.cs" />
     <Compile Include="Core\OpResult.cs" />
     <Compile Include="Flow\FlowModels.cs" />
     <Compile Include="Flow\FlowModule.cs" />
@@ -168,6 +170,9 @@
     <Compile Include="UI\SettingsForm.Designer.cs">
       <DependentUpon>SettingsForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\LogForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="UI\SplashForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -200,6 +205,7 @@
     <!-- 把 C++ 算法库及其 OpenCV 运行时复制到主程序输出目录 -->
     <PostBuildEvent>xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\VisionAlgo.Native.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
 xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\opencv_world455*.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
+xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
 exit /b 0</PostBuildEvent>
   </PropertyGroup>
 </Project>

@@ -387,6 +387,11 @@ ThirdParty/**/*.pdb
 # 导致 clone 后缺少 .lib 无法编译。这里把它放行（约 6.5MB，体积可接受）。
 !ThirdParty/**/lib/x64/
 !ThirdParty/**/lib/x64/*.lib
+
+# 例外：日志数据库用的 SQLite 原生库（官方 x64 构建，约 1.6MB，远低于 GitHub 单文件上限）。
+# 必须随仓库入库——否则 clone 后 PostBuildEvent 复制不到，运行时 sqlite3.dll 缺失，
+# 日志入库功能会静默失效。依赖仅 KERNEL32 + VC 运行时（后者 OpenCV/OpenVINO 本就要求）。
+!ThirdParty/SQLite/sqlite3.dll
 # ============================================================
 # 测试/冒烟程序（用户要求：不入库，本地保留，确认后自行上传）
 # 注意：VisionSystem.sln 仍引用这三个工程——新机器 clone 后加载解决方案

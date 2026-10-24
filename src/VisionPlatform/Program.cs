@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Forms;
 using VisionPlatform.Core;
+using VisionPlatform.Data;
 using VisionPlatform.Recipe;
 using VisionPlatform.UI;
 // 命名空间 VisionPlatform.Recipe 与类 Recipe 同名，用别名避免歧义
@@ -29,12 +30,20 @@ namespace VisionPlatform
             // （例如用户报告「画 ROI 报错」却看不到具体堆栈时，能从日志拿到精确异常）。
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) =>
-                Logger.Error("UI 线程未处理异常：" + e.Exception);
+                Logger.Error("", "UI 线程未处理异常", e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
-                Logger.Error("未处理异常：" + (e.ExceptionObject != null ? e.ExceptionObject.ToString() : "(null)"));
+            {
+                var ex = e.ExceptionObject as Exception;
+                Logger.Error("", "未处理异常", ex ?? new Exception(e.ExceptionObject != null ? e.ExceptionObject.ToString() : "(null)"));
+            };
 
             AppPaths.Ensure();
             ConfigStore.Load();
+
+            // 日志数据库：把运行日志（含 OK/NG 判定与软件报错/异常堆栈）持久化，支持按日期查看。
+            // 必须在首个 Logger.Info 之前初始化，确保启动日志也入库。
+            LogDb.Initialize(ConfigStore.Current.System.DbPath, ConfigStore.Current.System.LogRetentionDays);
+            Logger.EntryLogged += (s, e) => LogDb.Enqueue(e);
 
             // 【换色板必须在第一个窗体创建之前】UiTheme 的颜色属性是静态的，
             // 窗体构造函数里 ApplyTheme 读的就是当时的色板值；晚于此处会让首个窗体
@@ -103,6 +112,7 @@ namespace VisionPlatform
             }
 
             Camera.CameraManager.Instance.CloseAll();
+            LogDb.Shutdown();
             Logger.Info("===== VisionPlatform 退出 =====");
         }
 

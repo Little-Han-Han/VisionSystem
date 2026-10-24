@@ -95,8 +95,25 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public double YieldAlarmPercent { get; set; }
 
+        /// <summary>
+        /// 日志数据库文件路径（SQLite）。为空时回落到默认 <see cref="AppPaths.LogDbFile"/>。
+        /// 一般无需改动。
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public string DbPath { get; set; }
+
+        /// <summary>
+        /// 日志保留天数；超过该天数的日志记录（含 OK/NG 判定与软件报错）会被清理，
+        /// 0 表示不清理。默认 90。
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int LogRetentionDays { get; set; }
+
         /// <summary>良品率告警下限的默认值（旧配置缺失该字段时补齐用）。</summary>
         public const double DefaultYieldAlarmPercent = 95.0;
+
+        /// <summary>日志保留天数默认值（旧配置缺失该字段时补齐用）。</summary>
+        public const int DefaultLogRetentionDays = 90;
 
         public static SystemSettings CreateDefault()
         {
@@ -109,7 +126,9 @@ namespace VisionPlatform.Core
                 SaveNgOnly = false,
                 RequireCommBeforeRun = false,
                 YieldAlarmPercent = DefaultYieldAlarmPercent,
-                AllowCameraShare = false
+                AllowCameraShare = false,
+                DbPath = "",
+                LogRetentionDays = DefaultLogRetentionDays
             };
         }
 
@@ -124,7 +143,9 @@ namespace VisionPlatform.Core
                 SaveNgOnly = SaveNgOnly,
                 RequireCommBeforeRun = RequireCommBeforeRun,
                 YieldAlarmPercent = YieldAlarmPercent,
-                AllowCameraShare = AllowCameraShare
+                AllowCameraShare = AllowCameraShare,
+                DbPath = DbPath,
+                LogRetentionDays = LogRetentionDays
             };
         }
     }
@@ -650,6 +671,12 @@ namespace VisionPlatform.Core
             // 反序列化后为 0，这里补齐默认值 95，保证良率告警着色行为与首次运行一致。
             if (cfg.System.YieldAlarmPercent <= 0.0)
                 cfg.System.YieldAlarmPercent = SystemSettings.DefaultYieldAlarmPercent;
+
+            // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有 DbPath / LogRetentionDays 字段，
+            // 反序列化后 DbPath 为 null、LogRetentionDays 为 0，这里归一化为默认值
+            // （0 视为"未设置保留天数"，回落到默认 90，而不是"不清理"）。
+            if (cfg.System.DbPath == null) cfg.System.DbPath = "";
+            if (cfg.System.LogRetentionDays <= 0) cfg.System.LogRetentionDays = SystemSettings.DefaultLogRetentionDays;
 
             // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有这三项：
             // - CurrentProduct 缺失即 null → 归一化为 ""（= 全部）

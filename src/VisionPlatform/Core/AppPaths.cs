@@ -29,6 +29,12 @@ namespace VisionPlatform.Core
             get { return Path.Combine(LogDir, DateTime.Now.ToString("yyyy-MM-dd") + ".log"); }
         }
 
+        /// <summary>日志数据库文件（SQLite，落盘全部运行日志与判定结果）。</summary>
+        public static string LogDbFile
+        {
+            get { return Path.Combine(LogDir, "logs.db"); }
+        }
+
         /// <summary>全局配置文件。</summary>
         public static string ConfigFile { get { return Path.Combine(Root, "appconfig.json"); } }
 
