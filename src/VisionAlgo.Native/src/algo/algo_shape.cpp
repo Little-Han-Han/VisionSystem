@@ -10,14 +10,27 @@
 //           逐层向下在候选邻域内精化位置 / 角度 / 缩放；
 //           最细层再做亚像素位置与角度精化；
 //           最后按得分排序 + 非极大值抑制输出多目标。
-//    评分 —— 把模板点的梯度方向旋转到候选姿态后，与该处图像梯度求余弦相似度取平均。
+//    评分 —— 把模板点旋转到候选姿态后，与该处图像梯度求余弦相似度取平均。
 //
-//  性能设计（三项叠加）：
+//  性能设计（四项叠加）：
 //    1) 姿态预计算：角度/缩放的旋转只按「姿态」算一次，位置循环里只做加法与采样，
 //       避免在 (位置 × 角度 × 缩放) 三重循环里反复做三角函数与旋转。
-//    2) 提前终止：①理论上界 —— 剩余点全满分也达不到阈值即放弃；
-//                ②贪婪启发 —— 已评估的强边缘平均分过低即放弃（greediness 控制强度）。
-//    3) 并行 + SIMD：粗扫按位置、精化按候选做 OpenMP 并行；评分的累积段用 SSE2 四路。
+//    2) 提前终止：①理论上界 —— 剩余点即使全满分也达不到阈值即放弃；
+//                ②贪婪启发 —— 已评估点的平均分过低即放弃（greediness 控制强度）。
+//    3) 位置级剪枝 + 单并行域：粗层把「本位置当前最优得分」当作理论上界阈值，
+//       已找到高分姿态的位置在后续姿态上几十个点内就能退出；姿态预计算按块组织，
+//       一个块只做一次 fork/join（原实现每个姿态 fork 一次，360+ 姿态时开销可观）。
+//    4) 并行 + SIMD：粗扫按位置、精化按候选做 OpenMP 并行；评分的累积段用 SSE2 四路。
+//
+//  稳健性设计（针对「定位准确率不足」）：
+//    · 评分分母只统计「落在图像内」的模板点。目标贴边/部分出画时，出画的点根本无从
+//      判断对错，计入分母会把分数上限压到 (1-出画比例)，贴边件因此被判低分甚至漏检。
+//      图内的平坦点（梯度≈0）仍计入分母并按 0 分处理 —— 该有边缘却没有，属真实失配。
+//    · 覆盖率下限：图内点不足总数一半直接判失败，避免「只剩两三个点恰好对上」的假高分。
+//    · 非极大值抑制用「旋转外框的重叠面积比」而不是中心距，ROI 比工件大时不会把两个
+//      真实相邻目标当成同一个。
+//    · 粗层候选保留前做一次空间稀疏化，避免同一目标的分数平台占满候选名额而挤掉邻居。
+//    · 输出分数在最细层用「不剪枝」的口径重算一次，下游拿它判 OK/NG 才不会偏悲观。
 // ============================================================================
 
 #include "va_internal.h"
@@ -48,6 +61,22 @@ const size_t kMaxModelPoints = 8000;    // 特征点数量的硬上限
 const size_t kMaxPointsPerLevel = 1024; // 单层参与评分的最多点数
 const int    kDefaultMaxFeatures = 1500;    // 默认最多特征点数
 const double kDefaultMinFeatureDist = 2.0;  // 默认特征点最小间距（模板像素）
+
+// 评分的覆盖率下限：图内点数不足总数的这个比例时，本次评分直接判失败。
+// 0.5 的含义是「目标至少有一半还在视野里」—— 再少的话分数由极少数点决定，不可信。
+const float kMinCoverage = 0.5f;
+
+// 粗层姿态轴的抽稀倍数：最粗层不需要按 angle_step / scale_step 逐一尝试。
+// 金字塔下一层的精化会以 ±2 个步长重新搜索角度与缩放，因此抽稀 2 倍
+// （最坏误差 = 1 个步长）一定能被精化覆盖；姿态总数直接少 4 倍。
+const size_t kCoarsePoseStride = 2;
+
+// 粗层姿态预计算的单块内存上限。块越大 fork/join 越少，但块超过 CPU 末级缓存后
+// 每处理一个位置都要把整块姿态表重新流一遍，反而变慢。
+const size_t kCoarsePoseChunkBytes = 8u << 20;
+
+// 粗层候选保留时的空间分散半径（原图像素，按「最粗层像素 × 2」取）。
+const double kCandidateSepLevelFactor = 2.0;
 
 // 某一层金字塔的梯度场
 struct GradLevel {
@@ -92,7 +121,7 @@ void BuildGradients(const cv::Mat& gray, cv::Mat& gx, cv::Mat& gy)
     cv::Sobel(f, gy, CV_32F, 0, 1, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
 }
 
-// 双线性采样梯度（float 版）；越界返回 false，调用方按 0 分计入
+// 双线性采样梯度（float 版）；越界返回 false，调用方不计入分母
 bool SampleGrad(const cv::Mat& gx, const cv::Mat& gy,
                 float x, float y, float& outGx, float& outGy)
 {
@@ -164,7 +193,15 @@ void BuildPose(const ModelLevel& ml, float angleDeg, float scale, Pose& out)
 // 评分：模板点旋转到候选姿态后与该处图像梯度求余弦相似度取平均。
 //   threshold   —— 理论上界阈值：剩余点即使全满分也达不到就放弃
 //   abandonAvg  —— 贪婪阈值：已评估点的平均分低于它就放弃（<=0 表示不启用）
-// 返回 false 表示被提前淘汰。
+// 返回 false 表示被提前淘汰（或覆盖率不足）。
+//
+// 【分母语义】分母是「落在图像内」的模板点数，不是模板点总数：目标贴边 / 部分出画时
+//   出画的点无从判断对错，若计入分母，分数上限会被压成 (1 - 出画比例)，贴边件必然低分。
+//   图内的平坦点（梯度≈0）仍计入分母并按 0 分处理 —— 那里本该有边缘却没有，是真实失配。
+//
+// 【理论上界的写法】剩余点全部图内且全满分时，分子最多 sum + rest、分母最多
+//   inFrame + rest，所以 (sum + rest) / (inFrame + rest) 才是真正的上界。
+//   全部点都在图内时它退化成旧的 (sum + rest) / total —— 与原来完全一致，剪枝强度不变。
 // ---------------------------------------------------------------------------
 bool ScorePose(const GradLevel& lv, const Pose& pose,
                float cx, float cy, float threshold, float abandonAvg,
@@ -179,15 +216,19 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
     const float* pRy = &pose.ry[0];
 
     const float total = (float)n;
-    // 至少评估这么多点才允许用贪婪启发式淘汰：既要避免只看前几点就误杀，
-    // 又要让「小模型」能尽早剪枝（固定 16 会让 28 点的模型跑满全程，稀疏化因此不提速）。
-    size_t mEval = n / 4;
-    if (mEval < 6) mEval = 6;
-    if (mEval > 24) mEval = 24;
+
+    // 至少评估这么多「图内」点才允许用贪婪启发式淘汰：既要避免只看前几点就误杀，
+    // 又要让「小模型」能尽早剪枝。实测（360 姿态 × 76800 位置）绝大多数
+    // (位置, 姿态) 组合都死在第一次检查上，所以这个值直接决定粗扫耗时 ——
+    // 取 n/8 且不超过 8（原实现 n/4、上限 24，对 55 点的粗层模型要把 16 个点跑满）。
+    size_t mEval = n / 8;
+    if (mEval < 4) mEval = 4;
+    if (mEval > 8) mEval = 8;
     if (mEval > n) mEval = n;
     const size_t minEval = mEval;
 
     float sum = 0.0f;
+    size_t inFrame = 0;      // 落在图像内的采样点数（= 分母）
     size_t i = 0;
 
 #if VA_USE_SSE2
@@ -200,11 +241,13 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
 
     for (; i + 4 <= n; i += 4)
     {
-        // 采样无法向量化（地址发散），先标量取回 4 个点的梯度
+        // 采样无法向量化（地址发散），先标量取回 4 个点的梯度；
+        // 顺带统计「图内点数」—— 越界时 SampleGrad 返回 false，gx/gy 保持 0。
         for (int k = 0; k < 4; ++k)
         {
             float gx = 0.0f, gy = 0.0f;
-            SampleGrad(lv.gx, lv.gy, cx + pOx[i + k], cy + pOy[i + k], gx, gy);
+            if (SampleGrad(lv.gx, lv.gy, cx + pOx[i + k], cy + pOy[i + k], gx, gy))
+                ++inFrame;
             gxv[k] = gx;
             gyv[k] = gy;
         }
@@ -218,7 +261,7 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
         const __m128 vmag = _mm_sqrt_ps(_mm_add_ps(_mm_mul_ps(vgx, vgx), _mm_mul_ps(vgy, vgy)));
         const __m128 vdot = _mm_add_ps(_mm_mul_ps(vrx, vgx), _mm_mul_ps(vry, vgy));
 
-        // 平坦区（mag≈0）或越界点按 0 分计入：用掩码清零，同时避免除零
+        // 平坦区（mag≈0）按 0 分计入：用掩码清零，同时避免除零
         const __m128 vmask = _mm_cmpgt_ps(vmag, vEps);
         __m128 vcos = _mm_and_ps(_mm_div_ps(vdot, vmag), vmask);
         vcos = _mm_max_ps(_mm_min_ps(vcos, vOne), vNegOne);
@@ -227,9 +270,13 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
 
         // 每 4 个点检查一次是否可以提前放弃
         const float done4 = (float)(i + 4);
+        const float rest4 = total - done4;
         const float partial4 = HSum128(vSum);
-        if ((partial4 + (total - done4)) / total < threshold) { outScore = 0.0f; return false; }
-        if (abandonAvg > 0.0f && (i + 4) >= minEval && partial4 / done4 < abandonAvg)
+        const float denomMax4 = (float)inFrame + rest4;
+        if (denomMax4 > 0.0f && (partial4 + rest4) / denomMax4 < threshold)
+        { outScore = 0.0f; return false; }
+        if (abandonAvg > 0.0f && (i + 4) >= minEval && inFrame >= minEval
+            && partial4 / (float)inFrame < abandonAvg)
         { outScore = 0.0f; return false; }
     }
 
@@ -242,7 +289,7 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
     for (; i < n; ++i)
     {
         float gx = 0.0f, gy = 0.0f;
-        SampleGrad(lv.gx, lv.gy, cx + pOx[i], cy + pOy[i], gx, gy);
+        if (SampleGrad(lv.gx, lv.gy, cx + pOx[i], cy + pOy[i], gx, gy)) ++inFrame;
 
         const float mag = std::sqrt(gx * gx + gy * gy);
         if (mag > 1e-6f)
@@ -254,12 +301,20 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
         }
 
         const float done = (float)(i + 1);
-        if ((sum + (total - done)) / total < threshold) { outScore = 0.0f; return false; }
-        if (abandonAvg > 0.0f && (i + 1) >= minEval && sum / done < abandonAvg)
+        const float rest = total - done;
+        const float denomMax = (float)inFrame + rest;
+        if (denomMax > 0.0f && (sum + rest) / denomMax < threshold)
+        { outScore = 0.0f; return false; }
+        if (abandonAvg > 0.0f && (i + 1) >= minEval && inFrame >= minEval
+            && sum / (float)inFrame < abandonAvg)
         { outScore = 0.0f; return false; }
     }
 
-    float s = sum / total;
+    // 覆盖率不足：得分只由极少数图内点决定，不可信 → 直接判失败
+    const float denom = (float)inFrame;
+    if (denom < total * kMinCoverage) { outScore = 0.0f; return false; }
+
+    float s = sum / denom;
     if (s < 0.0f) s = 0.0f;      // 归一到 0~1
     if (s > 1.0f) s = 1.0f;
     outScore = s;
@@ -607,10 +662,13 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             if (angles.back() < aEnd - 1e-9) angles.push_back(aEnd);
         }
 
+        // 缩放区间与角度区间同样处理：min/max 填反时交换（原来是把 max 抬到 min，
+        // 等于静默只搜一个点）；末尾不足一个步长的部分补齐（原来会漏掉 scale_max）。
         double sMin = param->scale_min;
         if (sMin <= 0.0) sMin = 1.0;
         double sMax = param->scale_max;
-        if (sMax < sMin) sMax = sMin;
+        if (sMax <= 0.0) sMax = sMin;
+        if (sMax < sMin) { double t = sMin; sMin = sMax; sMax = t; }
         double sStep = param->scale_step;
         if (sStep <= 0.0) sStep = 0.0;
 
@@ -626,6 +684,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             if (count > 64) count = 64;
             for (int i = 0; i < count; ++i)
                 scales.push_back(ClampD(sMin + i * sStep, sMin, sMax));
+            if (scales.back() < sMax - 1e-9) scales.push_back(sMax);
         }
 
         // 贪婪系数：越大越激进（越快）；<=0 表示只用理论上界，不启用启发式
@@ -650,8 +709,9 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         }
 
         // ---------- 6. 最粗层全局扫描 ----------
-        // 循环次序：姿态在外、位置在内 —— 姿态的旋转只算一次并供全部位置复用；
-        // 位置维度再做 OpenMP 并行（各位置互不依赖，无竞争）。
+        // 循环次序：位置在外、姿态在内 —— 这样才能拿「本位置当前最优」当剪枝阈值，
+        // 也能让同一位置的所有姿态共处一个并行域（原实现每个姿态 fork/join 一次）。
+        // 姿态仍然只预计算一次（按块预计算，块内所有位置复用）。
         const int L0 = levels - 1;
         const double f0 = 1.0 / (double)(1 << L0);
         const int lw = pyr[L0].cols;
@@ -691,32 +751,83 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         const float thrCoarse = (float)coarseThr;
         const float avgCoarse = (float)(coarseThr * greediness);
 
-        Pose pose;
+        // 粗层姿态轴：按 kCoarsePoseStride 抽稀，首末值一定保留（保证搜索区间端点是覆盖的）。
+        // 金字塔只有一层时没有「下一层精化」来兜住抽稀带来的量化误差，此时不抽稀。
+        const size_t poseStride = (L0 >= 1) ? kCoarsePoseStride : 1;
+        std::vector<size_t> aiList;
+        std::vector<size_t> siList;
+        aiList.reserve(angles.size());
+        siList.reserve(scales.size());
+        for (size_t ai = 0; ai < angles.size(); ++ai)
+            if (ai % poseStride == 0 || ai + 1 == angles.size()) aiList.push_back(ai);
         for (size_t si = 0; si < scales.size(); ++si)
+            if (si % poseStride == 0 || si + 1 == scales.size()) siList.push_back(si);
+
+        const size_t nPoses = aiList.size() * siList.size();
+
+        // 单块姿态表的内存上限 → 每块最多装多少个姿态
+        const size_t perPoseBytes = mls[L0].pts.size() * sizeof(float) * 4;
+        size_t chunkMax = kCoarsePoseChunkBytes / (perPoseBytes > 0 ? perPoseBytes : 1);
+        if (chunkMax < 1) chunkMax = 1;
+        if (chunkMax > nPoses) chunkMax = nPoses;
+
+        for (size_t p0 = 0; p0 < nPoses; p0 += chunkMax)
         {
-            for (size_t ai = 0; ai < angles.size(); ++ai)
+            // 本块参与比较的姿态表（预计算一次，块内所有位置复用）
+            std::vector<Pose> poses;
+            std::vector<float> poseA;
+            std::vector<float> poseS;
+            poses.reserve(chunkMax);
+            poseA.reserve(chunkMax);
+            poseS.reserve(chunkMax);
+
+            for (size_t k = p0; k < nPoses && poses.size() < chunkMax; ++k)
             {
-                BuildPose(mls[L0], (float)angles[ai], (float)scales[si], pose);
-                const float a = (float)angles[ai];
-                const float sc = (float)scales[si];
+                const size_t si = k / aiList.size();
+                const size_t ai = k % aiList.size();
+                const float a = (float)angles[aiList[ai]];
+                const float sc = (float)scales[siList[si]];
+
+                Pose ps;
+                BuildPose(mls[L0], a, sc, ps);
+                poses.push_back(std::move(ps));   // Pose 只有四个 vector<float>，移动即转移缓冲区
+                poseA.push_back(a);
+                poseS.push_back(sc);
+            }
+
+            const size_t nChunk = poses.size();
+            const Pose* __restrict pPoses = poses.empty() ? 0 : &poses[0];
+            const float* pPoseA = poseA.empty() ? 0 : &poseA[0];
+            const float* pPoseS = poseS.empty() ? 0 : &poseS[0];
 
 #ifdef _OPENMP
-                #pragma omp parallel for schedule(dynamic, 512)
+            #pragma omp parallel for schedule(dynamic, 64)
 #endif
-                for (int p = 0; p < nPos; ++p)
+            for (int p = 0; p < nPos; ++p)
+            {
+                const float px = (float)posX[(size_t)p];
+                const float py = (float)posY[(size_t)p];
+
+                float best = bestScore[(size_t)p];
+                for (size_t k = 0; k < nChunk; ++k)
                 {
+                    // 位置级剪枝：本位置已找到更高分的姿态时，用「当前最优」当理论上界阈值。
+                    // ScorePose 的 threshold 语义是「上界达不到就退出」，所以这是数学等价的
+                    // （不会漏掉更好的姿态），只是把已失败姿态的评估点数量压到最少。
+                    const float thr = (best > thrCoarse) ? best : thrCoarse;
+
                     float s = 0.0f;
-                    if (ScorePose(grads[L0], pose, (float)posX[(size_t)p], (float)posY[(size_t)p],
-                                  thrCoarse, avgCoarse, s))
+                    if (ScorePose(grads[L0], pPoses[k], px, py, thr, avgCoarse, s))
                     {
-                        if (s > bestScore[(size_t)p])
+                        if (s > best)
                         {
-                            bestScore[(size_t)p] = s;
-                            bestAngle[(size_t)p] = a;
-                            bestScale[(size_t)p] = sc;
+                            best = s;
+                            bestAngle[(size_t)p] = pPoseA[k];
+                            bestScale[(size_t)p] = pPoseS[k];
                         }
                     }
                 }
+                bestScore[(size_t)p] = best;
             }
         }
 
@@ -749,20 +860,43 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         if (keep > 300) keep = 300;
 
         std::sort(cands.begin(), cands.end(), ScoreBetter);
-        if ((int)cands.size() > keep) cands.resize((size_t)keep);
+
+        // 空间分散：同一目标的分数平台在粗层很宽（模板内部处处都能拿高分），
+        // 直接按分数截断会让前 keep 名全落在它内部，第二个目标因此进不了精化。
+        // 这里按中心距做一次贪心稀疏化：只保留彼此相距至少「2 个最粗层像素」的候选。
+        {
+            const double sep = kCandidateSepLevelFactor * (double)(1 << L0);
+            const double sep2 = sep * sep;
+            std::vector<Candidate> picked;
+            picked.reserve((size_t)keep);
+            for (size_t i = 0; i < cands.size() && (int)picked.size() < keep; ++i)
+            {
+                const Candidate& c = cands[i];
+                bool near = false;
+                for (size_t j = 0; j < picked.size(); ++j)
+                {
+                    const double ddx = c.cx - picked[j].cx;
+                    const double ddy = c.cy - picked[j].cy;
+                    if (ddx * ddx + ddy * ddy < sep2) { near = true; break; }
+                }
+                if (!near) picked.push_back(c);
+            }
+            cands.swap(picked);
+        }
 
         // ---------- 7. 逐层向下精化（候选之间互不依赖，可并行）----------
-        const float thrFine = (float)param->min_score;
+        // 精化阶段只关心「能不能比当前候选更好」，所以阈值由 bestScore 动态给出，
+        // 这里只需要贪婪下限
         const float avgFine = (float)(param->min_score * greediness);
 
         for (int L = L0 - 1; L >= 0; --L)
         {
             const double f = 1.0 / (double)(1 << L);
             const int win = (L == 0) ? 2 : 1;
-            // 最细层把角度 / 缩放的搜索窗口放宽到 ±2 步：
-            // 粗层定位可能差 1~2 个步长，只搜 ±1 步会收敛不到位
-            const int aWin = (L == 0) ? 2 : 1;
-            const int sWin = (L == 0) ? 2 : 1;
+            // 角度 / 缩放窗口取 ±2 步：粗层姿态抽稀后最坏偏差是 1 个步长，
+            // 再叠加粗层定位误差会到 1~2 个步长，只搜 ±1 步会收敛不到位。
+            const int aWin = 2;
+            const int sWin = 2;
 
 #ifdef _OPENMP
             #pragma omp parallel for schedule(dynamic)
@@ -912,14 +1046,41 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             }
         }
 
-        // ---------- 9. 排序 + 非极大值抑制 + 输出 ----------
+        // ---------- 9. 最细层诚实重评 ----------
+        // 上面每一级都带阈值剪枝，返回的分数只是「不低于真实分」的近似值（剪得越早越乐观）。
+        // 下游拿 score 判 OK/NG，必须是真实分：这里用 threshold=0、abandonAvg=0
+        // （即不剪枝）在最细层重算一次。代价 = 候选数 × 全点评估，相对粗扫可忽略。
+        {
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(dynamic)
+#endif
+            for (int ci = 0; ci < (int)cands.size(); ++ci)
+            {
+                Candidate& c = cands[(size_t)ci];
+                Pose pl;
+                BuildPose(mls[0], (float)c.angle, (float)c.scale, pl);
+
+                float s = 0.0f;
+                if (ScorePose(grads[0], pl, (float)c.cx, (float)c.cy, 0.0f, 0.0f, s))
+                    c.score = s;
+                else
+                    c.score = 0.0;   // 覆盖率不足（目标大半出画）→ 不予输出
+            }
+        }
+
+        // ---------- 10. 排序 + 非极大值抑制 + 输出 ----------
         std::sort(cands.begin(), cands.end(), ScoreBetter);
 
         double overlap = param->max_overlap;
         if (overlap <= 0.0) overlap = 0.5;
+        if (overlap > 1.0) overlap = 1.0;
 
         const double minScore = param->min_score;
         std::vector<Candidate> accepted;
+        std::vector<cv::RotatedRect> acceptedRect;
+
+        // 复用同一个缓冲区，避免每次求交都分配
+        std::vector<cv::Point2f> interPoly;
 
         for (size_t i = 0; i < cands.size() && (int)accepted.size() < maxMatches; ++i)
         {
@@ -928,18 +1089,45 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 
             const double w = ctx->shape.width * c.scale;
             const double h = ctx->shape.height * c.scale;
-            const double minSide = std::min(w, h);
-            const double distThr = overlap * minSide;
-            if (distThr <= 0.0) { accepted.push_back(c); continue; }
+            const cv::RotatedRect ra(cv::Point2f((float)c.cx, (float)c.cy),
+                                     cv::Size2f((float)w, (float)h), (float)c.angle);
 
             bool dup = false;
-            for (size_t j = 0; j < accepted.size(); ++j)
+            for (size_t j = 0; j < acceptedRect.size(); ++j)
             {
-                const double ddx = c.cx - accepted[j].cx;
-                const double ddy = c.cy - accepted[j].cy;
-                if (std::sqrt(ddx * ddx + ddy * ddy) < distThr) { dup = true; break; }
+                const cv::RotatedRect& rb = acceptedRect[j];
+                const double wB = (double)rb.size.width;
+                const double hB = (double)rb.size.height;
+
+                // 便宜的外接圆排除：中心距超过两个半对角线之和，一定不相交
+                const double reach = 0.5 * (std::sqrt(w * w + h * h) + std::sqrt(wB * wB + hB * hB));
+                const double ddx = c.cx - (double)rb.center.x;
+                const double ddy = c.cy - (double)rb.center.y;
+                if (std::sqrt(ddx * ddx + ddy * ddy) >= reach) continue;
+
+                // 用「旋转外框的交集面积 / 较小框面积」判重。
+                // 中心距口径在 ROI 比工件大时会把两个真实相邻目标判成同一个。
+                interPoly.clear();
+                const int nv = cv::rotatedRectangleIntersection(ra, rb, interPoly);
+                double interArea = 0.0;
+                if (nv == cv::INTERSECT_FULL)
+                {
+                    // 一个框完全包住另一个 → 交集就是小框本身（不依赖是否回填多边形）
+                    interArea = std::min(w * h, wB * hB);
+                }
+                else if (nv == cv::INTERSECT_PARTIAL && !interPoly.empty())
+                {
+                    interArea = std::abs(cv::contourArea(interPoly));
+                }
+                const double denom = std::min(w * h, wB * hB);
+                if (denom > 0.0 && interArea / denom >= overlap) { dup = true; break; }
             }
-            if (!dup) accepted.push_back(c);
+
+            if (!dup)
+            {
+                accepted.push_back(c);
+                acceptedRect.push_back(ra);
+            }
         }
 
         int n = (int)accepted.size();
