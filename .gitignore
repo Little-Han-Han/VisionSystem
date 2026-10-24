@@ -401,3 +401,6 @@ src/SmokeAlgo/
 src/SmokeUi/
 src/SmokeParallel/
 /tools/fix_lag.py
+# SmokeAlgo 的 ObjectDetect 用例每次运行都会覆盖写这个诊断文件（模型维度/锚点数），
+# 属测试产物，不该进版本库。
+detect_diag.txt
