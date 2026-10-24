@@ -17,6 +17,9 @@ namespace VisionPlatform.Camera
         private readonly object _sync = new object();
         private readonly Dictionary<string, ICamera> _opened = new Dictionary<string, ICamera>();
 
+        /// <summary>最近一次 <see cref="Enumerate"/> 的结果快照（从未枚举过则为 null）。</summary>
+        private List<CameraInfo> _lastEnumerated;
+
         private CameraManager() { }
 
         /// <summary>当前选中的相机（可能为 null）。</summary>
@@ -30,6 +33,25 @@ namespace VisionPlatform.Camera
                 lock (_sync)
                 {
                     return new List<ICamera>(_opened.Values);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 最近一次 <see cref="Enumerate"/> 的结果快照（从未枚举过为 null，返回的是副本）。
+        /// <para>【用途】启动期 Splash 的 <see cref="OpenAll"/> 内部已经枚举过一次；主窗体首帧补刷
+        /// 相机下拉时复用这份结果即可，<b>不必在 UI 线程再同步枚举一次</b> —— 本机实测
+        /// DirectShow 枚举单台相机就要 ≈1.1 秒，同步跑会把主窗体首帧冻住。</para>
+        /// <para>需要「真实重新枚举」的地方（用户点「刷新」、相机管理器变更）仍直接调
+        /// <see cref="Enumerate"/>，它会顺带刷新本快照。</para>
+        /// </summary>
+        public List<CameraInfo> LastEnumerated
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _lastEnumerated == null ? null : new List<CameraInfo>(_lastEnumerated);
                 }
             }
         }
@@ -64,6 +86,12 @@ namespace VisionPlatform.Camera
             catch (Exception ex)
             {
                 Logger.Warn("枚举海康相机失败：" + ex.Message);
+            }
+
+            // 快照一份供 LastEnumerated 复用（启动期 Splash 已付过枚举代价，主窗体首帧不必再付一次）
+            lock (_sync)
+            {
+                _lastEnumerated = new List<CameraInfo>(list);
             }
 
             return list;

@@ -246,6 +246,9 @@ namespace VisionPlatform.UI
         /// 状态栏恒显示「相机：--」，用户看不到「启动已打开全部相机」这个效果。</para>
         /// <para>用 OnShown 而不是 OnHandleCreated：句柄可能被重建（RecreateHandle）导致重复刷新，
         /// OnShown 只在窗体<strong>首次</strong>显示时触发一次（Hide 后再 Show 不会重触发）。</para>
+        /// <para><b>用缓存，勿改成无参调用</b>：<c>RefreshCameraList(true)</c> 复用 Splash 阶段
+        /// <c>OpenAll()</c> 已经枚举出来的结果；改成 <c>RefreshCameraList()</c> 会在 UI 线程重新做一次
+        /// DirectShow 枚举（实测 ≈1.1s），把主窗体首帧冻住。</para>
         /// <para>这里<strong>不</strong>做任何权限判断：<see cref="RefreshCameraList"/> 内部会调
         /// <see cref="RefreshBindCombos"/>，后者已按 <c>_fullAccess</c> 决定绑定下拉是否可编辑，
         /// 权限口径保持单一来源。</para>
@@ -253,7 +256,7 @@ namespace VisionPlatform.UI
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            RefreshCameraList();
+            RefreshCameraList(true);   // 走枚举缓存：不要在首帧同步重新枚举（见方法注释）
         }
 
         /// <summary>视图绑定下拉框的条目；CameraId 为空表示「自动分配」。</summary>
@@ -522,7 +525,16 @@ namespace VisionPlatform.UI
 
         #region 相机
 
-        private void RefreshCameraList()
+        /// <summary>
+        /// 刷新工具栏相机下拉（并连带刷新各视图的绑定下拉）。
+        /// </summary>
+        /// <param name="preferCachedEnumeration">
+        /// true = 优先复用 <see cref="CameraManager.LastEnumerated"/>（启动补刷用）；
+        /// 缓存未就绪才回落到真实枚举。<b>其它调用点一律用无参调用</b>（= 真实枚举）。
+        /// <para>【为什么要有这个开关】DirectShow 枚举实测单台相机 ≈1.1s，
+        /// 启动期 Splash 的 <c>OpenAll()</c> 已经付过这份代价，主窗体首帧不该在 UI 线程再冻 1.1s。</para>
+        /// </param>
+        private void RefreshCameraList(bool preferCachedEnumeration = false)
         {
             if (_closing || IsDisposed || !IsHandleCreated) return;
 
@@ -535,7 +547,17 @@ namespace VisionPlatform.UI
                     tsComboCameras.BeginUpdate();
                     tsComboCameras.Items.Clear();
 
-                    List<CameraInfo> infos = CameraManager.Instance.Enumerate();
+                    // 启动补刷走缓存，避免在 UI 线程同步做 DirectShow 枚举（实测 ≈1.1s）；
+                    // 缓存未就绪（如 Splash 阶段枚举曾异常）才回落到真实枚举，此时慢一次但功能不丢。
+                    List<CameraInfo> infos = null;
+                    bool fromCache = false;
+                    if (preferCachedEnumeration)
+                    {
+                        infos = CameraManager.Instance.LastEnumerated;
+                        fromCache = infos != null;
+                    }
+                    if (infos == null) infos = CameraManager.Instance.Enumerate();
+
                     foreach (CameraInfo info in infos)
                         tsComboCameras.Items.Add(info);
 
@@ -555,7 +577,8 @@ namespace VisionPlatform.UI
 
                     RefreshBindCombos();
 
-                    Logger.Info("相机枚举完成，共 " + infos.Count + " 个");
+                    Logger.Info("相机列表就绪，共 " + infos.Count + " 个"
+                                + (fromCache ? "（复用启动期枚举结果，未重新枚举）" : "（已重新枚举）"));
                 
             }
             catch (Exception)
