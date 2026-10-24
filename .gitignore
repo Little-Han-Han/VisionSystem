@@ -395,3 +395,4 @@ ThirdParty/**/*.pdb
 src/SmokeAlgo/
 src/SmokeUi/
 src/SmokeParallel/
+/tools/fix_lag.py
