@@ -75,6 +75,10 @@ namespace VisionPlatform.UI
         private readonly object _flowStatSync = new object();
         private Dictionary<string, FlowOkNg> _flowStats = new Dictionary<string, FlowOkNg>(StringComparer.Ordinal);
 
+        /// <summary>统计数字变更标记：仅当 OK/NG 计数或节拍真正变化时才刷新统计卡片与状态栏，
+        /// 避免连续运行逐帧重建表格/重绘导致的卡顿（数值只在判定事件产生时变化，而非每渲染帧）。</summary>
+        private volatile bool _statsDirty = false;
+
         /// <summary>单流程 OK/NG 累计（仅供 <see cref="_flowStats"/> 使用）。</summary>
         private sealed class FlowOkNg
         {
@@ -908,6 +912,7 @@ namespace VisionPlatform.UI
             _statTotal++;
             if (result.Value.Passed) _statOk++; else _statNg++;
             _lastElapsedMs = result.Value.ElapsedMs;
+            _statsDirty = true;
             _lastSummary = result.Value.Summary ?? "";
 
             // 徽标 / 视图角标 / 统计 / 状态栏共用一次判定结果
@@ -1107,6 +1112,7 @@ namespace VisionPlatform.UI
             _statNg = 0;
             _lastElapsedMs = 0;
             _consecutiveNg = 0;
+            _statsDirty = false;
             lblConsecutiveNg.Visible = false;
             UpdateStats();
             UpdateStatus();
@@ -1181,6 +1187,7 @@ namespace VisionPlatform.UI
                 }
                 t.Name = name;
                 if (passed) t.Ok++; else t.Ng++;
+                _statsDirty = true;   // 计数变化，下一帧 UI 刷新一次即可（不再逐帧重建）
             }
         }
 
@@ -1865,8 +1872,14 @@ namespace VisionPlatform.UI
                         _lastSummary = summary ?? "";
                         SetVerdict(passed);
                         SetViewVerdict(idx, passed);
-                        UpdateStats();       // 按流程刷 OK/NG 数字（节流随帧显示节奏，计数已在事件层完成）
-                        UpdateStatus();
+                        // OK/NG 数字只在「计数真正变化」时刷新（_statsDirty），而非逐渲染帧重建——
+                        // 连续运行下每帧都重算+重绘表格/状态栏正是卡顿根因，现在仅随判定事件刷新
+                        if (_statsDirty)
+                        {
+                            _statsDirty = false;
+                            UpdateStats();
+                            UpdateStatus();
+                        }
 
                         view.ClearShapes();
                         if (shapes != null)
