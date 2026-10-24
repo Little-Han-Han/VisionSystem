@@ -225,6 +225,10 @@ namespace VisionPlatform.UI
             FlowOutputChannel.OutputReady += OnFlowOutput;
             FlowRunManager.StatusChanged += OnFlowManagerStatusChanged;
 
+            // 静态事件的退订不能只靠 OnFormClosing：程序化 Dispose（不走 Close）时该事件不触发，
+            // 静态事件会一直持有本窗体，Dispose 后每次 ConfigStore.Save() 都会回调到已释放控件上。
+            this.Disposed += OnFormDisposed;
+
             // 主界面流程下拉：初始化自有执行器/控制器并回填流程列表（算法库不可用时降级禁用）
             InitFlowRunner();
             RefreshFlowCombo();
@@ -2393,13 +2397,36 @@ namespace VisionPlatform.UI
             // 退出前确保视图绑定与布局被持久化
             SyncViewBindingsToConfig();
             ConfigStore.Save();
+            DetachStaticEvents();
+            CameraManager.Instance.CloseAll();
+        }
+
+        /// <summary>
+        /// 退订本窗体挂到<strong>静态</strong>事件上的全部处理器。
+        /// <para>两个调用点：<see cref="OnFormClosing"/>（正常 Close）与 <see cref="OnFormDisposed"/>
+        /// （程序化 Dispose，不走 Close）。<b>两处都会被调到，方法必须幂等</b>——
+        /// 事件 <c>-=</c> 对不存在的处理器是安全空操作，重复调用无副作用。</para>
+        /// <para>【为什么不写在 Designer 的 Dispose(bool) 里】那里是 VS 生成的，重新序列化会丢手写内容。</para>
+        /// </summary>
+        private void DetachStaticEvents()
+        {
             Logger.Logged -= OnLogged;
             RecipeStore.CurrentChanged -= OnRecipeChanged;
             CameraManager.Instance.CurrentChanged -= OnCameraManagerChanged;
             ConfigStore.Changed -= OnConfigChanged;
             FlowOutputChannel.OutputReady -= OnFlowOutput;
             FlowRunManager.StatusChanged -= OnFlowManagerStatusChanged;
-            CameraManager.Instance.CloseAll();
+        }
+
+        /// <summary>
+        /// 窗体被 Dispose（未走 Close，如程序化释放 / 异常兜底）时也要退订静态事件。
+        /// <para>【勿删】只在 OnFormClosing 退订是不够的：静态事件（ConfigStore.Changed 等）
+        /// 持有本窗体实例，Dispose 后订阅者依然存活，之后每次 ConfigStore.Save() 都会
+        /// 回调到已释放控件的处理器上抛 NullReferenceException。</para>
+        /// </summary>
+        private void OnFormDisposed(object sender, EventArgs e)
+        {
+            DetachStaticEvents();
         }
     }
 }
