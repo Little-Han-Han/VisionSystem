@@ -272,6 +272,23 @@ namespace VisionSystem.Controls
             get { return _viewport; }
         }
 
+        /// <summary>
+        /// 结果标签字号（屏幕像素，不随缩放变化）；<c>&lt;= 0</c> 不画标签。
+        /// <para>目标很多（如 Blob 20 个）时可调小或关掉，避免标签糊满画面。</para>
+        /// </summary>
+        [Category("Appearance"), DefaultValue(8f)]
+        [Description("图形结果标签的字号（屏幕像素）；小于等于 0 表示不显示标签。")]
+        public float ShapeLabelFontSize
+        {
+            get { return _renderOptions.LabelFontSize; }
+            set
+            {
+                if (Math.Abs(_renderOptions.LabelFontSize - value) < 0.01f) return;
+                _renderOptions.LabelFontSize = value;
+                Invalidate();
+            }
+        }
+
         /// <summary>当前交互模式。</summary>
         [Category("Behavior"), DefaultValue(InteractionMode.Select)]
         [Description("鼠标交互模式：选择编辑 / 平移 / 绘制各类图形。")]
@@ -1372,6 +1389,10 @@ namespace VisionSystem.Controls
 
             EnsureImageLayer();
             g.DrawImage(_imageLayer, 0, 0);
+
+            // 标签避让区 = 客户区：靠右/靠下的框，其标签往内挪，绝不画到画面外
+            _renderOptions.LabelClipBounds =
+                new RectangleF(0f, 0f, ClientSize.Width, ClientSize.Height);
 
             DrawShapes(g);
             DrawHandles(g);

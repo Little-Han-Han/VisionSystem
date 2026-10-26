@@ -47,14 +47,21 @@ namespace VisionPlatform.Core
         public static string TemplateDir { get { return Path.Combine(Root, "Templates"); } }
 
         /// <summary>
-        /// OCR 字符模板库的默认目录（<c>%AppData%\VisionPlatform\OcrChars</c>）。
+        /// OCR 字符模板库的默认目录：<strong>程序目录下的 <c>OCRModel</c></strong>
+        /// （即 <c>bin\x64\Release\OCRModel</c>）。
         /// <para>
-        /// 【只是"新建节点时的默认值"】老节点的 <c>TemplateDir</c> 参数一个字都不改 ——
-        /// 早期版本把模板目录指向程序目录下的 <c>OCRModel</c>，那些配置文件里的值必须继续生效
-        /// （见 <c>FlowModule.CreateNewParams</c> 与 <c>CreateDefaultParams</c> 的分工）。
+        /// 【为什么回到程序目录】用户明确要求模板放在 <c>bin\x64\Release\OCRModel</c>：
+        /// 现场排查时直接进程序目录就能看到样本，拷机器时随程序一起搬走，不必去翻 AppData。
+        /// 哈希/时间戳都无关紧要，这里只是"新建节点时的默认值"——
+        /// 老节点配置里的 <c>TemplateDir</c> 一个字都不改（见 <c>FlowModule.CreateNewParams</c>）。
         /// </para>
+        /// <para>【注意】节点参数里存的是<strong>相对路径</strong> <c>"OCRModel"</c>，
+        /// 运行时按 <c>AppDomain.BaseDirectory</c> 解析；本属性只给"管理窗体 / 迁移目标"用绝对值。</para>
         /// </summary>
-        public static string OcrCharsDir { get { return Path.Combine(Root, "OcrChars"); } }
+        public static string OcrCharsDir
+        {
+            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel"); }
+        }
 
         /// <summary>全局配置文件。</summary>
         public static string ConfigFile { get { return Path.Combine(Root, "appconfig.json"); } }

@@ -109,21 +109,10 @@ namespace VisionSystem.Controls.Geometry
                     g.DrawRectangle(pen, r.X - 2f, r.Y - 2f, r.Width + 4f, r.Height + 4f);
             }
 
-            // 标签文本（类别名 + 置信度等）：绘制在框左上角上方，深色底 + 框色字，保证可读
+            // 标签文本（类别名 + 置信度等）：统一走 ShapeLabelRenderer
+            // （共享字体 + 8pt + 四边都避让，靠右/靠下的框不会再画到画面外）
             if (!string.IsNullOrEmpty(Label))
-            {
-                using (var font = new Font("Segoe UI", 9f, FontStyle.Bold))
-                using (var textBrush = new SolidBrush(Color.FromArgb(235, StrokeColor.R, StrokeColor.G, StrokeColor.B)))
-                using (var bgBrush = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
-                {
-                    SizeF sz = g.MeasureString(Label, font);
-                    float bx = r.X;
-                    float by = r.Y - sz.Height - 2f;
-                    if (by < 0f) by = r.Y + 2f;   // 顶部越界则画在框内
-                    g.FillRectangle(bgBrush, bx, by, sz.Width + 6f, sz.Height + 3f);
-                    g.DrawString(Label, font, textBrush, bx + 3f, by + 1f);
-                }
-            }
+                ShapeLabelRenderer.Draw(g, Label, new PointF(r.X, r.Y), StrokeColor, options);
         }
 
         public bool HitTest(PointF imagePt, float tolerance)

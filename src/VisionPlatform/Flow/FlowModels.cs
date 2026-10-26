@@ -611,10 +611,54 @@ namespace VisionPlatform.Flow
                         node.Set(d.Key, d.Value);
                         changed = true;
                     }
+
+                    // ---- OCR 模板目录：把上一版的 %AppData%\...\OcrChars 拉回程序目录 ----
+                    // 【为什么必须迁移】上一版把新建节点的默认目录写成了**绝对路径**
+                    // %AppData%\VisionPlatform\OcrChars。用户现在要求模板统一放在
+                    // <程序目录>\OCRModel，若只改"新建默认值"，老节点仍指向 AppData，
+                    // 现场就会看到"模板明明放进 OCRModel 了，识别还说库为空"。
+                    if (type == FlowNodeType.Ocr && MigrateOcrTemplateDir(node)) changed = true;
                 }
             }
 
             return changed;
+        }
+
+        /// <summary>
+        /// 把 OCR 节点的 <c>TemplateDir</c> 从上一版的 <c>...\OcrChars</c> 绝对路径迁到相对路径 <c>"OCRModel"</c>。
+        /// <para>
+        /// 只动**旧默认值**（目录名恰为 <c>OcrChars</c> 的绝对路径）；用户自己指定的其它绝对/相对路径
+        /// 一律不碰 —— 迁移绝不能变成"把用户的自定义目录改掉"。
+        /// </para>
+        /// </summary>
+        /// <returns>是否发生变更。</returns>
+        public static bool MigrateOcrTemplateDir(FlowNode node)
+        {
+            if (node == null) return false;
+
+            string v = node.GetString("TemplateDir", "OCRModel");
+            v = (v ?? "").Trim();
+
+            if (v.Length == 0)
+            {
+                node.Set("TemplateDir", "OCRModel");
+                return true;
+            }
+
+            try
+            {
+                if (!System.IO.Path.IsPathRooted(v)) return false;
+
+                string leaf = System.IO.Path.GetFileName(v.TrimEnd('\\', '/'));
+                if (!string.Equals(leaf, "OcrChars", StringComparison.OrdinalIgnoreCase)) return false;
+
+                node.Set("TemplateDir", "OCRModel");
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;   // 路径非法就原样保留，交给运行期报"目录不存在"
+            }
         }
     }
 }

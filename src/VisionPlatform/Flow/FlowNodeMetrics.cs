@@ -44,6 +44,13 @@ namespace VisionPlatform.Flow
         /// <summary>OCR 平均置信度；<c>NaN</c> = 不适用。</summary>
         public double MeanScore = double.NaN;
 
+        /// <summary>
+        /// OCR 真正匹配上的字符数（label 不是 "?" 的个数）；-1 = 不适用。
+        /// <para>与 <see cref="CharCount"/> 的区别：后者是"分割出几个"，
+        /// 本字段是"其中几个认出来了"。两者不等时才是"模板/方向有问题"的直接证据。</para>
+        /// </summary>
+        public int MatchedCount = -1;
+
         /// <summary>是否"只做了字符分割、没有模板库"（此时文本是占位符）。</summary>
         public bool TextOnly = false;
 

@@ -58,10 +58,28 @@ namespace VisionPlatform.Flow
                             "\"{0}\" {1} 字符 · {2}{3}",
                             Quote(m.Text), m.CharCount, why, Cost(cost));
                     }
+
+                    // 有模板但一个都没认出来：这跟"没模板"是两回事，必须分开说，
+                    // 否则用户会一直去加模板，而真因是模板不是单个字符 / 方向不一致。
+                    if (m.MatchedCount == 0 && m.CharCount > 0)
+                    {
+                        return string.Format(CultureInfo.InvariantCulture,
+                            "\"?\" {0} 字符 · 全部未匹配{1}{2}",
+                            m.CharCount,
+                            Num("（最高 {0:0.00}）", m.TopScore),
+                            Cost(cost));
+                    }
+
+                    // 认出数与字符数不等时点明比例（部分字符被 ? 替换）
+                    string ratio = (m.MatchedCount > 0 && m.CharCount > 0 && m.MatchedCount < m.CharCount)
+                        ? string.Format(CultureInfo.InvariantCulture, " · 认出 {0}/{1}", m.MatchedCount, m.CharCount)
+                        : "";
+
                     return string.Format(CultureInfo.InvariantCulture,
-                        "\"{0}\"{1}{2}{3}",
+                        "\"{0}\"{1}{2}{3}{4}",
                         Quote(m.Text),
                         m.CharCount >= 0 ? " · " + m.CharCount.ToString(CultureInfo.InvariantCulture) + " 字符" : "",
+                        ratio,
                         Num(" · 置信 {0:0.00}", m.MeanScore),
                         Cost(cost));
 

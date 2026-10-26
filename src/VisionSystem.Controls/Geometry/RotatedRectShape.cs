@@ -206,28 +206,16 @@ namespace VisionSystem.Controls.Geometry
                 g.DrawLine(axisPen, vp.ImageToControl(Center), vp.ImageToControl(axisEnd));
             }
 
-            // 标签：样式照抄 RectangleShape.Draw 的标签段（9pt Bold + 半透明黑底 + 顶部越界落框内），
-            // 但**文字保持水平**（大角度下旋转文字不可读），定位在旋转后的左上角顶点外侧。
+            // 标签：统一走 ShapeLabelRenderer（共享字体 + 8pt + 四边避让）；
+            // **文字保持水平**（大角度下旋转文字不可读），定位在旋转后的左上角顶点外侧。
             // g.Save/Restore 包裹：让本段改成任何绘制方式都不会把 Graphics 状态泄漏给同帧的其它图形。
             if (!string.IsNullOrEmpty(Label))
             {
                 GraphicsState state = g.Save();
                 try
                 {
-                    using (var font = new Font("Segoe UI", 9f, FontStyle.Bold))
-                    using (var textBrush = new SolidBrush(Color.FromArgb(235, StrokeColor.R, StrokeColor.G, StrokeColor.B)))
-                    using (var bgBrush = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
-                    {
-                        PointF anchor = screen[0];      // 旋转后的左上角（屏幕坐标）
-                        SizeF sz = g.MeasureString(Label, font);
-
-                        float bx = anchor.X;
-                        float by = anchor.Y - sz.Height - 3f;
-                        if (by < 0f) by = anchor.Y + 3f;     // 顶部越界则画在框内
-
-                        g.FillRectangle(bgBrush, bx, by, sz.Width + 6f, sz.Height + 3f);
-                        g.DrawString(Label, font, textBrush, bx + 3f, by + 1f);
-                    }
+                    PointF anchor = screen[0];      // 旋转后的左上角（屏幕坐标）
+                    ShapeLabelRenderer.Draw(g, Label, anchor, StrokeColor, options);
                 }
                 finally
                 {

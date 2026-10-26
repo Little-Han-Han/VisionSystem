@@ -156,9 +156,9 @@ namespace VisionPlatform.UI
             txtLabel.TextChanged += OnLabelTextChanged;
 
             lblLabelBytes = new Label();
-            lblLabelBytes.Text = "0/7 字节";
+            lblLabelBytes.Text = "0 字符";
             lblLabelBytes.AutoSize = false;
-            lblLabelBytes.Size = new Size(78, 26);
+            lblLabelBytes.Size = new Size(112, 26);
             lblLabelBytes.TextAlign = ContentAlignment.MiddleLeft;
             lblLabelBytes.Margin = new Padding(0, 2, 10, 0);
 
@@ -272,7 +272,7 @@ namespace VisionPlatform.UI
             lblStatus.Height = 26;
             lblStatus.TextAlign = ContentAlignment.MiddleLeft;
             lblStatus.Padding = new Padding(8, 0, 8, 0);
-            lblStatus.Text = "就绪";
+            lblStatus.Text = "就绪：在右侧图上框选【单个字符】→ 填标签 → 入库（一个模板只装一个字符）";
 
             Controls.Add(right);
             Controls.Add(left);
@@ -603,7 +603,9 @@ namespace VisionPlatform.UI
             int bytes = OcrCharStore.LabelByteCount(txtLabel.Text);
             string err = OcrCharStore.ValidateLabel(txtLabel.Text);
 
-            lblLabelBytes.Text = bytes.ToString(CultureInfo.InvariantCulture)
+            int elements = new StringInfo((txtLabel.Text ?? "").Trim()).LengthInTextElements;
+            lblLabelBytes.Text = elements.ToString(CultureInfo.InvariantCulture) + " 字符 · "
+                                 + bytes.ToString(CultureInfo.InvariantCulture)
                                  + "/" + OcrCharStore.MaxLabelBytes + " 字节";
             lblLabelBytes.ForeColor = (err != null) ? UiTheme.ColorNg : UiTheme.ColorTextSecondary;
 

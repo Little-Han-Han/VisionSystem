@@ -50,6 +50,24 @@ namespace VisionSystem.Controls.Rendering
         /// <summary>是否在右下角显示鼠标位置面板（图像坐标 + 灰度值或 RGB 值）。</summary>
         public bool ShowHud { get; set; } = true;
 
+        /// <summary>
+        /// 结果标签的字号（<strong>屏幕像素</strong>，不随缩放变化）。<c>&lt;= 0</c> 表示不画标签。
+        /// <para>
+        /// 【为什么可调】同一份结果在不同场景要不同密度：单个目标时标签大一点好读，
+        /// 而 Blob 一次 20 个框时，9pt 粗体的标签会把画面糊满（用户反馈的"字体过大、显示不全"）。
+        /// </para>
+        /// </summary>
+        public float LabelFontSize { get; set; } = 8f;
+
+        /// <summary>
+        /// 标签可绘制区域（<strong>控件坐标</strong>）。<see cref="RectangleF.Empty"/> = 不裁剪。
+        /// <para>
+        /// 【为什么需要它】标签画在框的左上角外侧，靠右/靠下的框会把标签画到画面外 ——
+        /// 看起来像"结果丢了"。由 <see cref="ImageViewer"/> 每帧填入客户区矩形，标签自动往内挪。
+        /// </para>
+        /// </summary>
+        public RectangleF LabelClipBounds { get; set; } = RectangleF.Empty;
+
         /// <summary>HUD 面板背景色。</summary>
         public Color HudBackColor { get; set; } = Color.FromArgb(190, 18, 18, 22);
 

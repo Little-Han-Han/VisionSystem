@@ -92,12 +92,10 @@ namespace VisionPlatform.UI
                 _lblName.AutoEllipsis = true;
                 _lblBadge = MakeLabel("", 142, 0, 42, 18, ContentAlignment.MiddleLeft, UiTheme.FontGroupTitle);
                 _lblTime = MakeLabel("", 0, 0, 96, 18, ContentAlignment.MiddleRight, UiTheme.FontSmall);
-                _lblTime.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-                _lblTime.Left = Math.Max(172, Width - 96);
+                // 位置/尺寸统一由 LayoutInner() 按实际行宽行高算，不用 Anchor（两者混用会互相抵消）
 
                 _lblPrimary = MakeLabel("", 22, 18, 258, 17, ContentAlignment.MiddleLeft, UiTheme.FontBody);
                 _lblPrimary.AutoEllipsis = true;
-                _lblPrimary.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
                 Controls.Add(_lblIndex);
                 Controls.Add(_lblName);
@@ -112,7 +110,6 @@ namespace VisionPlatform.UI
                 _lblDetail = MakeLabel("", 28, 0, 258, DetailHeight - 2, ContentAlignment.MiddleLeft,
                                        UiTheme.FontSmall);
                 _lblDetail.AutoEllipsis = true;
-                _lblDetail.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
                 Controls.Add(_lblDetail);
             }
 
@@ -125,6 +122,68 @@ namespace VisionPlatform.UI
             }
 
             ApplyTheme();
+            LayoutInner();
+        }
+
+        /// <summary>
+        /// 按<strong>实际行宽/行高</strong>排布内部标签。
+        /// <para>
+        /// 【为什么不能写死 18 / 17 px】行高在不同 DPI 下会被父容器缩放（36 → 54@150%），
+        /// 而写死的标签高度不会跟着变：结果是"字变大了、格子没变大"，文字被裁掉半行 ——
+        /// 这正是用户反馈的"字体过大、显示不全"。这里一律按 <see cref="Control.Height"/> 等分，
+        /// 任何 DPI 下都不会裁。
+        /// </para>
+        /// </summary>
+        private void LayoutInner()
+        {
+            if (Width <= 0 || Height <= 0) return;
+
+            // 【必须判空】构造函数里 `Height = MainHeight` 就会触发 OnResize，
+            // 那一刻下面的 Label 还没 new 出来（同 OcrTemplateCard.ApplyLayout 那枚雷）。
+            // ⚠️ 只查本行真正拥有的那几个：主行没有 _lblDetail、明细行没有其它四个，
+            //    一次性全查会让 LayoutInner 永远提前返回（表现为"名字消失、时间挤到最左"）。
+            if (Kind == FlowResultRowKind.Main)
+            {
+                if (_lblIndex == null || _lblName == null || _lblBadge == null
+                    || _lblTime == null || _lblPrimary == null) return;
+            }
+            else
+            {
+                if (_lblDetail == null) return;
+            }
+
+            if (Kind == FlowResultRowKind.Main)
+            {
+                int h1 = Math.Max(14, (Height - 1) / 2);
+                int h2 = Math.Max(14, Height - h1);
+
+                _lblIndex.Top = 0; _lblIndex.Height = h1;
+                _lblBadge.Top = 0; _lblBadge.Height = h1;
+                _lblName.Top = 0;  _lblName.Height = h1;
+                _lblTime.Top = 0;  _lblTime.Height = h1;
+
+                // 右起预留"状态 44 + 时间 96 + 间隔 8"
+                _lblName.Width = Math.Max(48, Width - 22 - 148);
+                _lblTime.Left = Math.Max(_lblBadge.Right + 4, Width - 96);
+                _lblTime.Width = Math.Max(60, Width - _lblTime.Left);
+
+                _lblPrimary.Top = h1;
+                _lblPrimary.Height = h2;
+                _lblPrimary.Width = Math.Max(60, Width - 24);
+            }
+            else
+            {
+                _lblDetail.Top = 0;
+                _lblDetail.Height = Height;
+                _lblDetail.Width = Math.Max(60, Width - 30);
+            }
+        }
+
+        /// <summary>行尺寸变化（含 DPI 缩放 / 结果区宽度变化）时重排。</summary>
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            LayoutInner();
         }
 
         private Label MakeLabel(string text, int left, int top, int width, int height,

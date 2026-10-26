@@ -23,11 +23,51 @@ const int  DEF_NORM_W  = 16;    // 默认归一化宽
 const int  DEF_NORM_H  = 24;    // 默认归一化高
 const double DEF_ACCEPT = 0.6;  // 默认接受阈值
 
+// 极性判定：目标是让输出恒为「字 = 255、底 = 0」。
+//
+// 【为什么不能只看前景面积占比】旧实现用「fgRatio > 0.5 就反色」。可模板是用户**紧裁**出来的：
+// 字形很容易占满一半以上，于是「黑字白底」的紧裁图会被判成「已经是黑底白字」而不反色 ——
+// 模板存成了"背景的负形"，与正常归一化的候选做相关必然为负 → 恒定 0 分。
+// 现场表现就是「字符能分割、但全是 ? 且置信度 0.00」，而且没有任何报错。
+//
+// 【正确判据】先看**边框环**：字符几乎不会占满整圈，环上绝大多数是背景。
+//   · 环上多为亮（>=50%）→ 背景是亮的 → 需要反色；
+//   · 环上几乎全暗（<=20%）→ 已经是黑底白字 → 不反色；
+//   · 介于两者之间（字形贴边）→ 边框信息不足，才退回面积法。
+bool DetectNeedInvert(const cv::Mat& bin)
+{
+    const int w = bin.cols, h = bin.rows;
+    if (w > 2 && h > 2) {
+        long bright = 0, total = 0;
+        const uchar* top = bin.ptr<uchar>(0);
+        const uchar* bot = bin.ptr<uchar>(h - 1);
+        for (int x = 0; x < w; ++x) {
+            bright += (top[x] != 0) ? 1 : 0;
+            bright += (bot[x] != 0) ? 1 : 0;
+            total += 2;
+        }
+        for (int y = 1; y < h - 1; ++y) {
+            bright += (bin.ptr<uchar>(y)[0] != 0) ? 1 : 0;
+            bright += (bin.ptr<uchar>(y)[w - 1] != 0) ? 1 : 0;
+            total += 2;
+        }
+        if (total > 0) {
+            double r = (double)bright / (double)total;
+            if (r >= 0.5) return true;
+            if (r <= 0.2) return false;
+        }
+    }
+
+    // 边框判不出来时的兜底（极端：整幅都是字/都是底）
+    double total = (double)bin.total();
+    if (total < 1.0) total = 1.0;
+    return ((double)cv::countNonZero(bin) / total) > 0.5;
+}
+
 // 二值化：threshold < 0 走 Otsu；invert 语义见 va_ocr.h。
 //
-// invert == 0（默认）= **自动判定极性**：二值化后统计前景像素占比，超过一半说明
-// 「背景」被当成了前景（典型场景：白底黑字），于是整体反色。这样不论白底黑字还是
-// 黑底白字，输出恒为「字 = 255、底 = 0」，上层不必理解极性。
+// invert == 0（默认）= **自动判定极性**（判据见 DetectNeedInvert）。这样不论白底黑字还是
+// 黑底白字、不论紧裁还是整幅，输出恒为「字 = 255、底 = 0」，上层不必理解极性。
 // invert != 0 = 强制反色（保留旧语义，便于极端成像下手动干预）。
 cv::Mat MakeBinary(const cv::Mat& gray, const VA_OcrParam* p)
 {
@@ -39,12 +79,7 @@ cv::Mat MakeBinary(const cv::Mat& gray, const VA_OcrParam* p)
     cv::threshold(gray, bin, thresh, 255.0, type);
 
     bool needInvert = (p->invert != 0);
-    if (!needInvert) {
-        double total = (double)bin.total();
-        if (total < 1.0) total = 1.0;
-        double fgRatio = (double)cv::countNonZero(bin) / total;
-        needInvert = (fgRatio > 0.5);
-    }
+    if (!needInvert) needInvert = DetectNeedInvert(bin);
     if (needInvert) cv::bitwise_not(bin, bin);
 
     return bin;
@@ -529,7 +564,12 @@ int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                 std::memset(c.label, 0, sizeof(c.label));
                 if (accepted) CopyLabelSafe(label, c.label, VA_OCR_LABEL_BYTES);
                 else          c.label[0] = '?';
-                c.score = accepted ? score : 0.0;
+
+                // 【原始最佳分照实输出】未采纳时也保留 score（label 仍为 '?'）：
+                // 上层靠它区分「模板库不匹配（最高 0.3x）」与「压根没模板（0）」——
+                // 这正是"能分割、但全是 ? 置信度 0.00"唯一可诊断的线索。
+                // 注意：meanScore 仍只统计被采纳的字符，口径不变。
+                c.score = score;
 
                 chars.push_back(c);
             }

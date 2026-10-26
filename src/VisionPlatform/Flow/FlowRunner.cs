@@ -894,9 +894,23 @@ namespace VisionPlatform.Flow
 
                 // ⑤ 主判据：文本 / 字符数 / 平均置信度（结果区第二行、画布卡片、预览覆盖层同源）
                 int charCount = chars.Count;
+
+                // ⑤-a 认出来几个：label 不是 "?" 的才算（natvie 侧未采纳时 label 一定是 "?"）。
+                // 这个数与 charCount 的差值就是"模板不匹配"的直接证据：
+                // 分割出 4 个、认出 0 个 → 不是分割问题，是模板/方向/阈值问题。
+                int matched = 0;
+                double maxRawScore = 0.0;
+                foreach (OcrChar c in chars)
+                {
+                    if (!string.IsNullOrEmpty(c.Label) && c.Label != "?") matched++;
+                    if (c.Score > maxRawScore) maxRawScore = c.Score;
+                }
+
                 p.Metrics.Text = text;
                 p.Metrics.CharCount = charCount;
                 p.Metrics.MeanScore = meanScore;
+                p.Metrics.MatchedCount = matched;
+                p.Metrics.TopScore = maxRawScore;          // OCR 里它的语义是"最高原始匹配分"
                 p.Metrics.TextOnly = !hasTemplate;
                 p.Metrics.TextOnlyReason = hasTemplate ? null : (lib != null ? lib.Brief() : "未载入字符模板");
                 p.Metrics.TargetCount = charCount;
@@ -953,16 +967,35 @@ namespace VisionPlatform.Flow
 
                 // ⑩ 摘要
                 string shown = text.Replace("\r", "").Replace("\n", "⏎");
-                p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "字符识别：\"{0}\"（{1} 字符，平均置信度 {2:F2}）{3}",
-                    shown, charCount, meanScore,
-                    hasTemplate ? "" : "；" + lib.Brief());
+                string tail = "";
+                if (!hasTemplate)
+                {
+                    tail = "；" + lib.Brief();
+                }
+                else if (charCount > 0 && matched == 0)
+                {
+                    // 【最容易误判的一种失败】分割正常、模板也加载了，但一个都没认出来。
+                    // 不说清原因，用户只会觉得"OCR 坏了"；真实原因通常是
+                    // 模板不是单个字符 / 方向不一致 / 接受阈值太高。
+                    tail = string.Format(CultureInfo.InvariantCulture,
+                        "；{0} 个字符全部低于接受阈值（最高 {1:F2}）—— "
+                        + "请确认模板是【单个字符】、方向与现场一致，或调低「接受阈值」",
+                        charCount, maxRawScore);
+                }
 
-                // ⑪ 空库 / 全失败 / 部分失败 → 只黄不红（Warn 让位点见 StepNext）：
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "字符识别：\"{0}\"（{1} 字符，认出 {2}，平均置信度 {3:F2}）{4}",
+                    shown, charCount, matched, meanScore, tail);
+
+                // ⑪ 空库 / 全失败 / 部分失败 / 有模板但一个都没认出来 → 只黄不红
+                //    （Warn 让位点见 StepNext）：
                 //    OK 在本系统里是"检测通过"的语义，把"根本没识别"显示成 OK 会让操作员
                 //    把未识别工件判为良品 —— 这是误判风险，不是界面美化问题。
-                if (lib != null && lib.State != OcrTemplateState.Ok)
+                if ((lib != null && lib.State != OcrTemplateState.Ok)
+                    || (hasTemplate && charCount > 0 && matched == 0))
+                {
                     p.Status = FlowNodeStatus.Warn;
+                }
 
                 return true;
             }

@@ -223,7 +223,16 @@ namespace VisionPlatform.Flow
         //  标签
         // =====================================================================
 
-        /// <summary>标签校验：合法返回 null，非法返回中文原因。</summary>
+        /// <summary>
+        /// 标签校验：合法返回 null，非法返回中文原因。
+        /// <para>
+        /// 【硬规则：一个模板 = 一个字符】OCR 是"逐个分割框 → 与每个模板算相关系数 → 取最高分"，
+        /// 模板里若装了 N 个字符（例：框选一整串「N3O」并这样命名），那么任何**单个**字符框
+        /// 都只能和它比出很低的分（相关系数趋于 0），现场表现为
+        /// <strong>"字符能分割出来、但全是 ? 且置信度 0.00"</strong> —— 用户会以为是识别坏了。
+        /// 这个错误必须在入库时就拦住，不能等到运行期才变成一个沉默的 0 分。
+        /// </para>
+        /// </summary>
         public static string ValidateLabel(string label)
         {
             if (label == null) return "标签不能为空";
@@ -239,11 +248,22 @@ namespace VisionPlatform.Flow
                         return "标签不能包含 " + bad[k] + " 等文件名非法字符";
             }
 
+            // 文本元素个数（代理对算 1 个，如 emoji）
+            int elements = new StringInfo(s).LengthInTextElements;
+            if (elements != 1)
+            {
+                return string.Format(CultureInfo.InvariantCulture,
+                    "一个模板只能装一个字符，当前「{0}」是 {1} 个字符。"
+                    + "OCR 是逐字符匹配的：多字符模板永远匹配不上任何单个字符框（表现为置信度 0.00）。"
+                    + "请关掉这扇窗，回到图上**逐个字符**框选入库。",
+                    s, elements);
+            }
+
             int bytes = Encoding.UTF8.GetByteCount(s);
             if (bytes > MaxLabelBytes)
             {
                 return string.Format(CultureInfo.InvariantCulture,
-                    "标签最多 {0} 字节（UTF-8），「{1}」是 {2} 字节；中文每字 3 字节，即最多 2 个汉字。"
+                    "标签最多 {0} 字节（UTF-8），「{1}」是 {2} 字节。"
                     + "超过会被原生库静默截断，导致不同标签被合并成同一个字符。",
                     MaxLabelBytes, s, bytes);
             }

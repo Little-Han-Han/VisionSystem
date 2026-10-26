@@ -93,8 +93,12 @@ namespace VisionPlatform.Flow
             foreach (ParamItem p in CreateDefaultParams())
                 if (p != null && p.Key != null) map[p.Key] = p.Value;
 
+            // 【默认值统一为相对路径 "OCRModel"】运行时按 AppDomain.BaseDirectory 解析，
+            // 即 <程序目录>\OCRModel（Debug/Release 各一份，随程序走）。
+            // 这里刻意不再写绝对路径：绝对路径会把模板钉死在某台机器的某个目录，
+            // 换机器 / 换配置（bin\x64\Debug ↔ Release）就"模板全部消失"。
             if (Type == FlowNodeType.Ocr)
-                map["TemplateDir"] = VisionPlatform.Core.AppPaths.OcrCharsDir;
+                map["TemplateDir"] = "OCRModel";
 
             return map;
         }
