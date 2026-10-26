@@ -189,6 +189,21 @@ namespace VisionPlatform.UI
             // 横幅由调用方自建（本面板不改它的配色），这里只让它重绘一次：
             // 若横幅内部也订阅了 UiTheme.Changed，颜色会在它自己的回调里更新。
             if (_banner != null) _banner.Invalidate(true);
+
+            // 分组组头是构造期一次性 StyleGroupTitle 的，换主题不会自动重取色 —— 
+            // 不重套的话浅色主题下会留着深色的组标题（看起来像"这组禁用"）。
+            RestyleGroupHeaders(body);
+        }
+
+        /// <summary>递归重套分组组头的主题色（只认 <see cref="GroupHeaderTag"/> 标记的 Label）。</summary>
+        private static void RestyleGroupHeaders(Control root)
+        {
+            if (root == null) return;
+
+            var lbl = root as Label;
+            if (lbl != null && lbl.Tag is GroupHeaderTag) UiTheme.StyleGroupTitle(lbl);
+
+            foreach (Control c in root.Controls) RestyleGroupHeaders(c);
         }
 
         private void Build(NodeParamTable table)
