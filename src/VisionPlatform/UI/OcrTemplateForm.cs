@@ -754,6 +754,14 @@ namespace VisionPlatform.UI
             using (var dlg = new FolderBrowserDialog())
             {
                 dlg.Description = "选择迁移的目标目录（复制，不会移动原件）";
+                // 默认落在程序的 OCRModel（<程序目录>\OCRModel）：模板跟着程序走，
+                // 现场排查直接进程序目录就能看到样本
+                try
+                {
+                    string def = VisionPlatform.Core.AppPaths.OcrCharsDir;
+                    if (Directory.Exists(def)) dlg.SelectedPath = def;
+                }
+                catch (Exception) { }
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
                 string target = dlg.SelectedPath;
