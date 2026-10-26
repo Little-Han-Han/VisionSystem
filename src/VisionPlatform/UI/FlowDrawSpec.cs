@@ -9,6 +9,9 @@ namespace VisionPlatform.UI
         /// <summary>轴对齐矩形 ROI（X / Y / W / H）。</summary>
         Rect,
 
+        /// <summary>带角度的矩形 ROI（X / Y / W / H + Angle，绕自身中心旋转）。</summary>
+        RotatedRect,
+
         /// <summary>直线卡尺的扫描线段（X1 / Y1 / X2 / Y2）。</summary>
         Line,
 
@@ -44,18 +47,21 @@ namespace VisionPlatform.UI
 
         // 写回键：含义随 Kind 而定
         public readonly string X, Y, W, H;                 // Rect: X / Y / W / H
+        public readonly string Angle;                      // RotatedRect: 角度键（无角度时为 null）
         public readonly string X1, Y1, X2, Y2;             // Line: 线段两端点
         public readonly string Cx, Cy, InnerRadius, OuterRadius; // Ring: 圆心与内外半径
 
         private DrawSpec(DrawShapeKind kind, InteractionMode mode, string label, string primaryKey,
             string x, string y, string w, string h,
             string x1, string y1, string x2, string y2,
-            string cx, string cy, string inner, string outer)
+            string cx, string cy, string inner, string outer,
+            string angle = null)
         {
             Kind = kind; Mode = mode; Label = label; PrimaryKey = primaryKey;
             X = x; Y = y; W = w; H = h;
             X1 = x1; Y1 = y1; X2 = x2; Y2 = y2;
             Cx = cx; Cy = cy; InnerRadius = inner; OuterRadius = outer;
+            Angle = angle;
         }
 
         /// <summary>构造矩形 ROI 描述（模板区域 / ROI 裁剪 / 搜索区域）。</summary>
@@ -63,6 +69,20 @@ namespace VisionPlatform.UI
         {
             return new DrawSpec(DrawShapeKind.Rect, InteractionMode.DrawRectangle, label, x,
                 x, y, w, h, null, null, null, null, null, null, null, null);
+        }
+
+        /// <summary>
+        /// 构造「带角度的矩形 ROI」描述（本期只有 OCR 的 RoiX / RoiY / RoiW / RoiH / RoiAngle 一组）。
+        /// <para>
+        /// 写回键仍是 X / Y / W / H（= <strong>未旋转时</strong>的左上角与尺寸）再加 <paramref name="angle"/>
+        /// （绕自身中心的角度），与 <see cref="RotatedRectShape"/> 的「中心 + 宽高 + 角度」互为换算，
+        /// 换算点只有两处：<c>ReadCurrentGeometry</c> 与 <c>OnShapePicked</c>。
+        /// </para>
+        /// </summary>
+        public static DrawSpec MakeRotatedRect(string label, string x, string y, string w, string h, string angle)
+        {
+            return new DrawSpec(DrawShapeKind.RotatedRect, InteractionMode.DrawRotatedRect, label, x,
+                x, y, w, h, null, null, null, null, null, null, null, null, angle);
         }
 
         /// <summary>构造直线卡尺描述（扫描线段 X1/Y1/X2/Y2）。</summary>

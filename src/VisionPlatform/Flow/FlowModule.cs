@@ -77,6 +77,29 @@ namespace VisionPlatform.Flow
         public override string ToString() { return DisplayName; }
 
         /// <summary>
+        /// 新建节点时用的默认参数：先取 <see cref="CreateDefaultParams"/>，再覆盖"只该给新节点用"的默认值。
+        /// <para>
+        /// 【为什么必须分成两个入口】<see cref="CreateDefaultParams"/> 同时被"新建节点"和
+        /// "老配置升级补键"（<c>FlowSettings.UpgradeToCurrent</c>）两处复用。
+        /// 直接改它的 <c>TemplateDir</c> 默认值，会让**更老的、还没有这个键的配置**在升级时
+        /// 指向一个不存在的新目录 → 用户原有模板全部"消失"（其实是没被找到）。
+        /// </para>
+        /// <para>所以：<see cref="CreateDefaultParams"/> 的 <c>TemplateDir</c> 永远是 <c>"OCRModel"</c>，
+        /// 新默认目录只经本方法赋予新节点。</para>
+        /// </summary>
+        public Dictionary<string, string> CreateNewParams()
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (ParamItem p in CreateDefaultParams())
+                if (p != null && p.Key != null) map[p.Key] = p.Value;
+
+            if (Type == FlowNodeType.Ocr)
+                map["TemplateDir"] = VisionPlatform.Core.AppPaths.OcrCharsDir;
+
+            return map;
+        }
+
+        /// <summary>
         /// 生成该类型节点的默认参数列表。
         /// 默认值口径见 PRD §4.2 各条与 §7 默认假设 B（位置修正）/ C（卡尺）。
         /// </summary>
@@ -151,6 +174,8 @@ namespace VisionPlatform.Flow
                     Add(list, "MaxOverlap", "0.5");
                     Add(list, "Subpixel", "1");
                     Add(list, "Greediness", "0.9");
+                    // 「创建模板…」是参数面板上的动作行（NodeParamKind.Action，Key=CreateTemplate），
+                    // 点击后由 FlowForm 弹窗处理，没有参数值，故此处刻意不补键。
                     break;
 
                 case FlowNodeType.TemplateMatch:
@@ -166,6 +191,7 @@ namespace VisionPlatform.Flow
                     Add(list, "MinScore", "0.8");
                     Add(list, "MaxMatches", "1");
                     Add(list, "Subpixel", "1");
+                    // 同 ShapeMatch：「创建模板…」是动作行，不落盘、不补键。
                     break;
 
                 case FlowNodeType.Blob:
@@ -287,8 +313,18 @@ namespace VisionPlatform.Flow
                     Add(list, "AcceptScore", "0.6");
                     // 最多输出的字符数
                     Add(list, "MaxCount", "200");
-                    // 是否在预览上绘制字符框
-                    Add(list, "ShowBoxes", "1");
+                    // ROI（宽或高为 0 = 整帧）；角度绕 ROI 中心、顺时针为正，由执行器做仿射矫正
+                    Add(list, "RoiX", "0");
+                    Add(list, "RoiY", "0");
+                    Add(list, "RoiW", "0");
+                    Add(list, "RoiH", "0");
+                    Add(list, "RoiAngle", "0");
+                    // 角度跟随位置修正：θ 取「实测相对基准的偏差角」，关闭则只用 RoiAngle
+                    Add(list, "FollowPose", "1");
+                    // 结果显示（ShowBoxes 默认由 1 改为 0：默认少画框，老配置里的显式 1 不受影响）
+                    Add(list, "ShowRegionBox", "1");
+                    Add(list, "ShowStringBox", "1");
+                    Add(list, "ShowBoxes", "0");
                     break;
 
                 case FlowNodeType.SendData:
@@ -521,9 +557,36 @@ namespace VisionPlatform.Flow
                 Name = (m != null) ? m.DisplayName : type.ToString(),
                 X = x,
                 Y = y,
-                Params = (m != null) ? m.CreateDefaultParams() : new List<ParamItem>()
+                Params = BuildInitialParams(m, type)
             };
             return node;
+        }
+
+        /// <summary>
+        /// 新建节点的初始参数：走 <see cref="FlowModuleInfo.CreateNewParams"/> 的新默认值
+        /// （目前只有 OCR 的 <c>TemplateDir</c> 不同，见那里的注释）。
+        /// </summary>
+        private static List<ParamItem> BuildInitialParams(FlowModuleInfo m, FlowNodeType type)
+        {
+            if (m == null) return new List<ParamItem>();
+
+            List<ParamItem> list = m.CreateDefaultParams();
+            if (type != FlowNodeType.Ocr) return list;
+
+            Dictionary<string, string> newDefaults = m.CreateNewParams();
+            string dir;
+            if (!newDefaults.TryGetValue("TemplateDir", out dir) || string.IsNullOrEmpty(dir)) return list;
+
+            foreach (ParamItem p in list)
+            {
+                if (p != null && string.Equals(p.Key, "TemplateDir", StringComparison.Ordinal))
+                {
+                    p.Value = dir;
+                    return list;
+                }
+            }
+            list.Add(new ParamItem("TemplateDir", dir));
+            return list;
         }
 
         /// <summary>按模块 Key 创建节点（工具箱拖入时使用）；未识别 Key 返回 null。</summary>

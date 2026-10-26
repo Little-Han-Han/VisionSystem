@@ -68,6 +68,19 @@ namespace VisionPlatform.Flow
         /// <summary>字符识别字符框（橙色）。</summary>
         public static readonly Color ColorOcr = Color.FromArgb(255, 152, 0);
 
+        /// <summary>OCR 作用区域框（暗橙，虚线；只标"看的是哪一块"，不抢字符框的注意力）。</summary>
+        public static readonly Color ColorOcrRegion = Color.FromArgb(200, 150, 90, 30);
+
+        /// <summary>OCR 合并字符串框（亮黄绿；一行一个框 + 整行文本）。</summary>
+        public static readonly Color ColorOcrString = Color.FromArgb(190, 255, 110);
+
+        /// <summary>
+        /// 辅助图形的 <see cref="IGeometryShape.Name"/> 标记：<strong>受「轮廓」开关控制</strong>的那一类
+        /// （ROI 轮廓、卡尺窗口）。OCR 的区域框/串框不是轮廓，因此不打这个标记 ——
+        /// 否则取消勾选「轮廓」会把"OCR 在识别哪一块"一起关掉。
+        /// </summary>
+        public const string AuxContourName = "AuxContour";
+
         /// <summary>默认十字臂长（图像像素）。</summary>
         public const float DefaultCrossArm = 24f;
 
@@ -100,9 +113,11 @@ namespace VisionPlatform.Flow
             foreach (CaliperPoint p in points)
             {
                 if (p == null) continue;
-                list.Add(Line(p.Px1, p.Py1, p.Px2, p.Py2,
-                              p.Valid ? ColorWindowHit : ColorWindowMiss,
-                              ThinLine, true));
+                var s = Line(p.Px1, p.Py1, p.Px2, p.Py2,
+                             p.Valid ? ColorWindowHit : ColorWindowMiss,
+                             ThinLine, true);
+                s.Name = AuxContourName;   // 投影窗口属"输入几何"，随「轮廓」开关整组显隐
+                list.Add(s);
             }
             return list;
         }
@@ -166,8 +181,9 @@ namespace VisionPlatform.Flow
         /// <param name="height">高（图像像素）。</param>
         /// <param name="angle">角度（度，顺时针为正）。</param>
         /// <param name="primary">是否为第 1 目标。</param>
+        /// <param name="label">框标签（一般为 <c>#序号 分数</c>）；空 = 不画。</param>
         public static RotatedRectShape MatchBox(double cx, double cy, double width, double height,
-                                                double angle, bool primary)
+                                                double angle, bool primary, string label = null)
         {
             var r = new RotatedRectShape(new PointF((float)cx, (float)cy),
                                          (float)Math.Max(1.0, width),
@@ -176,22 +192,29 @@ namespace VisionPlatform.Flow
             r.StrokeColor = primary ? ColorShapeMatch : Color.FromArgb(150, ColorShapeMatch);
             r.LineWidth = primary ? BoldLine : ThinLine;
             r.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
             return r;
         }
 
         /// <summary>模板匹配 NCC 结果框（轴对齐矩形，仅平移匹配）。</summary>
-        public static RectangleShape NccBox(Rectangle rect, bool primary)
+        /// <param name="rect">结果框。</param>
+        /// <param name="primary">是否为第 1 目标。</param>
+        /// <param name="label">框标签（一般为 <c>#序号 得分</c>）；空 = 不画。</param>
+        public static RectangleShape NccBox(Rectangle rect, bool primary, string label = null)
         {
             var r = new RectangleShape(Math.Max(1f, rect.X), Math.Max(1f, rect.Y),
                                        Math.Max(1f, rect.Width), Math.Max(1f, rect.Height));
             r.StrokeColor = primary ? ColorNccMatch : Color.FromArgb(150, ColorNccMatch);
             r.LineWidth = primary ? BoldLine : ThinLine;
             r.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
             return r;
         }
 
         /// <summary>Blob 标记：以最小外接矩形（轴对齐）绘制，替代原先的面积等效圆。</summary>
-        public static RectangleShape BlobRect(double cx, double cy, double width, double height)
+        /// <param name="label">框标签（一般为 <c>#序号 面积px² · 圆度</c>）；空 = 不画。</param>
+        public static RectangleShape BlobRect(double cx, double cy, double width, double height,
+                                              string label = null)
         {
             float w = (float)Math.Max(1.0, width);
             float h = (float)Math.Max(1.0, height);
@@ -199,6 +222,7 @@ namespace VisionPlatform.Flow
             r.StrokeColor = ColorBlob;
             r.LineWidth = NormalLine;
             r.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
             return r;
         }
 
@@ -259,6 +283,9 @@ namespace VisionPlatform.Flow
             list.Add(Line(r, t, r, b, ColorRoi, ThinLine, true));
             list.Add(Line(r, b, l, b, ColorRoi, ThinLine, true));
             list.Add(Line(l, b, l, t, ColorRoi, ThinLine, true));
+
+            // 打上"轮廓"标记：预览区的「轮廓」开关按它整组显隐
+            foreach (IGeometryShape s in list) s.Name = AuxContourName;
             return list;
         }
 
@@ -318,6 +345,44 @@ namespace VisionPlatform.Flow
             r.IsEditable = false;
             r.Name = "OcrChar";
             if (!string.IsNullOrEmpty(labelText)) r.Label = labelText;
+            return r;
+        }
+
+        /// <summary>
+        /// OCR 作用区域框（虚线暗橙）：标出"这一帧里 OCR 到底在看哪一块"。
+        /// <para>它属于"输入几何"，调用方应放进 <c>AuxShapes</c> —— 进 <c>Shapes</c> 会让结果区
+        /// 多出一条"区域框"目标行，与字符数永久对不上。</para>
+        /// </summary>
+        public static RectangleShape OcrRegionBox(Rectangle region, string labelText)
+        {
+            if (region.Width <= 0 || region.Height <= 0) return null;
+
+            var r = new RectangleShape(Math.Max(0f, region.X), Math.Max(0f, region.Y),
+                                       Math.Max(1f, region.Width), Math.Max(1f, region.Height));
+            r.StrokeColor = ColorOcrRegion;
+            r.LineWidth = ThinLine;
+            r.IsEditable = false;
+            r.Name = "OcrRegion";
+            if (!string.IsNullOrEmpty(labelText)) r.Label = labelText;
+            return r;
+        }
+
+        /// <summary>
+        /// OCR 合并字符串框：一行字符折成<strong>一个</strong>框 + 整行文本。
+        /// <para>逐字符框是噪声（一行 30 个框）；"一行一个框 + 一行字"才是工程师看结果的方式。</para>
+        /// <para>T04（旋转 ROI）交付前几何只能是轴对齐，旋转串框归 T04，此处不得自行实现。</para>
+        /// </summary>
+        public static RectangleShape OcrStringBox(Rectangle rect, string text)
+        {
+            if (rect.Width <= 0 || rect.Height <= 0) return null;
+
+            var r = new RectangleShape(Math.Max(0f, rect.X), Math.Max(0f, rect.Y),
+                                       Math.Max(1f, rect.Width), Math.Max(1f, rect.Height));
+            r.StrokeColor = ColorOcrString;
+            r.LineWidth = BoldLine;
+            r.IsEditable = false;
+            r.Name = "OcrString";
+            if (!string.IsNullOrEmpty(text)) r.Label = text;
             return r;
         }
     }

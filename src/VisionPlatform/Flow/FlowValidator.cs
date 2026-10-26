@@ -75,6 +75,8 @@ namespace VisionPlatform.Flow
         private const string CodeResultNoUpstream = "W003";
         private const string CodeNormalized = "W004";
         private const string CodePositionNoMatch = "W005";
+        private const string CodeMultiShapeMatch = "W006";
+        private const string CodeFollowPoseNoCorrect = "W007";
 
         // ---------------------- 对外 API ----------------------
 
@@ -269,7 +271,78 @@ namespace VisionPlatform.Flow
                     node.Id, ""));
             }
 
+            // ---- ⑦ W006：一条流程里放了多个形状匹配节点 ----
+            // 算法库只有一个形状模型槽位，多节点会在每帧各自重训，这里只提示不拦
+            // （现场确实有人为了比对两种参数而临时放两个，硬拦会挡住正常调试）。
+            List<FlowNode> shapeNodes = CollectNodesOfType(nodes, FlowNodeType.ShapeMatch);
+            if (shapeNodes.Count > 1)
+            {
+                var names = new System.Text.StringBuilder();
+                for (int i = 0; i < shapeNodes.Count; i++)
+                {
+                    if (i > 0) names.Append('、');
+                    names.Append('「').Append(FlowOrder.Label(shapeNodes[i])).Append('」');
+                }
+
+                result.Add(new FlowIssue(FlowIssueLevel.Warning, CodeMultiShapeMatch,
+                    "流程里有 " + shapeNodes.Count + " 个形状匹配节点（" + names + "）。"
+                    + "算法库当前只有一个形状模型槽位，每帧每个节点都要各自重新训练模板（每个约 60~300ms），"
+                    + "节点越多越容易掉帧；建议一条流程只放一个形状匹配节点，其余拆到别的流程。",
+                    shapeNodes[1].Id, ""));
+            }
+
+            // ---- ⑧ W007：OCR 开了角度跟随，但上游没有位置修正 ----
+            foreach (FlowNode node in nodes)
+            {
+                if (node == null) continue;
+
+                FlowNodeType type;
+                if (!node.TryGetType(out type) || type != FlowNodeType.Ocr) continue;
+
+                // 【禁用态联动 —— 删这条判断前先看这里】
+                // 「角度跟随位置修正」在 T01~T03 期间是置灰的（NodeParamSchema.Ocr() 里给
+                // FollowPose 设了 DisabledReason，原因见那里的注释）。用户改不了它，却能被这条
+                // 警告追着报 —— 一个"做什么操作都消不掉"的警告会让人对所有警告失去信任，
+                // 以后真警告也会被忽略。
+                // 所以：**字段处于禁用态时不报**。判断刻意不写死"永远不报"，而是去问 Schema 的
+                // DisabledReason —— T04 把 FollowPose 的 DisabledReason 去掉之后，W007 会自动恢复，
+                // 不需要再回来改校验器。
+                if (IsFieldDisabled(FlowNodeType.Ocr, "FollowPose")) continue;
+
+                if (!node.GetBool("FollowPose", true)) continue;          // 默认值与 Schema 一致（"1"）
+                if (!HasAnyIncoming(flow, node.Id)) continue;             // 完全没连线：W001 已经报过，不重复
+                if (HasUpstreamOfType(flow, byId, node.Id, FlowNodeType.PositionCorrect)) continue;
+
+                result.Add(new FlowIssue(FlowIssueLevel.Warning, CodeFollowPoseNoCorrect,
+                    "字符识别节点「" + FlowOrder.Label(node) + "」打开了「角度跟随位置修正」，"
+                    + "但上游没有「位置修正」节点，角度偏差取不到（θ 恒为 0），实际只用配置角度识别。"
+                    + "要在工件旋转时跟着转，请在该节点之前接一个位置修正节点。",
+                    node.Id, ""));
+            }
+
             return result;
+        }
+
+        /// <summary>
+        /// 某节点类型的某个字段当前是否处于"禁用态"（Schema 里设了 <c>DisabledReason</c>）。
+        /// <para>
+        /// 【为什么要联动 Schema 而不是写死】"功能没做 → 字段置灰 → 相关警告也应当停" 这条规则
+        /// 如果写死成 <c>if (type == Ocr) continue;</c>，那么 T04 接通功能、去掉 DisabledReason 之后，
+        /// 警告不会自动恢复 —— 又得回来改一次校验器，而"漏改校验器"是典型的静默缺陷。
+        /// 这里直接问 Schema：置灰与停报是同一个事实的两个表现。
+        /// </para>
+        /// </summary>
+        private static bool IsFieldDisabled(FlowNodeType type, string key)
+        {
+            NodeParamTable table = NodeParamSchema.For(type);
+            if (table == null || table.Fields == null) return false;
+
+            foreach (NodeParamField f in table.Fields)
+            {
+                if (f == null || !string.Equals(f.Key, key, StringComparison.Ordinal)) continue;
+                return f.IsDisabled;
+            }
+            return false;
         }
 
         /// <summary>等价于文档里的 <c>List&lt;FlowIssue&gt; Validate(flow)</c>：返回扁平问题清单。</summary>
@@ -403,7 +476,19 @@ namespace VisionPlatform.Flow
         /// </summary>
         private static bool HasPoseUpstream(FlowDefinition flow, Dictionary<string, FlowNode> byId, string nodeId)
         {
+            return HasUpstreamOfType(flow, byId, nodeId,
+                FlowNodeType.ShapeMatch, FlowNodeType.TemplateMatch);
+        }
+
+        /// <summary>
+        /// 该节点的<strong>任意上游</strong>（沿连线往上递归，不含自身）是否出现
+        /// <paramref name="wanted"/> 中的任一类型。
+        /// </summary>
+        private static bool HasUpstreamOfType(FlowDefinition flow, Dictionary<string, FlowNode> byId,
+                                              string nodeId, params FlowNodeType[] wanted)
+        {
             if (flow == null || flow.Links == null || byId == null || string.IsNullOrEmpty(nodeId)) return false;
+            if (wanted == null || wanted.Length == 0) return false;
 
             Stack<string> stack = new Stack<string>();
             HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
@@ -423,13 +508,34 @@ namespace VisionPlatform.Flow
                     if (up == null) continue;
 
                     FlowNodeType t;
-                    if (up.TryGetType(out t)
-                        && (t == FlowNodeType.ShapeMatch || t == FlowNodeType.TemplateMatch)) return true;
+                    if (up.TryGetType(out t))
+                    {
+                        for (int i = 0; i < wanted.Length; i++)
+                        {
+                            if (t == wanted[i]) return true;
+                        }
+                    }
 
                     stack.Push(l.FromNodeId);
                 }
             }
             return false;
+        }
+
+        /// <summary>按类型收集节点，保持流程里的原始顺序（用于「同类节点有几个」这类提示）。</summary>
+        private static List<FlowNode> CollectNodesOfType(List<FlowNode> nodes, FlowNodeType wanted)
+        {
+            var result = new List<FlowNode>();
+            if (nodes == null) return result;
+
+            foreach (FlowNode n in nodes)
+            {
+                if (n == null) continue;
+
+                FlowNodeType t;
+                if (n.TryGetType(out t) && t == wanted) result.Add(n);
+            }
+            return result;
         }
 
         private static string PortLabel(FlowNode node, FlowPortDir dir, string portKey)

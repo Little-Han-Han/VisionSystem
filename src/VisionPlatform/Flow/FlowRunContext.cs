@@ -24,7 +24,18 @@ namespace VisionPlatform.Flow
         Ng,
 
         /// <summary>被跳过（无输入帧、未知节点类型等）。</summary>
-        Skipped
+        Skipped,
+
+        /// <summary>
+        /// 执行成功但有需要人注意的情况（如 OCR 模板库为空，只做分割不输出文本）。
+        /// <para>
+        /// <strong>语义边界</strong>：<c>Warn</c> 只影响显示，<strong>永远不等于 NG</strong> ——
+        /// 流程判定、下游联动、结果汇总都不得把它当失败处理。
+        /// 之所以不沿用 <c>Ok</c>：<c>OK</c> 在本系统里是"检测通过"的语义，
+        /// 把"根本没识别"显示成 OK 会让操作员把未识别的工件判为良品（这是误判风险，不是美化问题）。
+        /// </para>
+        /// </summary>
+        Warn
     }
 
     /// <summary>
@@ -172,6 +183,17 @@ namespace VisionPlatform.Flow
         /// <summary>该节点的结论摘要（一行）。</summary>
         public string Summary { get; set; }
 
+        /// <summary>该节点"主判据"的结构化取值（结果区/画布/预览五处共用，见 <see cref="FlowNodeMetrics"/>）。</summary>
+        public FlowNodeMetrics Metrics { get; set; }
+
+        /// <summary>
+        /// 该节点产出的<strong>辅助</strong>叠加图形（ROI 轮廓、卡尺窗口等"输入几何"）。
+        /// <para>与 <see cref="Shapes"/> 的分工：<c>Shapes</c> = 检测目标（会进结果区明细、可点行高亮），
+        /// <c>AuxShapes</c> = 辅助几何（只画在画布上，不占结果区行）。混在一起会让
+        /// "12 个 Blob"下面多出 4 条 ROI 边线行，条数永远对不上。</para>
+        /// </summary>
+        public List<IGeometryShape> AuxShapes { get; set; }
+
         /// <summary>该节点<strong>自身</strong>产出的叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes { get; set; }
 
@@ -188,7 +210,9 @@ namespace VisionPlatform.Flow
             NodeName = "";
             Summary = "";
             Status = FlowNodeStatus.Pending;
+            Metrics = new FlowNodeMetrics();
             Shapes = new List<IGeometryShape>();
+            AuxShapes = new List<IGeometryShape>();
         }
 
         public override string ToString()

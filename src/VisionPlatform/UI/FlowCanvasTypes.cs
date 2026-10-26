@@ -65,8 +65,12 @@ namespace VisionPlatform.UI
     }
 
     /// <summary>
-    /// 画布节点的运行状态（FR-ALG-23）：等待（灰）/ 运行中（蓝）/ 成功（绿）/ 失败（红）。
-    /// 由执行期 <see cref="FlowNodeStatus"/> 映射而来，画布只认这四个视觉态。
+    /// 画布节点的运行状态（FR-ALG-23）：等待（灰）/ 运行中（蓝）/ 成功（绿）/ 警告（黄）/ 失败（红）。
+    /// 由执行期 <see cref="FlowNodeStatus"/> 映射而来，画布只认这五个视觉态。
+    /// <para>
+    /// <c>Warn</c> 是"执行成功但结果不能用于判良品"（如 OCR 模板库为空只做了分割）。
+    /// 它<strong>必须与 Ok 视觉可辨</strong>，否则"没识别"会被读成"检测通过"。
+    /// </para>
     /// </summary>
     public enum FlowNodeRunState
     {
@@ -79,11 +83,14 @@ namespace VisionPlatform.UI
         /// <summary>执行成功。</summary>
         Ok,
 
+        /// <summary>执行成功但有警示（结果不可直接用于判良品）。</summary>
+        Warn,
+
         /// <summary>执行失败（判定 NG 或执行异常）。</summary>
         Failed
     }
 
-    /// <summary>单个节点的运行状态与耗时。</summary>
+    /// <summary>单个节点的运行状态、耗时与结果摘要。</summary>
     public sealed class FlowNodeRunInfo
     {
         /// <summary>视觉状态。</summary>
@@ -91,5 +98,11 @@ namespace VisionPlatform.UI
 
         /// <summary>该节点耗时（整数毫秒）；未执行时为 -1（不显示）。</summary>
         public int ElapsedMs = -1;
+
+        /// <summary>
+        /// 一行结果摘要（如 <c>3 个 · 0.93</c> / <c>"ABC-1234" · 8 字</c> / <c>12 个 · 1842 px²</c>）。
+        /// 空串 = 该节点没有可压缩的判据（节点卡片上显示"未运行"而不是 <c>0</c>）。
+        /// </summary>
+        public string Summary = "";
     }
 }

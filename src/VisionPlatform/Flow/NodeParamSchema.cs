@@ -25,11 +25,23 @@ namespace VisionPlatform.Flow
         /// <summary>文件路径（TextBox + 「浏览」按钮）。</summary>
         File,
 
+        /// <summary>
+        /// 动作行（一个按钮，<strong>不对应参数值</strong>）：点击由
+        /// <c>NodeParamPanel.ActionInvoked</c> 把 <see cref="NodeParamField.Key"/> 抛给调用方。
+        /// </summary>
+        Action,
+
         /// <summary>分组标题（不对应参数）。</summary>
         Group,
 
         /// <summary>只读提示文本（不对应参数）。</summary>
-        Note
+        Note,
+
+        /// <summary>
+        /// 目录选择行（TextBox + 「浏览…」+「打开」）。
+        /// <strong>末尾追加</strong>：枚举值向前兼容，已有序列化值不会错位。
+        /// </summary>
+        Folder
     }
 
     /// <summary>枚举选项：显示为 <see cref="NodeParamOption.Text"/>，落盘为 <see cref="NodeParamOption.Value"/>。</summary>
@@ -93,6 +105,23 @@ namespace VisionPlatform.Flow
         /// </summary>
         public bool Advanced { get; set; }
 
+        /// <summary>
+        /// 禁用原因（空 / null = 可用）。目前只对 <see cref="NodeParamKind.Action"/> 有意义：
+        /// 非空时按钮置灰不可点，tooltip 显示这段原因而不是 <see cref="Hint"/>。
+        /// <para>
+        /// 为什么要有它而不是"干脆不加这个 Action 行"：功能尚未实现时，
+        /// <strong>看得见但明显不可用</strong>远好于"看得见、点得动、点了没反应"——
+        /// 后者会被当成 bug 反馈，而且会和"上一版真的坏过的那个按钮"混在一起。
+        /// </para>
+        /// </summary>
+        public string DisabledReason { get; set; }
+
+        /// <summary>是否禁用（<see cref="DisabledReason"/> 非空即禁用）。</summary>
+        public bool IsDisabled
+        {
+            get { return !string.IsNullOrEmpty(DisabledReason); }
+        }
+
         public NodeParamField()
         {
             Key = "";
@@ -105,6 +134,7 @@ namespace VisionPlatform.Flow
             Increment = 1m;
             Options = new List<NodeParamOption>();
             Hint = "";
+            DisabledReason = "";
         }
 
         /// <summary>是否为「不对应参数」的展示行（分组标题 / 提示文本）。</summary>
@@ -213,6 +243,49 @@ namespace VisionPlatform.Flow
             {
                 Key = key, Label = label, Kind = NodeParamKind.File, Default = "",
                 Hint = hint, Advanced = advanced
+            };
+        }
+
+        /// <summary>
+        /// 动作行：面板渲染成一个按钮，点击抛 <c>NodeParamPanel.ActionInvoked</c>（参数即 <paramref name="key"/>）。
+        /// <para>动作行<strong>不落盘</strong>：它没有参数值，因此
+        /// <see cref="FlowModuleInfo.CreateDefaultParams"/> 里<strong>不要</strong>为它补键 ——
+        /// 补了就会在配置文件里留下一串永远为空的死键。</para>
+        /// </summary>
+        /// <summary>
+        /// 目录选择行：与 <see cref="NodeParamKind.File"/> 的区别只在语义与浏览方式
+        /// （文件用 <c>OpenFileDialog</c> 且过滤器写死图片格式，目录场景会被误导）。
+        /// </summary>
+        private static NodeParamField Folder(string key, string label, string def, string hint = "")
+        {
+            return new NodeParamField
+            {
+                Key = key, Label = label, Kind = NodeParamKind.Folder, Default = def, Hint = hint
+            };
+        }
+
+        private static NodeParamField Action(string key, string label,
+                                            string hint = "", bool advanced = false)
+        {
+            return new NodeParamField
+            {
+                Key = key, Label = label, Kind = NodeParamKind.Action, Default = "",
+                Hint = hint, Advanced = advanced
+            };
+        }
+
+        /// <summary>
+        /// 动作行（<strong>禁用态</strong>）：功能尚未实现时用这个重载，按钮置灰、tooltip 显示原因。
+        /// <para>第 4 参刻意是 <see cref="string"/> 而不是加一个可选的 bool ——
+        /// 与上一个重载靠类型区分，调用方写 3 个参数时不会产生重载歧义。</para>
+        /// </summary>
+        private static NodeParamField Action(string key, string label,
+                                            string hint, string disabledReason)
+        {
+            return new NodeParamField
+            {
+                Key = key, Label = label, Kind = NodeParamKind.Action, Default = "",
+                Hint = hint, DisabledReason = disabledReason
             };
         }
 
@@ -378,6 +451,12 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("MaxOverlap", "重叠阈值", 0, 1, 3, 0.05m, "0.5", "", true));
             t.Fields.Add(Dbl("Greediness", "贪婪系数", 0, 1, 3, 0.05m, "0.9", "0 = 关闭启发式（最慢最稳）", true));
             t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
+
+            // 这一组刻意只有一行 Action：模板状态的唯一真源是 T03 的模板状态卡片。
+            // 这里如果再加一行 Note 显示状态，就成了两处显示同一状态，刷新时机一旦不同步
+            // 就会互相矛盾（卡片「已就绪」、Note 还写着「见上方卡片」），故不设。
+            t.Fields.Add(Group("模板"));
+            t.Fields.Add(Action("CreateTemplate", "创建模板…", "打开模板制作界面（取图 / 画 ROI / 训练 / 保存）"));
             return t;
         }
 
@@ -402,6 +481,10 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("MinScore", "最小得分", 0, 1, 3, 0.05m, "0.8"));
             t.Fields.Add(Int("MaxMatches", "最多目标数", 1, 1000, "1"));
             t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
+
+            // 同上：模板状态由 T03 的卡片独占显示，这里只留动作行。
+            t.Fields.Add(Group("模板"));
+            t.Fields.Add(Action("CreateTemplate", "创建模板…", "打开模板制作界面（取图 / 画 ROI / 训练 / 保存）"));
 
             t.FooterNote = "仅支持平移匹配，不支持旋转/缩放；有旋转请用形状匹配。";
             return t;
@@ -564,12 +647,19 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.Ocr, Title = "字符识别(OCR)" };
 
             t.Fields.Add(Group("模板"));
-            // ⚠️ 这里刻意用 Text 而不是 File：NodeParamPanel 的文件浏览过滤器写死成图片格式，
-            //    选目录场景会被误导。模板目录是「相对程序基目录」的名字或相对路径。
-            t.Fields.Add(Text("TemplateDir", "模板目录", "OCRModel",
+            // ⚠️ 这里刻意不用 File：NodeParamPanel 的文件浏览过滤器写死成图片格式，选目录会被误导。
+            //    模板目录是「相对程序基目录」的名字或相对路径，故用 Folder（浏览 = 选文件夹）。
+            t.Fields.Add(Folder("TemplateDir", "模板目录", "OCRModel",
                 "相对程序运行目录（bin/x64/Release）的文件夹名，默认 OCRModel；留空按 OCRModel 处理"));
             t.Fields.Add(Note("约定：每个字符一张灰度图放进该目录，文件名（不含扩展名）即标签，"
-                + "如 A.png、7.png；支持中文标签如 中.png。目录为空时只做字符分割、不输出文本。"));
+                + "如 A.png、7.png；支持中文标签如 中.png。"
+                + "同一字符的多份样本用同名不同扩展名（A.png + A.bmp），每字符最多 6 份。"
+                + "目录为空时只做字符分割、不输出文本。"));
+            // 两个动作的语义由宿主（FlowForm）解释；ManageOcrTemplates 打开字符模板库窗体。
+            t.Fields.Add(Action("ManageOcrTemplates", "管理模板库…",
+                "打开字符模板库：查看 / 框选入库 / 删除 / 迁移（改动立即落盘并对下次运行生效）"));
+            t.Fields.Add(Action("OcrRescanTemplates", "重新扫描",
+                "模板目录被外部改动后强制重扫并刷新状态卡（不重跑流程也能看到最新字符数）"));
 
             t.Fields.Add(Group("分割参数"));
             t.Fields.Add(Int("Threshold", "二值化阈值", -1, 255, "-1",
@@ -589,7 +679,57 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("AcceptScore", "接受阈值", 0, 1, 2, 0.05m, "0.6",
                 "低于该置信度的字符输出 '?'；调低易误识、调高易漏识"));
             t.Fields.Add(Int("MaxCount", "最多字符数", 1, 2000, "200", "超出部分被截断"));
-            t.Fields.Add(Bool("ShowBoxes", "绘制字符框", "1", "在预览帧上叠加每个字符的外接框与置信度"));
+
+            t.Fields.Add(Group("ROI（宽或高为 0 = 整帧）"));
+            // RoiX/Y/W/H 是【真的生效】的：FlowRunner.ResolveRoi 已在读、轴对齐裁剪已工作，
+            // 所以这四项必须保持可用 —— 顺手把它们也置灰会把唯一能用的功能关掉。
+            t.Fields.Add(Int("RoiX", "X", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiY", "Y", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
+
+            // 【禁用中 → T04 启用】RoiAngle 目前没有被 RunOcr 读取，填了不生效。
+            // 这比死按钮更糟：用户会反复试、反复怀疑自己填错，而界面没有任何反馈。
+            // 注意：画布顶条「画 ROI」在 T02 起就能给 OCR 画旋转矩形并回写本键，所以这个值
+            // 可能"看起来填进去了"却不参与识别 —— 文案必须点明这一点（否则用户会以为自己画错了）。
+            // T04 接通「RoiAngle → 仿射矫正」后，删掉下面这一行 DisabledReason 即恢复可编辑。
+            var roiAngle = Dbl("RoiAngle", "角度(°)", -180, 180, 2, 0.5m, "0", "绕 ROI 中心；顺时针为正");
+            roiAngle.DisabledReason = "旋转 ROI 将在后续版本提供；当前 OCR 运行期只按轴对齐裁剪，ROI 角度不参与识别";
+            t.Fields.Add(roiAngle);
+
+            // 【禁用中 → T04 启用】框选 / 预览的入口同样在 T04。
+            // 刻意保留按钮但置灰：看得见、明显不可用 > 看得见、点得动、点了没反应
+            //（后者会被当 bug 反馈，而且容易和上一版真的坏过的顶条「画 ROI」混在一起）。
+            // T04 落地后：删掉第 4 个实参（或传空字符串）即恢复可用。
+            t.Fields.Add(Action("RoiPick", "框选 ROI",
+                "在画布上拖拽画出带角度的矩形 ROI（画完可拖旋转手柄）",
+                "该功能将在 OCR 旋转 ROI 版本提供（当前请先用顶条的「画 ROI」框轴对齐 ROI）"));
+            t.Fields.Add(Action("RoiPreview", "预览矫正图",
+                "按当前角度把 ROI 仿射矫正成正向图",
+                "该功能将在 OCR 旋转 ROI 版本提供"));
+
+            t.Fields.Add(Group("方向跟随"));
+            // 【禁用中 → T04 启用】角度跟随位置修正尚未实现，勾了不生效。
+            // T04 实现 θ = 实测偏差角后，删掉这一行 DisabledReason 即恢复可勾选。
+            // 【联动】置灰期间 FlowValidator 的 W007（"开了角度跟随但上游没有位置修正"）会自动停报
+            // —— 校验器不是写死"OCR 不报"，而是调 IsFieldDisabled(Ocr, "FollowPose") 问这里的
+            // DisabledReason。所以去掉这一行之后，W007 会自己恢复，不用再去改校验器。
+            var followPose = Bool("FollowPose", "角度跟随位置修正", "1",
+                "θ = 实测相对基准的偏差角；关闭则只用配置角度");
+            followPose.DisabledReason = "角度跟随位置修正将在后续版本提供，当前 ROI 角度固定为 0";
+            t.Fields.Add(followPose);
+
+            t.Fields.Add(Group("结果显示"));
+            // 区域框 = OCR 作用区域，默认开（让用户始终看得见"识别的是哪一块"）。
+            // 【本期已接通】FlowRunner.RunOcr 的 ⑥ 段按本开关产出 OcrRegionBox 到 AuxShapes，
+            // 所以这里不再有 DisabledReason —— 置灰会让唯一说明"它在看哪块"的东西消失。
+            t.Fields.Add(Bool("ShowRegionBox", "显示区域框(OCR 作用区域)", "1"));
+            // 合并字符串框（默认开）：一行一个框 + 整行文本。这是"结果更清楚"的主力，
+            // 取代了"把一行 30 个字符框全打开"的做法（那是噪声不是清晰）。
+            t.Fields.Add(Bool("ShowStringBox", "显示合并字符串框", "1", "按行归并：一行一个框 + 该行识别文本"));
+            // ⚠️ 默认值由 "1" 改为 "0"：默认少画一堆框，现场看预览更干净。
+            //    老配置里存的是显式 "1"，读到的就是 "1"（见 NodeParamPanel.LoadValues 的「键缺失才用默认」口径），不受影响。
+            t.Fields.Add(Bool("ShowBoxes", "显示逐字符框", "0", "默认关（老配置为显式 1，不受影响）"));
 
             t.FooterNote = "模板约定：每个字符一张灰度图放进模板目录，文件名即标签（A.png / 7.png，"
                          + "支持中文标签如 中.png）；目录为空时只做字符分割、不输出文本。"

@@ -22,7 +22,7 @@ namespace VisionPlatform.Flow
         /// <summary>级别。</summary>
         public FlowIssueLevel Level { get; private set; }
 
-        /// <summary>稳定代码（E001~E008 / W001~W004，见架构文档 §8.1）。</summary>
+        /// <summary>稳定代码（E001~E008 / W001~W007，见架构文档 §7.6「校验规则码全表」）。</summary>
         public string Code { get; private set; }
 
         /// <summary>中文说明。</summary>

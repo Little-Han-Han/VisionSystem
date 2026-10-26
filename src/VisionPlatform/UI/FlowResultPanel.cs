@@ -9,53 +9,122 @@ using VisionSystem.Controls.Geometry;
 namespace VisionPlatform.UI
 {
     /// <summary>
-    /// 流程编辑右栏「输出结果」面板：位于「编辑输入参数」下方，运行期实时显示当前节点的
-    /// 状态 / 耗时 / 摘要与其产出的每一个图形（表格形式），点击某行会在预览图像里高亮对应图形。
-    /// </summary>
-    /// <remarks>
-    /// <list type="bullet">
-    /// <item>【为什么不用设计器】本项目历史上出现过 VS 重序列化把事件订阅弄丢的事故
-    /// （见 <c>FlowPreviewPanel.cs</c> 中 <c>pullTimer.Tick</c> 的注释）。本控件<strong>全部纯代码
-    /// 构建、不使用设计器序列化</strong>，也就不需要 <c>FlowResultPanel.Designer.cs</c>。</item>
-    /// <item>【为什么是普通 UserControl 而不是自绘】自绘控件要同步维护三份白名单
-    /// （<c>UiStyle.IsSelfDrawn</c>、<c>Core/Lang.cs</c> 的第二份拷贝、<c>UiThemeManager.ReapplySelfDrawn</c>）。
-    /// 本控件走普通控件路径，由 <c>UiStyle</c> / <c>Lang</c> 自动遍历，配色仍显式套一次
-    /// <see cref="UiGrid.Apply"/> 与 <see cref="UiTheme"/> 保证一致。</item>
-    /// <item>【取数为什么通用】行直接来自 <see cref="FlowProgressSnapshot.Shapes"/>，
-    /// 不按节点类型分支，因此新增节点无需改动本类。</item>
-    /// </list>
+    /// 流程编辑右栏「输出结果」面板：按节点缓存最近一次运行结果，一节点一行 + 可展开明细，
+    /// 点击行在预览图像里高亮对应图形。
+    /// <para>
+    /// 【为什么从 DataGridView 改成 FlowLayoutPanel + 行控件】旧表 7 列合计 572px，而右栏内容宽只有
+    /// 288px，看 X/Y/宽高必须横向拖；且表格行高统一，做不到"主行 36 / 明细 22"的层级区分。
+    /// </para>
+    /// <para>
+    /// 【为什么纯代码构建、不建 .Designer.cs】本项目历史上出现过 VS 重序列化把事件订阅吃掉的事故
+    /// （DEF-01 就是这么坏的两个按钮）。本控件全部代码构建。
+    /// </para>
+    /// <para>
+    /// 【为什么内部只用标准 Label】自绘控件要同步维护三份白名单，漏一处就"切主题后不自绘了"。
+    /// 本控件与 <see cref="FlowResultRow"/> 都走普通控件路径。
+    /// </para>
     /// </remarks>
     public sealed class FlowResultPanel : UserControl
     {
+        /// <summary>明细行最多渲染条数（数据侧截断到 <see cref="NodeResultCache.MaxShapes"/>，界面再兜一层）。</summary>
+        private const int MaxDetailRows = 200;
+
+        /// <summary>同一节点缩略帧的重建最小间隔（毫秒）：连续运行时每帧重建会把 UI 拖垮。</summary>
+        private const int ThumbRebuildIntervalMs = 400;
+
         private Panel panelHead;
         private Label lblTitle;
         private Label lblNode;
-        private DataGridView grid;
+        private UiButton btnZoom;
+        private FlowLayoutPanel rows;
         private Panel panelFoot;
         private Label lblVerdict;
         private Label lblChain;
 
-        private bool _suppressSelection;   // 抑制 Rows.Clear() 触发的 SelectionChanged
         private UiVerdict _verdict = UiVerdict.None;
         private string _chainText = "";
 
-        // 上一次 Apply 的快照节点 Id。图形每运行周期都是新实例，高亮只能靠「节点 Id + 序号」定位。
-        private string _nodeId = "";
-        // 与 grid.Rows 逐行对齐的「图形序号」：图形行记它在 snap.Shapes 内的序号，非图形行（节点/状态/摘要）记 -1。
-        // 表格里混着节点级行，行号 ≠ 图形序号，故必须单独记一份。
-        private readonly List<int> _rowShapeIndex = new List<int>();
+        // 结果缓存：key = 节点 Id。换流程清空、重跑按节点覆盖、切节点只读。
+        private readonly Dictionary<string, NodeResultCache> _cache =
+            new Dictionary<string, NodeResultCache>(StringComparer.Ordinal);
 
-        /// <summary>
-        /// 点击结果行时触发；参数为（节点 Id、该节点 Shapes 列表内的图形序号）。
-        /// 序号 &lt; 0 或节点 Id 为空表示取消高亮。
-        /// </summary>
+        // 当前显示的节点（"" = 跟随最新快照，用于"没选中节点时看链尾结果"）
+        private string _shownNodeId = "";
+        private string _shownNodeName = "";
+
+        // 当前展开的节点（展开只对一个节点有效，避免多节点同时展开把面板撑爆）
+        private string _expandedNodeId = "";
+        private bool _zoomed;
+
+        private Func<Bitmap> _frameProvider;
+
+        // 被用户"点开过"的节点（ShowNode 调用过）。缩略帧只给这些节点抓：
+        // 若每帧给每个节点都降采样一次 5MP，一周期要多做 5 次缩放，直接吃掉 16ms 刷新预算。
+        private readonly HashSet<string> _openedNodes = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, DateTime> _thumbAt =
+            new Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+        /// <summary>点击结果行时触发（节点 Id、该节点 Shapes 内的图形序号）；序号 &lt; 0 表示取消高亮。</summary>
         public event Action<string, int> ShapeSelected;
+
+        /// <summary>点「放大 / 恢复」（UI-R10）；高度切换由宿主负责。</summary>
+        public event EventHandler ZoomClicked;
 
         public FlowResultPanel()
         {
             BuildUi();
             ApplyTheme();
             Clear();
+        }
+
+        // =====================================================================
+        //  对外只读状态（宿主与探针用）
+        // =====================================================================
+
+        /// <summary>当前显示的节点 Id（"" = 跟随最新）。</summary>
+        public string ShownNodeId { get { return _shownNodeId; } }
+
+        /// <summary>是否处于放大态。</summary>
+        public bool IsZoomed { get { return _zoomed; } }
+
+        /// <summary>当前渲染的明细行数。</summary>
+        public int DetailRowCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (Control c in rows.Controls)
+                {
+                    var r = c as FlowResultRow;
+                    if (r != null && r.Kind == FlowResultRowKind.Detail) n++;
+                }
+                return n;
+            }
+        }
+
+        /// <summary>首行宽度（用于断言 288px 下不出横向滚动）。</summary>
+        public int RowWidth
+        {
+            get { return rows.Controls.Count > 0 ? rows.Controls[0].Width : 0; }
+        }
+
+        /// <summary>行容器是否出现横向滚动条。</summary>
+        public bool HasHorizontalScroll
+        {
+            get { return rows.HorizontalScroll.Visible && rows.HorizontalScroll.Maximum > 0; }
+        }
+
+        /// <summary>取某节点的缓存（没有则 null）。</summary>
+        public NodeResultCache GetCache(string nodeId)
+        {
+            NodeResultCache c;
+            return (nodeId != null && _cache.TryGetValue(nodeId, out c)) ? c : null;
+        }
+
+        /// <summary>注入"当前帧"提供者（生成缩略帧用；返回的位图<strong>不转移所有权</strong>）。</summary>
+        public void SetFrameProvider(Func<Bitmap> provider)
+        {
+            _frameProvider = provider;
         }
 
         // =====================================================================
@@ -66,7 +135,7 @@ namespace VisionPlatform.UI
         {
             SuspendLayout();
 
-            // ---- 顶条：标题 + 当前节点 / 状态 / 耗时 ----
+            // ---- 顶条：标题 + 当前节点 + 放大按钮 ----
             panelHead = new Panel();
             panelHead.Dock = DockStyle.Top;
             panelHead.Height = 26;
@@ -74,46 +143,43 @@ namespace VisionPlatform.UI
 
             lblTitle = new Label();
             lblTitle.Dock = DockStyle.Left;
-            lblTitle.Width = 68;
+            lblTitle.Width = 60;
             lblTitle.AutoSize = false;
             lblTitle.Text = "输出结果";
             lblTitle.TextAlign = ContentAlignment.MiddleLeft;
+
+            btnZoom = new UiButton();
+            btnZoom.Dock = DockStyle.Right;
+            btnZoom.Width = 52;
+            btnZoom.Text = "放大";
+            btnZoom.Kind = UiButtonKind.Neutral;
+            btnZoom.Click += OnZoomClicked;
 
             lblNode = new Label();
             lblNode.Dock = DockStyle.Fill;
             lblNode.AutoEllipsis = true;
             lblNode.TextAlign = ContentAlignment.MiddleLeft;
 
-            panelHead.Controls.Add(lblNode);    // 先加 → 占满剩余
-            panelHead.Controls.Add(lblTitle);   // 后加 → 逆序停靠，排到最左
+            // 逆序停靠：先加 Fill，再加两侧
+            panelHead.Controls.Add(lblNode);
+            panelHead.Controls.Add(btnZoom);
+            panelHead.Controls.Add(lblTitle);
 
-            // ---- 中部：结果表格 ----
-            grid = new DataGridView();
-            grid.Dock = DockStyle.Fill;
-            grid.ReadOnly = true;
-            grid.AllowUserToAddRows = false;
-            grid.AllowUserToDeleteRows = false;
-            grid.AllowUserToOrderColumns = false;
-            grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            grid.MultiSelect = false;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            grid.ScrollBars = ScrollBars.Both;
-            grid.CellClick += OnGridCellClick;
-            grid.SelectionChanged += OnGridSelectionChanged;
-
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colItem", HeaderText = "项目", FillWeight = 22f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colValue", HeaderText = "值", FillWeight = 34f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colX", HeaderText = "X", FillWeight = 11f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colY", HeaderText = "Y", FillWeight = 11f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colW", HeaderText = "宽", FillWeight = 11f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colH", HeaderText = "高", FillWeight = 11f });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colRemark", HeaderText = "备注", FillWeight = 18f });
+            // ---- 中部：行容器（一节点一行 + 展开明细）----
+            rows = new FlowLayoutPanel();
+            rows.Dock = DockStyle.Fill;
+            rows.FlowDirection = FlowDirection.TopDown;
+            rows.WrapContents = false;
+            rows.AutoScroll = true;
+            rows.Padding = new Padding(0);
+            rows.Margin = new Padding(0);
+            rows.Resize += OnRowsResize;
 
             // ---- 底条：整链结论 OK/NG + 链尾摘要 ----
             panelFoot = new Panel();
             panelFoot.Dock = DockStyle.Bottom;
-            panelFoot.Height = 48;
-            panelFoot.Padding = new Padding(6, 4, 6, 4);
+            panelFoot.Height = 44;
+            panelFoot.Padding = new Padding(6, 2, 6, 2);
 
             lblVerdict = new Label();
             lblVerdict.Dock = DockStyle.Left;
@@ -128,15 +194,15 @@ namespace VisionPlatform.UI
             panelFoot.Controls.Add(lblChain);
             panelFoot.Controls.Add(lblVerdict);
 
-            // 逆序停靠：panelHead(Top) → panelFoot(Bottom) → grid(Fill)
-            Controls.Add(grid);
+            // 逆序停靠：rows(Fill) → panelFoot(Bottom) → panelHead(Top)
+            Controls.Add(rows);
             Controls.Add(panelFoot);
             Controls.Add(panelHead);
 
             ResumeLayout(false);
         }
 
-        /// <summary>运行时重套主题（切换深浅色板时由 <c>FlowForm.RefreshTheme</c> 调用）。</summary>
+        /// <summary>运行时重套主题（切换深浅色板时由 <see cref="FlowForm"/> 调用）。</summary>
         public void ApplyTheme()
         {
             BackColor = UiTheme.ColorPanelBg;
@@ -150,89 +216,101 @@ namespace VisionPlatform.UI
             lblNode.Font = UiTheme.FontBody;
             lblNode.BackColor = UiTheme.ColorHeaderBg;
 
+            rows.BackColor = UiTheme.ColorPanelBg;
+
             panelFoot.BackColor = UiTheme.ColorPanelBg;
             lblChain.ForeColor = UiTheme.ColorTextSecondary;
             lblChain.Font = UiTheme.FontBody;
             lblChain.BackColor = UiTheme.ColorPanelBg;
 
-            UiGrid.Apply(grid);
-
-            // 右栏只有 ~288px 宽，7 列按 Fill 挤会把数值压成「12…」，改为固定列宽 + 横向滚动
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-            grid.ScrollBars = ScrollBars.Both;
-            ColumnWidth("colItem", 96);
-            ColumnWidth("colValue", 150);
-            ColumnWidth("colX", 60);
-            ColumnWidth("colY", 60);
-            ColumnWidth("colW", 58);
-            ColumnWidth("colH", 58);
-            ColumnWidth("colRemark", 90);
-
             // 结论徽标的语义色必须最后覆盖：UiStyle 遍历普通 Label 时会把前景色统一成主文本色
             UiTheme.StyleBadge(lblVerdict, _verdict);
             lblChain.Text = _chainText;
+
+            foreach (Control c in rows.Controls)
+            {
+                var row = c as FlowResultRow;
+                if (row != null) row.ApplyTheme();
+            }
         }
 
-        private void ColumnWidth(string name, int width)
+        /// <summary>切换放大态（宿主改完高度后调用；这里只更新按钮文案）。</summary>
+        public void SetZoomed(bool zoomed)
         {
-            DataGridViewColumn col = grid.Columns[name];
-            if (col != null) col.Width = width;
+            _zoomed = zoomed;
+            btnZoom.Text = zoomed ? "恢复" : "放大";
         }
 
         // =====================================================================
-        //  数据刷新
+        //  数据
         // =====================================================================
 
-        /// <summary>用一次节点快照重建结果行。节点级信息与图形级信息都进同一张表。</summary>
-        public void Apply(FlowProgressSnapshot snap)
+        /// <summary>
+        /// 吃进一个节点快照：更新缓存（每节点只留最近一次），若当前正在显示该节点则刷新界面。
+        /// <para>缩略帧按"每节点每 400ms 最多重建一次"节流：连续运行时每帧都重建会把 UI 拖垮。</para>
+        /// </summary>
+        /// <param name="type">节点类型；决定主判据文案（T07 填好 Metrics 后此处才真正生效）。</param>
+        public void Apply(FlowProgressSnapshot snap, FlowNodeType type = FlowNodeType.ResultOutput)
         {
             if (snap == null) { Clear(); return; }
 
-            _nodeId = snap.NodeId ?? "";
-
-            lblNode.Text = string.Format(CultureInfo.InvariantCulture,
-                "第 {0}/{1} 个节点：{2}　{3}　{4} ms",
-                snap.Index, snap.Total, snap.NodeName, StatusText(snap.Status), snap.ElapsedMs);
-
-            BeginRebuild();
-            try
+            NodeResultCache c = GetCache(snap.NodeId);
+            bool isNew = c == null;
+            if (c == null)
             {
-                _rowShapeIndex.Clear();
-
-                AddRow(null, -1, "节点", snap.NodeName, "", "", "", "",
-                       string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 个", snap.Index, snap.Total));
-                AddRow(null, -1, "状态", StatusText(snap.Status), "", "", "", "",
-                       snap.ElapsedMs + " ms");
-                if (!string.IsNullOrEmpty(snap.Summary))
-                    AddRow(null, -1, "摘要", OneLine(snap.Summary), "", "", "", "", "");
-
-                int n = 0;
-                if (snap.Shapes != null)
-                {
-                    foreach (IGeometryShape s in snap.Shapes)
-                    {
-                        if (s == null) continue;
-                        // 序号从 0 起，与预览区加入视图的顺序一致（两边同样跳过 null）
-                        RectangleF b = s.Bounds;
-                        AddRow(s, n, "图形 " + (n + 1), ValueOf(s),
-                               Num(b.X), Num(b.Y), Num(b.Width), Num(b.Height),
-                               string.IsNullOrEmpty(s.Name) ? s.GetType().Name : s.Name);
-                        n++;
-                    }
-                }
-
-                if (n == 0)
-                    AddRow(null, -1, "（该节点没有图形输出）", "", "", "", "", "", "");
+                c = new NodeResultCache();
+                if (!string.IsNullOrEmpty(snap.NodeId)) _cache[snap.NodeId] = c;
             }
-            finally
+
+            c.NodeId = snap.NodeId ?? "";
+            c.NodeName = snap.NodeName ?? "";
+            c.Type = type;
+            c.Index = snap.Index;
+            c.Total = snap.Total;
+            c.Status = snap.Status;
+            c.ElapsedMs = snap.ElapsedMs;
+            c.Summary = snap.Summary ?? "";
+            c.RunAt = DateTime.Now;
+            if (snap.Metrics != null) c.Metrics = snap.Metrics;
+
+            // 辅助图形：只用于画布绘制（轮廓开关），永不进明细行
+            c.AuxShapes = (snap.AuxShapes != null)
+                ? new List<IGeometryShape>(snap.AuxShapes)
+                : new List<IGeometryShape>();
+
+            // 图形：拷贝 + 截断（不能持有会话里那个列表的引用，它会被会话释放或复用）
+            var copy = new List<IGeometryShape>();
+            bool truncated = false;
+            if (snap.Shapes != null)
             {
-                EndRebuild();
+                foreach (IGeometryShape s in snap.Shapes)
+                {
+                    if (s == null) continue;
+                    if (copy.Count >= NodeResultCache.MaxShapes) { truncated = true; break; }
+                    copy.Add(s);
+                }
+            }
+            c.Shapes = copy;
+            c.ShapesTruncated = truncated;
+
+            TryUpdateThumbnail(c, isNew);
+
+            // 显示规则：正在看这个节点 → 刷新；没选中节点（跟随最新）→ 切到最新快照的节点
+            if (string.IsNullOrEmpty(_shownNodeId))
+            {
+                _shownNodeId = c.NodeId;
+                _shownNodeName = c.NodeName;
+                Render();
+            }
+            else if (string.Equals(_shownNodeId, c.NodeId, StringComparison.Ordinal))
+            {
+                Render();
             }
 
             if (snap.IsChainEnd) ApplyVerdict(snap);
         }
 
-        /// <summary>只刷新底部整链结论（用于「当前看的是某个节点，但整链跑完了」的情况）。</summary>
+        /// <summary>只刷新底部整链结论（"看的是某个节点，但整链跑完了"时用）。</summary>
         public void ApplyVerdict(FlowProgressSnapshot snap)
         {
             if (snap == null) return;
@@ -244,75 +322,226 @@ namespace VisionPlatform.UI
             lblChain.Text = _chainText;
         }
 
-        /// <summary>清空全部内容（换流程 / 换选中节点时调用）。</summary>
+        /// <summary>
+        /// 切换到某个节点：<strong>直接从缓存回填，不清空再填</strong>
+        /// （先 Clear 再填会有一次可见的空白闪烁，PRD 5.2 明令禁止）。
+        /// </summary>
+        public void ShowNode(string nodeId, string nodeName)
+        {
+            _shownNodeId = nodeId ?? "";
+            _shownNodeName = nodeName ?? "";
+
+            // 记录"被点开过"：只有这些节点才值得为它抓一张缩略帧（见 _openedNodes 注释）
+            if (!string.IsNullOrEmpty(_shownNodeId)) _openedNodes.Add(_shownNodeId);
+
+            Render();
+        }
+
+        /// <summary>清空全部内容与缓存（换流程时调用）。</summary>
         public void Clear()
         {
-            lblNode.Text = "等待运行…";
+            foreach (NodeResultCache c in _cache.Values)
+            {
+                if (c != null) c.ReleaseThumbnail();
+            }
+            _cache.Clear();
+            _thumbAt.Clear();
+            _openedNodes.Clear();
 
-            BeginRebuild();
-            try { grid.Rows.Clear(); _rowShapeIndex.Clear(); }
-            finally { EndRebuild(); }
+            _shownNodeId = "";
+            _shownNodeName = "";
+            _expandedNodeId = "";
 
-            _nodeId = "";
+            if (lblNode != null) lblNode.Text = "等待运行…";
+
+            if (rows != null)
+            {
+                while (rows.Controls.Count > 0)
+                {
+                    Control c = rows.Controls[0];
+                    rows.Controls.RemoveAt(0);
+                    c.Dispose();
+                }
+            }
 
             _verdict = UiVerdict.None;
             _chainText = "";
-            UiTheme.StyleBadge(lblVerdict, _verdict);
-            lblChain.Text = "";
+            if (lblVerdict != null) UiTheme.StyleBadge(lblVerdict, _verdict);
+            if (lblChain != null) lblChain.Text = "";
 
-            FireShapeSelected("", -1);      // 换流程 / 换节点：旧高亮一并撤掉，避免残留在别的节点上
-        }
-
-        private void BeginRebuild()
-        {
-            _suppressSelection = true;
-        }
-
-        private void EndRebuild()
-        {
-            _suppressSelection = false;
-        }
-
-        /// <summary>
-        /// 加一行。<paramref name="shape"/> 仍挂到 <c>Row.Tag</c>（点选当帧可立刻按实例高亮），
-        /// <paramref name="shapeIndex"/> 另记一份到 <see cref="_rowShapeIndex"/>（非图形行传 -1）。
-        /// </summary>
-        private void AddRow(IGeometryShape shape, int shapeIndex, string item, string value,
-                            string x, string y, string w, string h, string remark)
-        {
-            int i = grid.Rows.Add(item, value, x, y, w, h, remark);
-            grid.Rows[i].Tag = shape;
-            _rowShapeIndex.Add(shapeIndex);
+            FireShapeSelected("", -1);      // 换流程：旧高亮一并撤掉
         }
 
         // =====================================================================
-        //  行 → 图形高亮
+        //  渲染
         // =====================================================================
 
-        private void OnGridCellClick(object sender, DataGridViewCellEventArgs e)
+        private void Render()
         {
-            if (e == null || e.RowIndex < 0 || e.RowIndex >= grid.Rows.Count) return;
-            RaiseShapeSelected(e.RowIndex);
+            NodeResultCache c = GetCache(_shownNodeId);
+
+            if (c == null)
+            {
+                lblNode.Text = string.IsNullOrEmpty(_shownNodeName)
+                    ? "等待运行…"
+                    : _shownNodeName + "　尚未运行";
+                RebuildRows(null);
+                return;
+            }
+
+            lblNode.Text = string.Format(CultureInfo.InvariantCulture,
+                "{0}　第 {1}/{2} 个　{3} ms",
+                c.NodeName, c.Index, c.Total, c.ElapsedMs);
+
+            RebuildRows(c);
         }
 
-        private void OnGridSelectionChanged(object sender, EventArgs e)
+        private void RebuildRows(NodeResultCache c)
         {
-            if (_suppressSelection) return;                 // Rows.Clear() / 重建期间不响应
+            SuspendLayout();
+            rows.SuspendLayout();
 
-            DataGridViewRow row = grid.CurrentRow;
-            RaiseShapeSelected(row != null ? row.Index : -1);
+            while (rows.Controls.Count > 0)
+            {
+                Control old = rows.Controls[0];
+                rows.Controls.RemoveAt(0);
+                old.Dispose();
+            }
+
+            bool hasResult = c != null;
+            bool expanded = c != null && !string.IsNullOrEmpty(_expandedNodeId)
+                            && string.Equals(_expandedNodeId, c.NodeId, StringComparison.Ordinal);
+
+            FlowResultRow main = FlowResultRow.CreateMain();
+            main.RowClicked += OnMainRowClicked;
+
+            string primary = c != null
+                ? NodeResultText.Primary(c.Type, c.Metrics, c.ElapsedMs, c.Summary)
+                : "";
+
+            main.ApplyMain(c != null ? c.Index : 0,
+                           c != null ? c.NodeName
+                                     : (string.IsNullOrEmpty(_shownNodeName) ? "（未选择节点）" : _shownNodeName),
+                           c != null ? c.Status : FlowNodeStatus.Pending,
+                           primary,
+                           c != null ? c.ElapsedMs : -1,
+                           c != null ? c.RunAt : DateTime.MinValue,
+                           expanded,
+                           hasResult);
+            rows.Controls.Add(main);
+
+            if (expanded && c != null && c.Shapes != null && c.Shapes.Count > 0)
+            {
+                int limit = Math.Min(c.Shapes.Count, MaxDetailRows);
+                for (int i = 0; i < limit; i++)
+                {
+                    FlowResultRow detail = FlowResultRow.CreateDetail(i);
+                    detail.ApplyDetail(i + 1, DescribeShape(c.Shapes[i]));
+                    detail.RowClicked += OnDetailRowClicked;
+                    rows.Controls.Add(detail);
+                }
+
+                if (c.Shapes.Count > limit || c.ShapesTruncated)
+                {
+                    FlowResultRow more = FlowResultRow.CreateDetail(-1);
+                    more.ApplyDetail(0, "（共 " + c.Shapes.Count + " 条，仅显示前 " + limit + " 条）");
+                    rows.Controls.Add(more);
+                }
+            }
+            else if (expanded && c != null)
+            {
+                FlowResultRow none = FlowResultRow.CreateDetail(-1);
+                none.ApplyDetail(0, "该节点没有可定位的目标");
+                rows.Controls.Add(none);
+            }
+
+            LayoutRows();
+
+            rows.ResumeLayout(true);
+            ResumeLayout(true);
+        }
+
+        private void OnRowsResize(object sender, EventArgs e)
+        {
+            LayoutRows();
         }
 
         /// <summary>
-        /// 按行号发高亮请求：图形行发（节点 Id、图形序号），非图形行 / 空行发（""、-1）表示取消。
+        /// 统一设置行宽：<strong>行宽 = 容器可用宽 - 竖直滚动条</strong>。
+        /// 这是"288px 内容宽不出现横向滚动"的落地手段 —— 行从不比容器宽，自然没有横向滚动。
         /// </summary>
-        private void RaiseShapeSelected(int rowIndex)
+        private void LayoutRows()
         {
-            if (rowIndex < 0 || rowIndex >= _rowShapeIndex.Count) { FireShapeSelected("", -1); return; }
+            if (rows == null) return;
 
-            int shapeIndex = _rowShapeIndex[rowIndex];
-            if (shapeIndex >= 0 && _nodeId.Length > 0) FireShapeSelected(_nodeId, shapeIndex);
-            else FireShapeSelected("", -1);
+            // 【为什么"总是"预留竖直滚动条宽度】若按 VerticalScroll.Visible 动态扣，
+            // 会出现"先按无滚动条算宽 → 行变宽 → 撑出横向滚动条 → 宽度又变 → 滚动条消失"的来回抖动，
+            // 结果就是横向滚动条一会儿有一会儿没有（探针里表现为 60 行时冒出来）。
+            // 恒定预留 17px，代价是行略窄，收益是"永远不出现横向滚动"这个硬约束成立。
+            int avail = rows.ClientSize.Width - SystemInformation.VerticalScrollBarWidth;
+            if (avail < 60) avail = rows.ClientSize.Width;
+            if (avail < 60) return;
+
+            bool showTime = avail >= 280;   // 窄宽度（150% DPI）下优先牺牲时间戳
+            foreach (Control c in rows.Controls)
+            {
+                c.Width = Math.Max(60, avail - 2);
+                var row = c as FlowResultRow;
+                if (row != null) row.ShowTimestamp(showTime);
+            }
+        }
+
+        // =====================================================================
+        //  行 → 高亮（C5 四条断言的落点）
+        // =====================================================================
+
+        /// <summary>
+        /// 主行点击：<strong>有目标就高亮第 1 个</strong>（C5-a），无目标则清除高亮（C5-d）。
+        /// 同时切换展开态。
+        /// </summary>
+        private void OnMainRowClicked(object sender, EventArgs e)
+        {
+            NodeResultCache c = GetCache(_shownNodeId);
+
+            if (c == null || c.Shapes == null || c.Shapes.Count == 0)
+            {
+                // C5-d：无结果节点 —— 清除所有高亮，不弹异常、不写错误日志
+                FireShapeSelected("", -1);
+                return;
+            }
+
+            _expandedNodeId = string.Equals(_expandedNodeId, c.NodeId, StringComparison.Ordinal)
+                ? "" : c.NodeId;
+            Render();
+
+            // C5-a：点主行 → 只高亮第 1 个（序号 0）
+            FireShapeSelected(c.NodeId, 0);
+        }
+
+        /// <summary>
+        /// 明细行点击：高亮第 k 个目标（C5-b / C5-c）。
+        /// 每次都以新序号重设高亮，而 <c>ImageViewer.SelectShape</c> 会先取消其它图形 ——
+        /// 所以"越点越多"在结构上不可能发生。
+        /// </summary>
+        private void OnDetailRowClicked(object sender, EventArgs e)
+        {
+            var row = sender as FlowResultRow;
+            if (row == null || row.DetailIndex < 0) return;
+
+            NodeResultCache c = GetCache(_shownNodeId);
+            if (c == null || c.Shapes == null || row.DetailIndex >= c.Shapes.Count)
+            {
+                FireShapeSelected("", -1);
+                return;
+            }
+
+            FireShapeSelected(c.NodeId, row.DetailIndex);
+        }
+
+        private void OnZoomClicked(object sender, EventArgs e)
+        {
+            EventHandler h = ZoomClicked;
+            if (h != null) h(this, EventArgs.Empty);
         }
 
         private void FireShapeSelected(string nodeId, int shapeIndex)
@@ -322,37 +551,97 @@ namespace VisionPlatform.UI
         }
 
         // =====================================================================
-        //  取数辅助
+        //  缩略帧
         // =====================================================================
 
-        /// <summary>图形的「值」列：有标签（检测框 / 字符框）用标签，否则用几何串。</summary>
-        private static string ValueOf(IGeometryShape s)
+        private void TryUpdateThumbnail(NodeResultCache c, bool isNew)
         {
-            var rect = s as RectangleShape;
-            if (rect != null && !string.IsNullOrEmpty(rect.Label)) return rect.Label;
+            if (c == null || _frameProvider == null) return;
 
-            string geo = s.ToGeometryString();
-            return string.IsNullOrEmpty(geo) ? (string.IsNullOrEmpty(s.Name) ? s.GetType().Name : s.Name) : geo;
-        }
+            // 按需生成：只有被点开过的节点才抓（否则每帧 5 个节点 × 5MP 降采样，超预算）
+            if (string.IsNullOrEmpty(c.NodeId) || !_openedNodes.Contains(c.NodeId)) return;
 
-        private static string StatusText(FlowNodeStatus status)
-        {
-            switch (status)
+            DateTime last;
+            bool hasAt = _thumbAt.TryGetValue(c.NodeId ?? "", out last);
+            bool due = isNew || c.Thumbnail == null || !hasAt
+                       || (DateTime.Now - last).TotalMilliseconds >= ThumbRebuildIntervalMs;
+            if (!due) return;
+
+            Bitmap frame = null;
+            try
             {
-                case FlowNodeStatus.Running: return "运行中";
-                case FlowNodeStatus.Ok: return "OK";
-                case FlowNodeStatus.Ng: return "NG";
-                case FlowNodeStatus.Skipped: return "跳过";
-                default: return "未执行";
+                frame = _frameProvider();
+            }
+            catch (Exception)
+            {
+                frame = null;   // 取帧失败不影响结果区（缩略帧只是"锦上添花"）
+            }
+            if (frame == null) return;
+
+            try
+            {
+                Bitmap thumb = ThumbGeometry.BuildThumbnail(frame);
+                if (thumb == null) return;
+
+                c.ReleaseThumbnail();
+                c.Thumbnail = thumb;
+                c.ThumbDivisor = ThumbGeometry.ThumbScale;
+                c.SourceWidth = frame.Width;
+                c.SourceHeight = frame.Height;
+                _thumbAt[c.NodeId ?? ""] = DateTime.Now;
+            }
+            catch (Exception)
+            {
+                // 缩略帧失败不影响主流程；下一次快照会重试
             }
         }
 
-        private static string Num(float v)
+        // =====================================================================
+        //  取数辅助
+        // =====================================================================
+
+        /// <summary>明细行文本：目标的关键几何/数值，压成一行（288px 内不换行）。</summary>
+        private static string DescribeShape(IGeometryShape s)
         {
-            return v.ToString("F2", CultureInfo.InvariantCulture);
+            if (s == null) return "";
+
+            var rect = s as RectangleShape;
+            if (rect != null)
+            {
+                string label = string.IsNullOrEmpty(rect.Label) ? "" : rect.Label + "　";
+                return string.Format(CultureInfo.InvariantCulture, "{0}({1:0},{2:0}) {3:0}×{4:0}",
+                    label, rect.X, rect.Y, rect.Width, rect.Height);
+            }
+
+            var rr = s as RotatedRectShape;
+            if (rr != null)
+            {
+                string label = string.IsNullOrEmpty(rr.Label) ? "" : rr.Label + "　";
+                return string.Format(CultureInfo.InvariantCulture,
+                    "{0}({1:0},{2:0}) {3:0}×{4:0} {5:0.0}°",
+                    label, rr.Center.X, rr.Center.Y, rr.Width, rr.Height, rr.AngleDeg);
+            }
+
+            var line = s as LineSegmentShape;
+            if (line != null)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "({0:0},{1:0})→({2:0},{3:0})",
+                    line.P1.X, line.P1.Y, line.P2.X, line.P2.Y);
+            }
+
+            var circle = s as CircleShape;
+            if (circle != null)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "C=({0:0},{1:0}) R={2:0}",
+                    circle.Center.X, circle.Center.Y, circle.Radius);
+            }
+
+            string geo = s.ToGeometryString();
+            if (!string.IsNullOrEmpty(geo)) return geo;
+            return string.IsNullOrEmpty(s.Name) ? s.GetType().Name : s.Name;
         }
 
-        /// <summary>摘要压成一行（表格单元格不显示换行）。</summary>
+        /// <summary>摘要压成一行（行控件不显示换行）。</summary>
         private static string OneLine(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
@@ -360,6 +649,30 @@ namespace VisionPlatform.UI
             string s = text.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
             while (s.Contains("  ")) s = s.Replace("  ", " ");
             return s.Trim();
+        }
+
+        // =====================================================================
+        //  探针支撑：让 SmokeUi 不点鼠标也能走完 C5
+        // =====================================================================
+
+        /// <summary>模拟点击主行（仅测试用）。</summary>
+        public void SimulateMainRowClick()
+        {
+            OnMainRowClicked(this, EventArgs.Empty);
+        }
+
+        /// <summary>模拟点击明细第 <paramref name="index"/> 条（从 0 起，仅测试用）。</summary>
+        public void SimulateDetailRowClick(int index)
+        {
+            FlowResultRow row = FlowResultRow.CreateDetail(index);
+            try
+            {
+                OnDetailRowClicked(row, EventArgs.Empty);
+            }
+            finally
+            {
+                row.Dispose();
+            }
         }
     }
 }

@@ -44,6 +44,17 @@ namespace VisionPlatform.UI
         private string _infoBeforeRoi = "";                         // 进入拖框前的顶条文本，退出时还原
         private DrawSpec _drawSpec;                                 // 当前要画的几何（矩形/直线/圆环）；null 视为矩形（兼容旧 BeginRoiPick）
 
+        // 旋转矩形的「编辑态」：画完不退出，用户可继续拖 8 个手柄改尺寸/角度（FR-07）。
+        // 编辑期间必须保持 _roiPicking = true —— 否则 OnPullTick 会用运行帧把 ROI 冲掉。
+        private bool _editingRotated;
+        private RotatedRectShape _editShape;                        // 编辑中的那个实例（就在 viewer.Shapes 里）
+
+        // FR-12：选中节点时叠加的 ROI 轮廓。ShowFrame 每 33 ms ClearShapes + 重新 Add，
+        // 因此这里存的是「模板」，真图形每帧重放（与 _hlNodeId 的高亮机制同理）。
+        private RotatedRectShape _roiOutline;
+        private string _roiOutlineLabel = "";
+        private RotatedRectShape _roiOutlineShape;                  // 当前已加进 viewer 的那一个
+
         // 结果表格点行后要突出的目标。ShowFrame 每 33ms 会 ClearShapes + 重新 Add，
         // 高亮会被冲掉，故记在这里、每次 ShowFrame 末尾重新施加（见 ShowFrame）。
         //
@@ -61,20 +72,36 @@ namespace VisionPlatform.UI
         private ComboBox cmbMode;
         private Label lblInfo;
         private CheckBox chkPauseAuto;
+        private CheckBox chkContour;
         private UiButton btnDrawRoi;
+        private UiButton btnLabelDetail;
         private UiButton btnLoadImage;
+
+        /// <summary>当前帧要画的两组图形：检测目标 + 辅助几何（ROI 轮廓 / OCR 区域）。</summary>
+        private List<IGeometryShape> _curShapes = new List<IGeometryShape>();
+        private List<IGeometryShape> _curAux = new List<IGeometryShape>();
+
+        /// <summary>「轮廓」开关：只控制标记为 <see cref="FlowShapes.AuxContourName"/> 的辅助几何。</summary>
+        private bool _showContour = true;
+
         private Panel panelView;
         private ImageViewer viewer;
         private Label lblEmpty;
         private Label lblVerdict;
         private Label lblSummary;
         private System.ComponentModel.IContainer components;
+        private ToolTip toolTip;
         private Timer pullTimer;
 
         public FlowPreviewPanel()
         {
             InitializeComponent();
             ApplyTheme();
+
+            // 标注详细度是全局偏好：启动时从配置取一次，按钮文案跟着走
+            ShapeLabelStyle.Reload();
+            UpdateLabelDetailButton();
+            _showContour = (chkContour == null) || chkContour.Checked;
         }
 
         #region 控件构建
@@ -86,7 +113,9 @@ namespace VisionPlatform.UI
             this.panelTop = new System.Windows.Forms.Panel();
             this.lblInfo = new System.Windows.Forms.Label();
             this.chkPauseAuto = new System.Windows.Forms.CheckBox();
+            this.chkContour = new System.Windows.Forms.CheckBox();
             this.btnDrawRoi = new VisionPlatform.UI.UiButton();
+            this.btnLabelDetail = new VisionPlatform.UI.UiButton();
             this.btnLoadImage = new VisionPlatform.UI.UiButton();
             this.cmbMode = new System.Windows.Forms.ComboBox();
             this.panelView = new System.Windows.Forms.Panel();
@@ -94,6 +123,7 @@ namespace VisionPlatform.UI
             this.lblEmpty = new System.Windows.Forms.Label();
             this.lblVerdict = new System.Windows.Forms.Label();
             this.lblSummary = new System.Windows.Forms.Label();
+            this.toolTip = new System.Windows.Forms.ToolTip(this.components);
             this.pullTimer = new System.Windows.Forms.Timer(this.components);
             this.panelTop.SuspendLayout();
             this.panelView.SuspendLayout();
@@ -103,7 +133,9 @@ namespace VisionPlatform.UI
             // 
             this.panelTop.Controls.Add(this.lblInfo);
             this.panelTop.Controls.Add(this.chkPauseAuto);
+            this.panelTop.Controls.Add(this.chkContour);
             this.panelTop.Controls.Add(this.btnDrawRoi);
+            this.panelTop.Controls.Add(this.btnLabelDetail);
             this.panelTop.Controls.Add(this.btnLoadImage);
             this.panelTop.Controls.Add(this.cmbMode);
             this.panelTop.Dock = System.Windows.Forms.DockStyle.Top;
@@ -129,9 +161,39 @@ namespace VisionPlatform.UI
             this.chkPauseAuto.Dock = System.Windows.Forms.DockStyle.Right;
             this.chkPauseAuto.Location = new System.Drawing.Point(344, 2);
             this.chkPauseAuto.Name = "chkPauseAuto";
-            this.chkPauseAuto.Size = new System.Drawing.Size(116, 24);
+            // 文案压到 4 个字：顶条现在要多放「轮廓」「标注·标准」两个开关，
+            // 保留 116px 会把中间的节点信息（lblInfo）挤到只剩几十像素。
+            this.chkPauseAuto.Size = new System.Drawing.Size(88, 24);
             this.chkPauseAuto.TabIndex = 1;
-            this.chkPauseAuto.Text = "暂停自动刷新";
+            this.chkPauseAuto.Text = "暂停刷新";
+            // 
+            // chkContour
+            // 
+            // 「轮廓」开关：只控制 ROI 轮廓 / 卡尺窗口这类"输入几何"。
+            // OCR 的区域框与合并字符串框不受它影响 —— 否则取消勾选会把"在识别哪一块"一起关掉。
+            this.chkContour.Checked = true;
+            this.chkContour.Dock = System.Windows.Forms.DockStyle.Right;
+            this.chkContour.Location = new System.Drawing.Point(280, 2);
+            this.chkContour.Name = "chkContour";
+            this.chkContour.Size = new System.Drawing.Size(64, 24);
+            this.chkContour.TabIndex = 6;
+            this.chkContour.Text = "轮廓";
+            // 
+            // btnLabelDetail
+            // 
+            // 标注详细度：点一下循环 简 → 标准 → 详细（全局记忆，见 UiSettings.FlowLabelDetail）
+            this.btnLabelDetail.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnLabelDetail.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnLabelDetail.Dock = System.Windows.Forms.DockStyle.Right;
+            this.btnLabelDetail.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnLabelDetail.Font = new System.Drawing.Font("微软雅黑", 10F, System.Drawing.FontStyle.Bold);
+            this.btnLabelDetail.ForeColor = System.Drawing.Color.White;
+            this.btnLabelDetail.Kind = VisionPlatform.UI.UiButtonKind.Grab;
+            this.btnLabelDetail.Location = new System.Drawing.Point(200, 2);
+            this.btnLabelDetail.Name = "btnLabelDetail";
+            this.btnLabelDetail.Size = new System.Drawing.Size(80, 24);
+            this.btnLabelDetail.TabIndex = 7;
+            this.btnLabelDetail.Text = "标注·标准";
             // 
             // btnDrawRoi
             // 
@@ -205,6 +267,18 @@ namespace VisionPlatform.UI
             this.viewer.ShapeCreated += this.OnViewerShapeCreated;
             // Esc 取消拖框（控件自身只取消当前拖拽，不退出我们的取框状态）
             this.viewer.KeyDown += this.OnViewerKeyDown;
+            // ★ 顶条三个控件的订阅也曾被 VS 重序列化吞掉（同 pullTimer.Tick 那次）：
+            //   丢了的表现是「点『画 ROI』毫无反应」——RoiPickRequested 没有订阅者，
+            //   就永远进不了 BeginDraw，_roiPicking 也就永远为 false（DEF-01 的根因）。
+            this.btnDrawRoi.Click += this.OnDrawRoiClick;
+            this.btnLoadImage.Click += this.OnLoadImageClick;
+            this.chkPauseAuto.CheckedChanged += this.OnPauseAutoChanged;
+            this.chkContour.CheckedChanged += this.OnContourChanged;
+            this.btnLabelDetail.Click += this.OnLabelDetailClick;
+            // 旋转矩形编辑态：拖动过程只刷标签（ShapesChanged），松手才落盘一次（ShapeCommitted）。
+            this.viewer.ShapesChanged += this.OnViewerShapesChanged;
+            this.viewer.ShapeCommitted += this.OnViewerShapeCommitted;
+            this.viewer.MouseUp += this.OnViewerMouseUp;
             // 
             // lblEmpty
             // 
@@ -230,6 +304,8 @@ namespace VisionPlatform.UI
             this.lblSummary.Name = "lblSummary";
             this.lblSummary.Size = new System.Drawing.Size(560, 22);
             this.lblSummary.TabIndex = 0;
+            // 覆盖层与顶条同源：长文本必须省略号收尾，不能撑出画面（UI-R09 三处文案一致）
+            this.lblSummary.AutoEllipsis = true;
             this.lblSummary.Visible = false;
             // 
             // pullTimer
@@ -271,6 +347,9 @@ namespace VisionPlatform.UI
             chkPauseAuto.ForeColor = UiTheme.ColorTextSecondary;
             chkPauseAuto.Font = UiTheme.FontBody;
 
+            chkContour.ForeColor = UiTheme.ColorTextSecondary;
+            chkContour.Font = UiTheme.FontBody;
+
             // btnLoadImage 是 UiButton（GDI+ 自绘）：填充 / 字体 / 前景全部由控件自身取自
             // UiTheme（FillColor + FontButton），此处不再覆盖，避免双重着色。
 
@@ -289,6 +368,11 @@ namespace VisionPlatform.UI
             lblSummary.ForeColor = UiTheme.ColorTextPrimary;
             lblSummary.Font = UiTheme.FontMono;
 
+            // 自绘叠加层（ROI 轮廓 / 编辑中的旋转矩形）用的是固定 StrokeColor，换色板后要重取；
+            // 轮廓图形本身每帧会重建，这里主要管「正在编辑」和「已加进视图」的那两个。
+            if (_roiOutlineShape != null) _roiOutlineShape.StrokeColor = UiTheme.ColorAccent;
+            if (_editShape != null) _editShape.StrokeColor = UiTheme.ColorAccent;
+
             UiTheme.StyleViewBadge(lblVerdict, UiVerdict.None);
         }
 
@@ -301,6 +385,40 @@ namespace VisionPlatform.UI
         {
             _controller = controller;
         }
+
+        /// <summary>
+        /// 「轮廓」开关状态：控制 ROI 轮廓 / 卡尺投影窗口这类<strong>输入几何</strong>的显隐。
+        /// <para>OCR 的区域框与合并字符串框<strong>不受它影响</strong>（它们的开关在节点参数里），
+        /// 否则取消勾选「轮廓」会把"OCR 在识别哪一块"一起关掉 —— 那正好是本次要治的"看不清结果"。</para>
+        /// </summary>
+        public bool ShowContour
+        {
+            get { return _showContour; }
+            set
+            {
+                if (_showContour == value) return;
+                _showContour = value;
+                if (chkContour != null && chkContour.Checked != value)
+                {
+                    // 直接改 Checked 会再触发一次 CheckedChanged，用标记避免递归重绘
+                    chkContour.CheckedChanged -= OnContourChanged;
+                    chkContour.Checked = value;
+                    chkContour.CheckedChanged += OnContourChanged;
+                }
+                RebuildShapes();
+            }
+        }
+
+        /// <summary>设置标注详细度（1 简 / 2 标准 / 3 详细）并立即重绘。</summary>
+        public void SetLabelDetail(int level)
+        {
+            ShapeLabelStyle.Current = UiSettings.NormalizeLabelDetail(level);
+            UpdateLabelDetailButton();
+            RebuildShapes();
+        }
+
+        /// <summary>当前标注详细度。</summary>
+        public int LabelDetail { get { return ShapeLabelStyle.Current; } }
 
         /// <summary>设置当前选中节点 Id（「选中节点」模式下只显示该节点的输出）。</summary>
         public void SetSelectedNodeId(string nodeId)
@@ -344,6 +462,34 @@ namespace VisionPlatform.UI
             get { return !viewer.ImageSize.IsEmpty; }
         }
 
+        /// <summary>
+        /// 预览区当前显示的图像（供"抓取当前帧做模板"取用）。
+        /// <para>
+        /// <strong>不转移所有权</strong>：位图仍归视图，换图 / 清图时会被释放。
+        /// 调用方要用请自己 <c>Clone()</c> —— 直接把引用拿走并在别处长期持有，
+        /// 会得到"随机 GDI+ 对象当前正在使用"这类崩溃。
+        /// </para>
+        /// </summary>
+        public Bitmap DisplayedImage
+        {
+            get { return viewer != null ? viewer.Image : null; }
+        }
+
+        /// <summary>
+        /// 当前画面所属的节点 Id（<see cref="ShowFrame"/> 时写入，历史缩略帧时写该节点）。
+        /// <para>结果区据此判断"点行能不能直接高亮"，还是必须先用缩略帧回看。</para>
+        /// </summary>
+        public string CurrentNodeId
+        {
+            get { return _curNodeId ?? ""; }
+        }
+
+        /// <summary>当前画面画的图形是否属于该节点自身（false = 链尾全链图形，序号对不上）。</summary>
+        public bool CurrentOwnShapes
+        {
+            get { return _curNodeOwnShapes; }
+        }
+
         /// <summary>是否正处于「画 ROI」拖框状态。</summary>
         public bool IsRoiPicking
         {
@@ -383,8 +529,16 @@ namespace VisionPlatform.UI
 
             _roiPicking = true;
             _drawSpec = null;     // 旧矩形路径：路由时按 Rect 处理
+            _editingRotated = false;
+            _editShape = null;
+            SetDrawButtonText(false);
             _modeBeforeRoi = viewer.Mode;
             _infoBeforeRoi = lblInfo.Text;
+
+            // 绘制期间右键是「取消」语义，别让与当前操作无关的右键菜单弹出来。
+            // 置位跟着 _roiPicking 走（而不是 _editingRotated）：用户刚点完按钮、还没画完
+            // 那段窗口里右键同样不该弹菜单 —— 绑 _editingRotated 会漏掉这一段。
+            viewer.SuppressContextMenu = true;
 
             // 屏幕→图像坐标换算由 ImageViewer 内部完成，这里只需切模式
             viewer.Mode = InteractionMode.DrawRectangle;
@@ -413,8 +567,14 @@ namespace VisionPlatform.UI
 
             _drawSpec = spec;
             _roiPicking = true;
+            _editingRotated = false;      // 画完第一个图形后才进入编辑态（见 OnViewerShapeCreated）
+            _editShape = null;
+            SetDrawButtonText(false);
             _modeBeforeRoi = viewer.Mode;
             _infoBeforeRoi = lblInfo.Text;
+
+            // 同 BeginRoiPick：绘制期间抑制右键菜单（置位跟 _roiPicking 走）
+            viewer.SuppressContextMenu = true;
 
             // 屏幕→图像坐标换算由 ImageViewer 内部完成，这里只需切模式
             viewer.Mode = spec.Mode;
@@ -442,8 +602,28 @@ namespace VisionPlatform.UI
             {
                 case DrawShapeKind.Line: return "在图像上拖动绘制线段（直线卡尺扫描线）";
                 case DrawShapeKind.Ring: return "在图像上拖动绘制圆环（圆卡尺环形 ROI）";
+                case DrawShapeKind.RotatedRect:
+                    return "在图像上拖动绘制 ROI（画完可拖 8 个手柄调尺寸 / 角度，按住 Shift 吸附 15°）";
                 default: return "在图像上拖动绘制 ROI";
             }
+        }
+
+        /// <summary>
+        /// 旋转矩形的标签文本：「12.4°  400×100」。编辑态与 FR-12 轮廓共用同一口径，
+        /// 所以放在这里而不是各调用点各写一份 format。
+        /// </summary>
+        public static string FormatRotatedRoiLabel(float width, float height, float angleDeg)
+        {
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "{0:0.0}°  {1:0}×{2:0}", angleDeg, width, height);
+        }
+
+        /// <summary>顶条按钮在「画 ROI」↔「完成」之间切换（编辑态时点它是结束编辑，不再请求新几何）。</summary>
+        private void SetDrawButtonText(bool editing)
+        {
+            btnDrawRoi.Text = editing ? "完成" : "画 ROI";
+            btnDrawRoi.Kind = editing ? UiButtonKind.Start : UiButtonKind.Grab;
+            btnDrawRoi.Invalidate();
         }
 
         /// <summary>
@@ -454,13 +634,36 @@ namespace VisionPlatform.UI
         {
             if (!_roiPicking) return;
 
+            bool wasEditing = _editingRotated;
+            string info = _infoBeforeRoi;
+
             EndRoiPickSilently();
             viewer.ClearShapes();
             viewer.Shapes.NotifyChanged();
-            lblInfo.Text = _infoBeforeRoi;
+
+            // 编辑态取消：值在拖动过程中已经逐次落过盘，这里只退出编辑，绝不谎报"已取消"
+            lblInfo.Text = wasEditing ? "已结束画 ROI（本次修改已保存）" : info;
 
             EventHandler handler = RoiPickCancelled;
             if (handler != null) handler(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// 结束旋转矩形编辑态（点「完成」/ Esc / 右键）：恢复原交互模式与顶条文本，
+        /// 把最终 ROI 留作叠加层。<strong>不回滚</strong>已保存的参数（每次松手都已经落盘）。
+        /// </summary>
+        public void FinishRotatedRoiEdit()
+        {
+            if (!_editingRotated) return;
+
+            RotatedRectShape keep = _editShape;
+            string info = _infoBeforeRoi;
+
+            EndRoiPickSilently();
+            lblInfo.Text = string.IsNullOrEmpty(info) ? "ROI 已更新" : info;
+
+            if (keep != null) ShowRotatedRoi(keep);
+            viewer.Focus();
         }
 
         /// <summary>
@@ -534,7 +737,7 @@ namespace VisionPlatform.UI
             viewer.Shapes.NotifyChanged();
         }
 
-        /// <summary>只画一条线段叠加（直线卡尺扫描线）。</summary>
+        /// <summary>只画一个线段叠加（直线卡尺扫描线）。</summary>
         private void ShowLine(LineSegmentShape line)
         {
             viewer.ClearShapes();
@@ -544,6 +747,79 @@ namespace VisionPlatform.UI
             shape.StrokeColor = UiTheme.ColorAccent;
             viewer.Shapes.Add(shape);
             viewer.Shapes.NotifyChanged();
+        }
+
+        /// <summary>
+        /// 只画一个旋转矩形 ROI 叠加（带角度标签）。与 <see cref="ShowRoiRect"/> 同口径：
+        /// 先清空再添加，避免和运行结果的图形叠在一起。
+        /// </summary>
+        private void ShowRotatedRoi(RotatedRectShape rect)
+        {
+            if (rect == null) return;
+
+            viewer.ClearShapes();
+
+            var shape = new RotatedRectShape(rect.Center, rect.Width, rect.Height, rect.AngleDeg);
+            shape.Name = "ROI";
+            shape.StrokeColor = UiTheme.ColorAccent;
+            shape.Label = FormatRotatedRoiLabel(rect.Width, rect.Height, rect.AngleDeg);
+            viewer.Shapes.Add(shape);
+            viewer.Shapes.NotifyChanged();
+        }
+
+        // =====================================================================
+        //  FR-12：选中节点常显 ROI 轮廓
+        // =====================================================================
+
+        /// <summary>
+        /// 设置「选中节点常显的 ROI 轮廓」（传 null 清除）。只保存模板，
+        /// 真正的图形在每帧 <see cref="ShowFrame"/> 末尾重放 —— 否则会被 33 ms 的
+        /// <c>ClearShapes</c> 立刻冲掉（与结果行高亮同一个机制）。
+        /// </summary>
+        public void SetRoiOutline(RotatedRectShape outline, string label)
+        {
+            _roiOutline = outline;
+            _roiOutlineLabel = label ?? "";
+
+            ReapplyRoiOutline();
+            viewer.Invalidate();
+        }
+
+        /// <summary>清除 ROI 轮廓叠加（切到别的节点 / 换流程时调用）。</summary>
+        public void ClearRoiOutline()
+        {
+            if (_roiOutline == null && _roiOutlineShape == null) return;
+
+            _roiOutline = null;
+            _roiOutlineLabel = "";
+
+            ReapplyRoiOutline();
+            viewer.Invalidate();
+        }
+
+        /// <summary>
+        /// 把 ROI 轮廓重放到视图里：先摘掉上一帧那个（避免越积越多），再加一个新的。
+        /// 绘制 / 编辑态不画 —— 那时用户手上已经有一个正在编辑的 ROI，叠一层只会互相干扰。
+        /// </summary>
+        private void ReapplyRoiOutline()
+        {
+            if (_roiOutlineShape != null)
+            {
+                viewer.Shapes.Remove(_roiOutlineShape);
+                _roiOutlineShape = null;
+            }
+
+            if (_roiOutline == null || _roiPicking) return;
+
+            var shape = new RotatedRectShape(_roiOutline.Center, _roiOutline.Width,
+                                             _roiOutline.Height, _roiOutline.AngleDeg);
+            shape.Name = "ROI轮廓";
+            shape.IsEditable = false;                 // 只读叠加：鼠标选不中，不会误拖
+            shape.StrokeColor = UiTheme.ColorAccent;
+            shape.Label = _roiOutlineLabel;
+
+            viewer.Shapes.Add(shape);
+            _roiOutlineShape = shape;
         }
 
         /// <summary>只画一个圆环叠加（圆卡尺环形 ROI）。</summary>
@@ -565,7 +841,16 @@ namespace VisionPlatform.UI
 
             _roiPicking = false;
             _drawSpec = null;
+            _editingRotated = false;
+            _editShape = null;
+            SetDrawButtonText(false);
             viewer.Mode = _modeBeforeRoi;
+
+            // 复位点必须是这里 —— 它是三条退出路径（完成 / Esc / 右键取消）的公共出口。
+            // 只在 FinishRotatedRoiEdit 里复位的话，Esc 与右键取消这两条路径不复位 →
+            // 右键菜单从此永久消失（不报错、不崩溃，最难查）。
+            viewer.SuppressContextMenu = false;
+
             _infoBeforeRoi = "";
         }
 
@@ -577,9 +862,21 @@ namespace VisionPlatform.UI
             _hasRun = false;
             _staticShown = false;
 
+            // 换流程 / 重载：ROI 轮廓属于上一个流程的节点，一并清掉（ClearShapes 会移除图形本体）
+            _roiOutline = null;
+            _roiOutlineLabel = "";
+            _roiOutlineShape = null;
+
             viewer.ClearShapes();
             viewer.Shapes.NotifyChanged();
             viewer.ClearImage();
+
+            // 叠加层模板一并清空：否则此刻点「轮廓」/「标注」会把上一个流程的图形重新画出来
+            _curShapes = new List<IGeometryShape>();
+            _curAux = new List<IGeometryShape>();
+            _hlNodeId = "";
+            _hlIndex = -1;
+            _curNodeOwnShapes = false;
 
             lblEmpty.Visible = true;
             lblEmpty.Text = "运行流程后可在此查看各节点处理结果";
@@ -604,7 +901,7 @@ namespace VisionPlatform.UI
             Bitmap raw = ctl.TryTakeOriginal();
             if (raw != null)
             {
-                if (Mode == FlowPreviewMode.Original && !_paused) ShowFrame(raw, null);
+                if (Mode == FlowPreviewMode.Original && !_paused) ShowFrame(raw, null, null);
                 else raw.Dispose();
             }
 
@@ -669,21 +966,33 @@ namespace VisionPlatform.UI
                 ? snap.AllShapes
                 : snap.Shapes;
 
+            // 辅助几何（ROI 轮廓 / 卡尺窗口 / OCR 区域与串框）：链尾模式下没有归属节点，
+            // 只画该节点时才有意义，故只在"节点视图"里带上。
+            List<IGeometryShape> aux = (mode == FlowPreviewMode.ChainEnd && snap.AllShapes.Count > 0)
+                ? null
+                : snap.AuxShapes;
+
             // 记下本帧的「高亮身份上下文」：只有画的是该节点自身图形时，
             // 结果表格里的图形序号才能对上（链尾全链图形是各节点图形的拼接，序号不可比）。
             _curNodeId = snap.NodeId ?? "";
             _curNodeOwnShapes = !ReferenceEquals(shapes, snap.AllShapes);
 
-            ShowFrame(snap.Frame, shapes);
+            ShowFrame(snap.Frame, shapes, aux);
             snap.Frame = null;      // 已交给视图持有（OwnsImage=true），此后不得再释放
 
-            string head = string.Format("第 {0}/{1} 个节点：{2}　{3} ms",
-                snap.Index, snap.Total, snap.NodeName, snap.ElapsedMs);
+            // 【三处文案同源（UI-R09）】顶条、覆盖层、状态栏都走 NodeResultText，
+            // 谁也不再就地拼字符串 —— 否则"同一个节点三个说法"会随下次改动长回来。
+            string primary = NodeResultText.Primary(snap.Type, snap.Metrics, snap.ElapsedMs, snap.Summary);
+            string badge = NodeResultText.Badge(snap.Status);
+
+            string head = string.Format("第 {0}/{1} 个节点：{2}　{3}",
+                snap.Index, snap.Total, snap.NodeName, badge);
+            if (!string.IsNullOrEmpty(primary)) head += " · " + primary;
             if (snap.IsChainEnd && snap.Fps > 0.0)
                 head += string.Format("　|　{0:F1} fps　平均 {1:F0} ms", snap.Fps, snap.AvgCycleMs);
             lblInfo.Text = head;
 
-            // 左上角 OK/NG 文本覆盖：仅在有一次完整结论时显示（FR-ALG-21）
+            // 左上角结论徽标 + 一行摘要：链尾显示整链结论，节点视图显示该节点自身的结论。
             if (snap.IsChainEnd)
             {
                 UiTheme.StyleViewBadge(lblVerdict, snap.Passed ? UiVerdict.Ok : UiVerdict.Ng);
@@ -693,10 +1002,22 @@ namespace VisionPlatform.UI
                 lblSummary.Text = string.IsNullOrEmpty(first) ? (snap.Passed ? "OK" : "NG") : first;
                 lblSummary.Visible = true;
             }
+            else
+            {
+                UiVerdict v = UiVerdict.None;
+                if (snap.Status == FlowNodeStatus.Ok) v = UiVerdict.Ok;
+                else if (snap.Status == FlowNodeStatus.Ng) v = UiVerdict.Ng;
+                else if (snap.Status == FlowNodeStatus.Warn) v = UiVerdict.Warn;
+
+                UiTheme.StyleViewBadge(lblVerdict, v);
+                lblVerdict.Visible = v != UiVerdict.None;
+                lblSummary.Text = string.IsNullOrEmpty(primary) ? "" : primary;
+                lblSummary.Visible = lblSummary.Text.Length > 0;
+            }
         }
 
         /// <summary>显示帧并替换叠加图形（视图持有帧所有权，换图时自行释放旧帧）。</summary>
-        private void ShowFrame(Bitmap frame, List<IGeometryShape> shapes)
+        private void ShowFrame(Bitmap frame, List<IGeometryShape> shapes, List<IGeometryShape> aux)
         {
             if (frame != null)
             {
@@ -704,16 +1025,50 @@ namespace VisionPlatform.UI
                 lblEmpty.Visible = false;
             }
 
+            _curShapes = shapes ?? new List<IGeometryShape>();
+            _curAux = aux ?? new List<IGeometryShape>();
+            RebuildShapes();
+        }
+
+        /// <summary>
+        /// 重建叠加层（不碰图像）：检测目标按标注详细度渲染，辅助几何按「轮廓」开关过滤。
+        /// <para>
+        /// 【为什么单独一个方法】「轮廓」开关与标注详细度都只该重画图形：
+        /// 若走 <c>ShowFrame</c> 会重新 <c>SetImage</c> 一次，连续运行时表现为整幅闪一下。
+        /// </para>
+        /// </summary>
+        private void RebuildShapes()
+        {
+            if (viewer == null) return;
+
+            int level = ShapeLabelStyle.Current;
             viewer.ClearShapes();
-            if (shapes != null)
+
+            for (int i = 0; i < _curShapes.Count; i++)
             {
-                foreach (IGeometryShape s in shapes)
-                    if (s != null) viewer.Shapes.Add(s);
+                IGeometryShape s = ShapeLabelStyle.Render(_curShapes[i], level);
+                if (s != null) viewer.Shapes.Add(s);
+            }
+
+            for (int i = 0; i < _curAux.Count; i++)
+            {
+                IGeometryShape s = _curAux[i];
+                if (s == null) continue;
+
+                // 「轮廓」只管输入几何；OCR 区域框 / 串框不打 AuxContourName，因此永远可见
+                if (!_showContour && string.Equals(s.Name, FlowShapes.AuxContourName, StringComparison.Ordinal))
+                    continue;
+
+                viewer.Shapes.Add(s);
             }
 
             // 重新施加「点结果表格行」的高亮：上面的 ClearShapes + Add 已经把选中态清掉了。
             // 这里按「节点 Id + 序号」在新实例上重新定位，因此连续运行时高亮不会被刷新冲掉。
             ReapplyHighlight();
+
+            // 顺序不能反：ReapplyHighlight 用的是「序号」定位，必须先按原始图形列表定好高亮，
+            // 再把 ROI 轮廓追加到末尾，否则轮廓会顶掉真正该高亮的那一个。
+            ReapplyRoiOutline();
 
             viewer.Shapes.NotifyChanged();
         }
@@ -759,6 +1114,74 @@ namespace VisionPlatform.UI
             SetHighlight("", -1);
         }
 
+        /// <summary>
+        /// 显示某个历史节点的<strong>1/4 缩略帧</strong>并高亮指定目标（结果区"切回历史节点点行"用）。
+        /// <para>
+        /// 【为什么图形要在这里缩】结果图形一律存<strong>原图坐标</strong>，而这里显示的是 1/4 缩略图；
+        /// 换算方向错了框会飞出画面且不报错。换算只有 <see cref="ThumbGeometry.ToThumb(RectangleF)"/> 一处实现，
+        /// 传进来的 <paramref name="shapes"/> 保持原图坐标即可，缩放由本方法做。
+        /// </para>
+        /// <para>本方法只用于"回看"，<strong>不参与任何检测计算</strong>；下一次运行帧到达时会被正常覆盖。</para>
+        /// </summary>
+        /// <param name="thumbnail">缩略帧（1/4 尺寸）；本方法会克隆一份，调用方仍持有原图。</param>
+        /// <param name="shapes">该节点的结果图形（<strong>原图坐标</strong>）；可为 null。</param>
+        /// <param name="nodeId">节点 Id（用于高亮的节点匹配）。</param>
+        /// <param name="highlightIndex">要高亮的目标序号；&lt; 0 表示不高亮。</param>
+        /// <param name="title">顶条文案。</param>
+        public void ShowHistoricalFrame(Bitmap thumbnail, IList<IGeometryShape> shapes,
+                                        string nodeId, int highlightIndex, string title)
+        {
+            if (thumbnail == null) return;
+
+            _roiPicking = false;
+            _editingRotated = false;
+            _editShape = null;
+            viewer.SuppressContextMenu = false;
+
+            viewer.OwnsImage = true;
+            viewer.SetImage(new Bitmap(thumbnail), true);
+            viewer.ClearShapes();
+
+            // 缩略帧的图形同样走 _curShapes：这样「轮廓」/「标注」开关在当前画面上依然可用
+            // （否则一按开关，缩略图上的框会整片消失，看起来像"回看坏了"）。
+            var scaledList = new List<IGeometryShape>();
+            if (shapes != null)
+            {
+                foreach (IGeometryShape s in shapes)
+                {
+                    if (s == null) continue;
+                    IGeometryShape scaled = ThumbGeometry.ScaleShape(s);
+                    if (scaled == null) continue;
+                    scaled.IsEditable = false;
+                    scaledList.Add(scaled);
+                }
+            }
+            _curShapes = scaledList;
+            _curAux = new List<IGeometryShape>();
+
+            // 直接重建（不经过 ReapplyHighlight —— 此刻 _curNodeId 还没更新，序号校验会全部落空）
+            int level = ShapeLabelStyle.Current;
+            foreach (IGeometryShape s in _curShapes)
+            {
+                IGeometryShape shown = ShapeLabelStyle.Render(s, level);
+                if (shown != null) viewer.Shapes.Add(shown);
+            }
+            if (viewer.Shapes.Count > 0) viewer.Shapes.NotifyChanged();
+
+            // 让 SetHighlight 的节点/序号校验通过：当前画面就是"该节点的自有图形"
+            _curNodeId = nodeId ?? "";
+            _curNodeOwnShapes = true;
+            _hasRun = false;
+            _staticShown = true;
+
+            lblEmpty.Visible = false;
+            lblVerdict.Visible = false;
+            lblSummary.Visible = false;
+            lblInfo.Text = string.IsNullOrEmpty(title) ? "历史帧（1/4 缩略）" : title;
+
+            SetHighlight(nodeId ?? "", highlightIndex);
+        }
+
         /// <summary>取摘要首行（以「；」分隔），避免覆盖标签过长。</summary>
         private static string FirstLine(string summary)
         {
@@ -799,6 +1222,57 @@ namespace VisionPlatform.UI
             _paused = chkPauseAuto.Checked;
         }
 
+        /// <summary>「轮廓」开关：只重画叠加层，不动图像（不重建帧，连续运行时也不会闪一下）。</summary>
+        private void OnContourChanged(object sender, EventArgs e)
+        {
+            _showContour = chkContour.Checked;
+            RebuildShapes();
+        }
+
+        /// <summary>标注详细度：简 → 标准 → 详细 → 简 循环，并落盘记忆（Q17：全局，不按节点）。</summary>
+        private void OnLabelDetailClick(object sender, EventArgs e)
+        {
+            int next;
+            switch (UiSettings.NormalizeLabelDetail(ShapeLabelStyle.Current))
+            {
+                case UiSettings.LabelDetailSimple: next = UiSettings.LabelDetailStandard; break;
+                case UiSettings.LabelDetailDetailed: next = UiSettings.LabelDetailSimple; break;
+                default: next = UiSettings.LabelDetailDetailed; break;
+            }
+
+            ShapeLabelStyle.Current = next;
+            UpdateLabelDetailButton();
+            RebuildShapes();
+
+            // 全局偏好落盘：换流程 / 重启后仍是这一档
+            try
+            {
+                AppConfig cfg = ConfigStore.Current;
+                if (cfg != null && cfg.Ui != null)
+                {
+                    cfg.Ui.FlowLabelDetail = next;
+                    ConfigStore.Save(cfg);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 落盘失败不影响本次观感，但必须留痕（否则"设置记不住"查不到原因）
+                Logger.Warn("保存标注详细度失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>按钮文案与 tooltip 跟着档位变（"标注·简"这种写法比三态下拉更省地方）。</summary>
+        private void UpdateLabelDetailButton()
+        {
+            if (btnLabelDetail == null) return;
+            btnLabelDetail.Text = "标注·" + ShapeLabelStyle.Name(ShapeLabelStyle.Current);
+            if (toolTip != null)
+            {
+                toolTip.SetToolTip(btnLabelDetail,
+                    "画布叠加标签的详细度：简=只标序号，标准=序号+分数，详细=再补坐标与尺寸（点击循环）");
+            }
+        }
+
         /// <summary>
         /// 用户拖完一个矩形。控件已把图形加进 Shapes 才触发本事件，故此处接管渲染：
         /// 取完数值后清掉、只保留这一个 ROI 矩形。
@@ -809,10 +1283,51 @@ namespace VisionPlatform.UI
         /// </summary>
         private void OnViewerShapeCreated(object sender, ShapeEventArgs e)
         {
-            if (!_roiPicking) return;
+            if (!_roiPicking)
+            {
+                // 非绘制态收到图形：说明视图被别处切到了绘制模式，或用户没点「画 ROI」就框选。
+                // 静默 return 会让人以为"点了没反应"，所以给一句话（下一帧运行信息会覆盖它）。
+                lblInfo.Text = "请先点顶条的「画 ROI」再框选（当前不在绘制状态）";
+                return;
+            }
             if (e == null || e.Shape == null) return;
 
             DrawShapeKind kind = (_drawSpec != null) ? _drawSpec.Kind : DrawShapeKind.Rect;
+
+            // 旋转矩形：画完**不退出**，进入「编辑态」让用户拖 8 个手柄（FR-07），
+            // 松手才落盘（ShapeCommitted）。这一支必须排在 Rect 之前 ——
+            // 落进 Rect 分支会被 e.Shape.Bounds 静默压成轴对齐外接框，角度直接丢且不报错。
+            if (kind == DrawShapeKind.RotatedRect)
+            {
+                RotatedRectShape rr = e.Shape as RotatedRectShape;
+                if (rr == null) return;
+
+                if (rr.Width < MinRoiSizePx || rr.Height < MinRoiSizePx)
+                {
+                    viewer.ClearShapes();
+                    viewer.Shapes.NotifyChanged();
+
+                    MessageBox.Show(this,
+                        string.Format("ROI 太小（{0:F0}×{1:F0} 像素，宽或高需 ≥ {2} 像素），已忽略，请重新拖动。",
+                            rr.Width, rr.Height, MinRoiSizePx),
+                        "画几何", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                _editingRotated = true;
+                _editShape = rr;
+                rr.StrokeColor = UiTheme.ColorAccent;
+                rr.Label = FormatRotatedRoiLabel(rr.Width, rr.Height, rr.AngleDeg);
+                viewer.Shapes.NotifyChanged();
+
+                SetDrawButtonText(true);
+                lblInfo.Text = "拖 8 个手柄调尺寸 / 角度（Shift 吸附 15°），点「完成」结束";
+
+                // 画完即落盘一次；之后每次松手由 OnViewerShapeCommitted 再落盘一次。
+                // _roiPicking 保持 true：否则 OnPullTick 会用运行帧把 ROI 冲掉。
+                CommitRotatedRoi(rr);
+                return;
+            }
 
             if (kind == DrawShapeKind.Rect)
             {
@@ -899,18 +1414,71 @@ namespace VisionPlatform.UI
             if (hRing != null) hRing(this, new ShapeEventArgs(new RingShape(ringShape.Center, ringShape.OuterRadius, ringShape.InnerRadius)));
         }
 
-        /// <summary>Esc 取消画 ROI（不写回参数）。</summary>
+        /// <summary>
+        /// 拖动过程中只刷新标签文本（形如「12.4°  400×100」）——
+        /// <strong>不写节点参数、不 SaveFlows</strong>（红线①：拖动路径绝不落盘）。
+        /// </summary>
+        private void OnViewerShapesChanged(object sender, EventArgs e)
+        {
+            if (!_roiPicking || !_editingRotated || _editShape == null) return;
+
+            _editShape.Label = FormatRotatedRoiLabel(_editShape.Width, _editShape.Height, _editShape.AngleDeg);
+        }
+
+        /// <summary>松手 = 用户调整完了：把当前几何交给宿主落盘一次。</summary>
+        private void OnViewerShapeCommitted(object sender, ShapeEventArgs e)
+        {
+            if (!_roiPicking || !_editingRotated) return;
+
+            RotatedRectShape rr = (e != null) ? e.Shape as RotatedRectShape : null;
+            if (rr == null) return;
+
+            // 拖太小（比如把高度拖到 1px）视为误操作：不落盘，也不改标签
+            if (rr.Width < MinRoiSizePx || rr.Height < MinRoiSizePx) return;
+
+            _editShape = rr;
+            rr.Label = FormatRotatedRoiLabel(rr.Width, rr.Height, rr.AngleDeg);
+            viewer.Shapes.NotifyChanged();
+
+            CommitRotatedRoi(rr);
+        }
+
+        /// <summary>编辑态右键 = 退出编辑（与 Esc 等价；已在拖动的右键仍归视图的平移/菜单处理）。</summary>
+        private void OnViewerMouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && _editingRotated) FinishRotatedRoiEdit();
+        }
+
+        /// <summary>把旋转矩形交给宿主（FlowForm）写回 RoiX/RoiY/RoiW/RoiH + RoiAngle 并持久化。</summary>
+        private void CommitRotatedRoi(RotatedRectShape shape)
+        {
+            if (shape == null) return;
+
+            EventHandler<ShapeEventArgs> handler = ShapePicked;
+            if (handler != null) handler(this, new ShapeEventArgs(shape));
+        }
+
+        /// <summary>Esc：编辑态先退出编辑（值已保存），未画完的则整体取消。</summary>
         private void OnViewerKeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode != Keys.Escape || !_roiPicking) return;
 
-            CancelRoiPick();
+            if (_editingRotated) FinishRotatedRoiEdit();
+            else CancelRoiPick();
+
             e.Handled = true;
         }
 
         /// <summary>顶条「画 ROI」：只发请求，画哪一组由宿主决定（可能先弹菜单让用户选）。</summary>
         private void OnDrawRoiClick(object sender, EventArgs e)
         {
+            // 编辑态下这个按钮已经变成「完成」：点它只结束编辑，不再请求新的几何组
+            if (_editingRotated)
+            {
+                FinishRotatedRoiEdit();
+                return;
+            }
+
             EventHandler handler = RoiPickRequested;
             if (handler != null) handler(this, EventArgs.Empty);
         }

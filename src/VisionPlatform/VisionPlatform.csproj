@@ -81,6 +81,12 @@
     <Compile Include="Flow\FlowRunner.cs" />
     <Compile Include="Flow\FlowRunSlot.cs" />
     <Compile Include="Flow\FlowShapes.cs" />
+    <Compile Include="Flow\OcrCharStore.cs" />
+    <Compile Include="Flow\OcrTemplateLoadResult.cs" />
+    <Compile Include="Flow\FlowNodeMetrics.cs" />
+    <Compile Include="Flow\NodeResultText.cs" />
+    <Compile Include="Flow\TemplateStore.cs" />
+    <Compile Include="Flow\TemplateTrainer.cs" />
     <Compile Include="Flow\NodeParamSchema.cs" />
     <Compile Include="Models\User.cs" />
     <Compile Include="Native\NativeCamera.cs" />
@@ -121,6 +127,23 @@
       <DependentUpon>FlowForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\FlowDrawSpec.cs" />
+    <Compile Include="UI\OcrTemplateCard.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="UI\OcrTemplateForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\FlowResultRow.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="UI\NodeResultCache.cs" />
+    <Compile Include="UI\ShapeLabelStyle.cs" />
+    <Compile Include="UI\TemplateForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\TemplateStatusCard.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="UI\FlowResultPanel.cs">
       <SubType>UserControl</SubType>
     </Compile>

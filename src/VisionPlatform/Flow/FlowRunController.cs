@@ -30,6 +30,12 @@ namespace VisionPlatform.Flow
         /// <summary>节点执行状态。</summary>
         public FlowNodeStatus Status = FlowNodeStatus.Pending;
 
+        /// <summary>
+        /// 节点类型。结果文案（<see cref="NodeResultText"/>）要靠它决定用哪些判据字段，
+        /// 由投递方填好，消费方（预览顶条 / 结果区 / 状态栏）不必各自去流程里反查。
+        /// </summary>
+        public FlowNodeType Type = FlowNodeType.ResultOutput;
+
         /// <summary>该节点自身耗时（整数毫秒）。</summary>
         public int ElapsedMs;
 
@@ -41,6 +47,12 @@ namespace VisionPlatform.Flow
 
         /// <summary>该节点自身产出的叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes = new List<IGeometryShape>();
+
+        /// <summary>该节点产出的<strong>辅助</strong>图形（ROI 轮廓 / 卡尺窗口，不进结果区明细）。</summary>
+        public List<IGeometryShape> AuxShapes = new List<IGeometryShape>();
+
+        /// <summary>该节点的主判据（结果区/画布/预览共用的唯一真源）；未填时各字段为"不适用"。</summary>
+        public FlowNodeMetrics Metrics = new FlowNodeMetrics();
 
         /// <summary>全链叠加图形；仅链尾快照非空（用于「链尾结果」显示模式）。</summary>
         public List<IGeometryShape> AllShapes = new List<IGeometryShape>();
@@ -622,14 +634,29 @@ namespace VisionPlatform.Flow
         //  快照投递（覆盖式）
         // =====================================================================
 
-        private void PublishNode(FlowRunSession s, FlowNodeProgress p, bool chainEnd, double fps, double avgMs)
+        /// <summary>按节点 Id 求节点类型（快照要用它选主判据字段）；查不到按结果输出处理。</summary>
+        private static FlowNodeType ResolveNodeType(FlowRunSession s, string nodeId)
         {
-            var snap = new FlowProgressSnapshot();
+            if (s == null || s.Flow == null || s.Flow.Nodes == null || string.IsNullOrEmpty(nodeId))
+                return FlowNodeType.ResultOutput;
+
+            foreach (FlowNode n in s.Flow.Nodes)
+            {
+                if (n == null || !string.Equals(n.Id, nodeId, StringComparison.Ordinal)) continue;
+                FlowNodeType t;
+                if (n.TryGetType(out t)) return t;
+            }
+            return FlowNodeType.ResultOutput;
+        }
+
+        private void PublishNode(FlowRunSession s, FlowNodeProgress p, bool chainEnd, double fps, double avgMs)
+        {            var snap = new FlowProgressSnapshot();
             snap.NodeId = p.NodeId ?? "";
             snap.NodeName = p.NodeName ?? "";
             snap.Index = p.Index;
             snap.Total = p.Total;
             snap.Status = p.Status;
+            snap.Type = ResolveNodeType(s, p.NodeId);
             snap.ElapsedMs = p.ElapsedMs;
             snap.Summary = p.Summary ?? "";
             snap.Fps = fps;
@@ -640,6 +667,8 @@ namespace VisionPlatform.Flow
             p.Frame = null;
 
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);
+            if (p.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(p.AuxShapes);
+            if (p.Metrics != null) snap.Metrics = p.Metrics;
 
             SnapOffsetInfo(snap, s);
             PushNode(snap);
@@ -669,9 +698,17 @@ namespace VisionPlatform.Flow
                     snap.NodeName = last.NodeName ?? "";
                     snap.Index = last.Index;
                     snap.Total = last.Total;
-                    snap.Status = snap.Passed ? FlowNodeStatus.Ok : FlowNodeStatus.Ng;
+                    snap.Type = ResolveNodeType(s, last.NodeId);
+                    // ⚠️ Warn 不得被结论覆盖：末节点是"只分割未识别"这类警示态时，
+                    //    用整链 Passed 改写会把它变成 Ok，界面上再也看不出"没识别"。
+                    //    整链结论只反映 OK/NG，节点自身的警示态优先保住。
+                    snap.Status = last.Status == FlowNodeStatus.Warn
+                        ? FlowNodeStatus.Warn
+                        : (snap.Passed ? FlowNodeStatus.Ok : FlowNodeStatus.Ng);
                     snap.ElapsedMs = last.ElapsedMs;
                     snap.Summary = last.Summary ?? "";
+                    if (last.Metrics != null) snap.Metrics = last.Metrics;
+                    if (last.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(last.AuxShapes);
                     if (snap.Shapes.Count == 0 && last.Shapes != null)
                         snap.Shapes = new List<IGeometryShape>(last.Shapes);
                 }

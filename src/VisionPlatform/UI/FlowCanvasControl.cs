@@ -28,8 +28,10 @@ namespace VisionPlatform.UI
         private const int NodeW = 150;           // 节点宽度
         private const int TitleH = 26;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
+        private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
+        private const int SummaryH = SummaryRowH * 2 + 2;   // 卡片底部结果区总高（常驻，未运行也占位）
         private const int NodePadBottom = 4;     // 端子区下方留白
-        private const int NominalNodeH = 48;     // 工具箱拖入落点居中用的名义高度（1 行端子的实际高度）
+        private const int NominalNodeH = TitleH + RowH + SummaryH + NodePadBottom;   // 1 行端子的实际高度（拖入落点居中用）
         private const float PortGlyph = 9f;      // 端子方形符号边长
         private const float PortHitRadius = 10f; // 端子命中半径（端子命中优先于节点本体）
         private const int HitTol = 6;            // 连线命中容差
@@ -349,6 +351,7 @@ namespace VisionPlatform.UI
             {
                 case FlowNodeStatus.Running: return FlowNodeRunState.Running;
                 case FlowNodeStatus.Ok:      return FlowNodeRunState.Ok;
+                case FlowNodeStatus.Warn:    return FlowNodeRunState.Warn;
                 case FlowNodeStatus.Ng:      return FlowNodeRunState.Failed;
                 default:                     return FlowNodeRunState.Waiting;
             }
@@ -358,6 +361,16 @@ namespace VisionPlatform.UI
         /// 设置节点运行状态与耗时并重绘。耗时传负数表示不显示耗时文本。
         /// </summary>
         public void SetNodeStatus(string nodeId, FlowNodeRunState state, int elapsedMs)
+        {
+            SetNodeStatus(nodeId, state, elapsedMs, null);
+        }
+
+        /// <summary>
+        /// 设置节点运行状态、耗时与<strong>一行结果摘要</strong>并重绘。
+        /// <para><paramref name="summary"/> 为 null 表示"不改变已有摘要"（如仅切到运行中时）；
+        /// 传空串表示"明确没有摘要"（未运行节点显示"未运行"）。</para>
+        /// </summary>
+        public void SetNodeStatus(string nodeId, FlowNodeRunState state, int elapsedMs, string summary)
         {
             if (string.IsNullOrEmpty(nodeId)) return;
 
@@ -370,6 +383,7 @@ namespace VisionPlatform.UI
 
             info.State = state;
             info.ElapsedMs = elapsedMs;
+            if (summary != null) info.Summary = summary;
             Invalidate();
         }
 
@@ -422,7 +436,13 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
-        /// 端子行数 = max(输入端子数, 输出端子数)；节点高度 = 标题行 + 行数 × 行高 + 底部留白。
+        /// 端子行数 = max(输入端子数, 输出端子数)；
+        /// 节点高度 = 标题行 + 行数 × 行高 + <strong>结果区（常驻两行）</strong> + 底部留白。
+        /// <para>
+        /// 结果区高度<strong>恒定预留</strong>（不随是否运行变化）：高度若跟着运行状态变，
+        /// 连续运行时卡片会上下跳动、连线端点跟着抖，比"未运行时多一块空白"难看得多。
+        /// 未运行时该区域显示灰字「未运行」。
+        /// </para>
         /// </summary>
         private static int PortRowCount(FlowNode n)
         {
@@ -431,7 +451,7 @@ namespace VisionPlatform.UI
 
         private static float NodeHeight(FlowNode n)
         {
-            return TitleH + PortRowCount(n) * RowH + NodePadBottom;
+            return TitleH + PortRowCount(n) * RowH + SummaryH + NodePadBottom;
         }
 
         /// <summary>
@@ -1132,46 +1152,82 @@ namespace VisionPlatform.UI
             return !FlowOrder.WouldCreateCycle(_flow, fromNode.Id, toNode.Id);
         }
 
-        /// <summary>按运行状态取边框色（灰 / 蓝 / 绿 / 红）；选中态优先用强调色描边。</summary>
+        /// <summary>按运行状态取边框色（灰 / 蓝 / 绿 / 黄 / 红）；选中态优先用强调色描边。</summary>
         private static Color BorderColor(FlowNodeRunState state, bool selected)
         {
             switch (state)
             {
                 case FlowNodeRunState.Running: return UiTheme.ColorRunning;
                 case FlowNodeRunState.Ok:      return UiTheme.ColorOk;
+                case FlowNodeRunState.Warn:    return UiTheme.ColorWarn;
                 case FlowNodeRunState.Failed:  return UiTheme.ColorNg;
                 default:
                     return selected ? UiTheme.ColorAccent : UiTheme.ColorDisabled;
             }
         }
 
-        /// <summary>画节点下方的耗时文本与失败标记（全部纯文本，不靠图标区分）。</summary>
+        /// <summary>
+        /// 卡片底部的结果区（常驻两行，见 <see cref="NodeHeight"/>）：
+        /// 第一行 = 结果摘要（如 <c>3 个 · 0.93</c>），第二行 = 耗时 + 状态标记。
+        /// <para>
+        /// 未运行节点第一行显示灰字「未运行」、第二行留空 —— 不能显示 <c>0</c>：
+        /// "0 个目标"和"还没跑过"是两件事，用同一个数字表示会让人把未运行读成检测为空。
+        /// </para>
+        /// <para>摘要行在 NG / 警告时变色（红 / 黄），边框同色 —— 这是"哪个节点出事了一眼看出来"的唯一出口。</para>
+        /// </summary>
         private static void DrawRunOverlay(Graphics g, RectangleF r, FlowNodeRunState state, FlowNodeRunInfo run)
         {
-            if (state == FlowNodeRunState.Waiting) return;
+            float x = r.X + 10f;
+            float w = r.Width - 20f;
+            float y1 = r.Bottom - NodePadBottom - SummaryRowH * 2f - 1f;
+            float y2 = y1 + SummaryRowH;
 
-            var msRect = new RectangleF(r.X, r.Bottom + 1f, r.Width * 0.55f, 13f);
-            var markRect = new RectangleF(r.Right - r.Width * 0.35f, r.Bottom + 1f, r.Width * 0.35f, 13f);
+            var sfNear = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center,
+                                            Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            var sfFar = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
 
-            var sf = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near };
+            // ---- 第一行：结果摘要 ----
+            string mark = "";
+            Color markColor = UiTheme.ColorTextSecondary;
+            if (state == FlowNodeRunState.Failed) { mark = "NG"; markColor = UiTheme.ColorNg; }
+            else if (state == FlowNodeRunState.Warn) { mark = "警告"; markColor = UiTheme.ColorWarn; }
+            else if (state == FlowNodeRunState.Running) { mark = "运行中"; markColor = UiTheme.ColorRunning; }
 
-            if (run != null && run.ElapsedMs >= 0)
+            float markW = string.IsNullOrEmpty(mark) ? 0f : 34f;
+
+            string summary = (run != null) ? (run.Summary ?? "") : "";
+            if (state == FlowNodeRunState.Waiting || string.IsNullOrEmpty(summary))
             {
+                if (state == FlowNodeRunState.Waiting)
+                {
+                    var rectWait = new RectangleF(x, y1, w, SummaryRowH);
+                    using (Brush b = new SolidBrush(UiTheme.ColorDisabled))
+                        g.DrawString("未运行", UiTheme.FontMono, b, rectWait, sfNear);
+                }
+            }
+            else
+            {
+                Color sumColor = state == FlowNodeRunState.Failed ? UiTheme.ColorNg
+                               : state == FlowNodeRunState.Warn ? UiTheme.ColorWarn
+                               : UiTheme.ColorTextPrimary;
+                var rectSum = new RectangleF(x, y1, Math.Max(20f, w - markW), SummaryRowH);
+                using (Brush b = new SolidBrush(sumColor))
+                    g.DrawString(summary, UiTheme.FontMono, b, rectSum, sfNear);
+            }
+
+            if (!string.IsNullOrEmpty(mark))
+            {
+                var rectMark = new RectangleF(r.Right - 10f - markW, y1, markW, SummaryRowH);
+                using (Brush b = new SolidBrush(markColor))
+                    g.DrawString(mark, UiTheme.FontButton, b, rectMark, sfFar);
+            }
+
+            // ---- 第二行：耗时（仅在有结果时显示）----
+            if (state != FlowNodeRunState.Waiting && run != null && run.ElapsedMs >= 0)
+            {
+                var rectMs = new RectangleF(x, y2, w, SummaryRowH);
                 using (Brush b = new SolidBrush(UiTheme.ColorTextSecondary))
-                    g.DrawString(run.ElapsedMs + " ms", UiTheme.FontMono, b, msRect, sf);
-            }
-
-            if (state == FlowNodeRunState.Failed)
-            {
-                var sfMark = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near };
-                using (Brush b = new SolidBrush(UiTheme.ColorNg))
-                    g.DrawString("NG", UiTheme.FontButton, b, markRect, sfMark);
-            }
-            else if (state == FlowNodeRunState.Running)
-            {
-                var sfMark = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near };
-                using (Brush b = new SolidBrush(UiTheme.ColorRunning))
-                    g.DrawString("运行中", UiTheme.FontMono, b, markRect, sfMark);
+                    g.DrawString(run.ElapsedMs + " ms", UiTheme.FontMono, b, rectMs, sfNear);
             }
         }
 

@@ -229,6 +229,90 @@ namespace VisionPlatform.Core
         /// <summary>默认主题（深色）。</summary>
         public const string DefaultTheme = "Dark";
 
+        /// <summary>
+        /// 结果区高度（<strong>96-DPI 逻辑像素</strong>，默认 180）。
+        /// <para>
+        /// 【为什么存逻辑值不存物理像素】150% DPI 下若直接存物理高度，换显示器/改缩放后
+        /// 重启会"结果区突然变成一半高"。显示时按 <c>实际px = 逻辑值 × DeviceDpi / 96</c> 换算。
+        /// </para>
+        /// <para>【0 表示"字段缺失"】<c>DataContractJsonSerializer</c> 反序列化不跑构造函数，
+        /// 老配置没有这个字段时读到 0；120 才是合法下界，所以"0 = 未设置"天然可区分（§C6）。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int FlowResultPanelHeight { get; set; }
+
+        /// <summary>
+        /// 端子区展开状态：0 = 未设置（取默认收起）、1 = 收起、2 = 展开。
+        /// <para>
+        /// 【为什么是 int 不是 bool】需求是"默认收起"，而 <c>DataContractJsonSerializer</c>
+        /// 对缺失的 bool 一律给 <c>false</c> —— 用 bool 的话"字段缺失"与"用户显式展开"无法区分，
+        /// 老配置会表现为"默认展开"，与需求正好相反。三态 int 把"缺失"独立表达出来。
+        /// </para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int FlowPortsState { get; set; }
+
+        /// <summary>
+        /// 画布叠加标签的详细度：1 = 简（只标序号）/ 2 = 标准（序号 + 分数）/ 3 = 详细（再补坐标与尺寸）。
+        /// <para>【为什么是 1~3 而不是 0~2】<c>DataContractJsonSerializer</c> 对缺失的 int 给 0，
+        /// 0 必须能表达"字段缺失"，否则无法把"老配置"与"用户选了简"区分开。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int FlowLabelDetail { get; set; }
+
+        /// <summary>标注详细度：简。</summary>
+        public const int LabelDetailSimple = 1;
+
+        /// <summary>标注详细度：标准（默认）。</summary>
+        public const int LabelDetailStandard = 2;
+
+        /// <summary>标注详细度：详细。</summary>
+        public const int LabelDetailDetailed = 3;
+
+        /// <summary>归一化标注详细度：缺失（0）或越界一律按"标准"。</summary>
+        public static int NormalizeLabelDetail(int value)
+        {
+            if (value == LabelDetailSimple || value == LabelDetailDetailed) return value;
+            return LabelDetailStandard;
+        }
+
+        /// <summary>结果区高度默认值（逻辑像素）。</summary>
+        public const int DefaultResultPanelHeight = 180;
+        /// <summary>结果区高度下界（逻辑像素）。</summary>
+        public const int MinResultPanelHeight = 120;
+
+        /// <summary>结果区高度上界（逻辑像素）。</summary>
+        public const int MaxResultPanelHeight = 380;
+
+        /// <summary>端子区状态：未设置。</summary>
+        public const int PortsStateUnset = 0;
+
+        /// <summary>端子区状态：收起。</summary>
+        public const int PortsStateCollapsed = 1;
+
+        /// <summary>端子区状态：展开。</summary>
+        public const int PortsStateExpanded = 2;
+
+        /// <summary>
+        /// 归一化「反序列化得来的」结果区高度：&lt;= 0 视为字段缺失补默认 180；
+        /// 其余夹到 120~380。
+        /// <para>【与"钳制"的区别】缺失必须补默认值，只有显式写出的越界值才夹 ——
+        /// 把缺失值钳到 120 会让老用户一升级就发现"结果区变矮了"。</para>
+        /// </summary>
+        public static int NormalizeResultPanelHeight(int value)
+        {
+            if (value <= 0) return DefaultResultPanelHeight;
+            if (value < MinResultPanelHeight) return MinResultPanelHeight;
+            if (value > MaxResultPanelHeight) return MaxResultPanelHeight;
+            return value;
+        }
+
+        /// <summary>归一化端子区状态：只接受 1 / 2，其余（含缺失的 0）一律按默认"收起"。</summary>
+        public static int NormalizePortsState(int value)
+        {
+            return value == PortsStateExpanded ? PortsStateExpanded : PortsStateCollapsed;
+        }
+
         /// <summary>最大并行流程数的默认值。</summary>
         public const int DefaultMaxParallelFlows = 4;
 
@@ -247,6 +331,9 @@ namespace VisionPlatform.Core
             MaxParallelFlows = DefaultMaxParallelFlows;
             Language = Lang.ZhCN;
             Theme = DefaultTheme;
+            FlowResultPanelHeight = DefaultResultPanelHeight;
+            FlowPortsState = PortsStateCollapsed;
+            FlowLabelDetail = LabelDetailStandard;
         }
 
         /// <summary>把最大并行流程数钳制到 1~8（0 / 99 之类的越界值都会被纠正）。
@@ -283,6 +370,12 @@ namespace VisionPlatform.Core
             clone.Language = string.IsNullOrWhiteSpace(Language) ? Lang.ZhCN : Language;
             // 主题同理：缺失即深色（漏掉这行会在保存时被清成 null，下次启动退回深色）
             clone.Theme = string.IsNullOrWhiteSpace(Theme) ? DefaultTheme : Theme;
+            // 新增的两个 UI 偏好也必须归一化后带过去，否则保存时会把它们清成 0（= "未设置"），
+            // 下次启动虽然能补默认值，但用户拖过的高度就白拖了。
+            clone.FlowResultPanelHeight = NormalizeResultPanelHeight(FlowResultPanelHeight);
+            clone.FlowPortsState = NormalizePortsState(FlowPortsState);
+            // 标注详细度同理：归一化后再带过去，否则保存时会被清成 0（= 未设置）
+            clone.FlowLabelDetail = NormalizeLabelDetail(FlowLabelDetail);
             if (ViewBindings != null) clone.ViewBindings = new List<string>(ViewBindings);
             return clone;
         }
@@ -618,6 +711,14 @@ namespace VisionPlatform.Core
             if (cfg.Algorithm == null) cfg.Algorithm = new AlgorithmSettings();
             if (cfg.Ui == null) cfg.Ui = new UiSettings();
             if (cfg.Ui.ViewBindings == null) cfg.Ui.ViewBindings = new List<string>();
+
+            // 新增的 UI 偏好：老配置里没有这两个字段 → 反序列化得 0 → 归一化补默认值。
+            // 【必须是"归一化"而不是"钳制"】高度钳到 120 会让老用户一升级就发现"结果区变矮"；
+            // 端子区若把缺失当 false（展开）就与"默认收起"的需求相反（详见 UiSettings 注释）。
+            cfg.Ui.FlowResultPanelHeight = UiSettings.NormalizeResultPanelHeight(cfg.Ui.FlowResultPanelHeight);
+            cfg.Ui.FlowPortsState = UiSettings.NormalizePortsState(cfg.Ui.FlowPortsState);
+            // 标注详细度：老配置没有该字段 → 反序列化得 0 → 归一化为"标准"
+            cfg.Ui.FlowLabelDetail = UiSettings.NormalizeLabelDetail(cfg.Ui.FlowLabelDetail);
             if (cfg.Flows == null) cfg.Flows = new FlowSettings();
             if (cfg.Flows.Flows == null) cfg.Flows.Flows = new List<FlowDefinition>();
             if (cfg.Comm == null) cfg.Comm = CommSettings.CreateDefault();

@@ -50,6 +50,32 @@ namespace VisionPlatform.UI
         /// </summary>
         private readonly Dictionary<string, string> _roiLastGroup = new Dictionary<string, string>();
 
+        // 模板状态卡片（ShapeMatch / TemplateMatch 才有）：
+        //   _templateCardNodeId 记录"卡片当前绑的是哪个节点"，只有节点变了才 Dispose 重建。
+        //   参数面板在旋转 ROI 编辑态下每次松手都会 SetNode，无条件重建 = 拖一次手柄漏一张缩略图。
+        private TemplateStatusCard _templateCard;
+        private string _templateCardNodeId;
+
+        // OCR 的字符模板库卡片（数据源是整目录扫描，与匹配类的单模板资产完全不同）
+        private OcrTemplateCard _ocrCard;
+        private string _ocrCardNodeId;
+
+        // ---------------------------------------------------------------------
+        //  右栏结构（UI-R01）：全部代码构建，**不动 FlowForm.Designer.cs**
+        //  该工程有"VS 重序列化吃掉事件订阅"的事故史（DEF-01 就是这么坏的两个按钮），
+        //  所以设计器里的 lblParams / lblPorts / treePorts / nodeParamPanel 在构造期
+        //  从 panelRight 摘下来，重新装进这里新建的容器。
+        // ---------------------------------------------------------------------
+        private Panel panelRightTop;        // 上：参数标题 + 端子标题 + 端子树 + 参数面板(Fill)
+        private Panel panelSplitter;        // 中：6px 可拖动分隔条
+        private string _portsTitleBase = "";   // 端子标题原文（展开/收起时追加 ▼/▶）
+        private int _resultHeightLogical;      // 结果区高度（96-DPI 逻辑像素，见 UiSettings）
+        private bool _portsExpanded;
+        private bool _draggingSplitter;
+        private int _dragStartScreenY;
+        private int _dragStartHeight;
+        private int _heightBeforeZoom = -1;    // >=0 表示处于"放大"态，值为放大前的高度
+
         public FlowForm()
         {
             InitializeComponent();
@@ -73,6 +99,8 @@ namespace VisionPlatform.UI
             canvas.LinkReplaced += OnLinkReplaced;
 
             nodeParamPanel.ParamsChanged += OnParamsChanged;
+            // 参数面板里的动作行（「创建模板…」等）只抛 Key，语义由本窗体解释
+            nodeParamPanel.ActionInvoked += OnParamAction;
 
             try
             {
@@ -101,15 +129,10 @@ namespace VisionPlatform.UI
             //   还是设计器里的宋体 8pt，分类节点会渲染成宋体 8pt、叶子是雅黑 10pt，两级不一致。
             UiStyle.ApplyForm(this);
 
-            // 输出结果面板：Add 在最后 → WinForms 逆序停靠，它先拿到 Bottom，
-            // nodeParamPanel(Fill) 自动收缩，正好落在「编辑输入参数」下方。
-            // 放在 UiStyle.ApplyForm 之后：本面板自建配色（ApplyTheme）是唯一来源，
-            // 不希望再被通用遍历覆盖掉语义色。
-            resultPanel = new FlowResultPanel();
-            resultPanel.Dock = DockStyle.Bottom;
-            resultPanel.Height = 220;
-            resultPanel.ShapeSelected += OnResultShapeSelected;
-            panelRight.Controls.Add(resultPanel);
+            // 输出结果面板 + 右栏结构重整：见 BuildRightColumn 的注释
+            // （放在 UiStyle.ApplyForm 之后：本面板自建配色是唯一来源，
+            //   不希望再被通用遍历覆盖掉语义色）
+            BuildRightColumn();
 
             InitModules();
             RefreshPortTree(null);
@@ -133,6 +156,237 @@ namespace VisionPlatform.UI
             // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
             UiTitleBar.Attach(this);
         }
+
+        #region 右栏结构（UI-R01 / R10）
+
+        /// <summary>
+        /// 重建右栏：参数区、端子区（可收起）、6px 可拖动分隔条、结果区（高度可记忆）。
+        /// <para>
+        /// 【为什么不用设计器】见字段注释：设计器重序列化会吃掉事件订阅。
+        /// 这里把设计器里的四个子控件<strong>摘下来改名</strong>（<c>Controls.Clear</c> 不会 Dispose，对象仍在），
+        /// 重新装进新容器；<c>FlowForm.Designer.cs</c> 一个字节都不动。
+        /// </para>
+        /// <para>
+        /// 【停靠顺序】WinForms 按 Controls 集合<strong>逆序</strong>停靠：最后加的最先贴边。
+        /// 所以添加顺序是 (Fill) → (Bottom 分隔条) → (Bottom 结果区)，
+        /// 最终自上而下才是：参数/端子区 → 分隔条 → 结果区。
+        /// </para>
+        /// </summary>
+        private void BuildRightColumn()
+        {
+            // 读偏好（老配置缺字段 → 归一化成默认值，见 UiSettings.Normalize*）
+            _resultHeightLogical = UiSettings.NormalizeResultPanelHeight(
+                ConfigStore.Current != null && ConfigStore.Current.Ui != null
+                    ? ConfigStore.Current.Ui.FlowResultPanelHeight
+                    : 0);
+            _portsExpanded = UiSettings.NormalizePortsState(
+                ConfigStore.Current != null && ConfigStore.Current.Ui != null
+                    ? ConfigStore.Current.Ui.FlowPortsState
+                    : 0) == UiSettings.PortsStateExpanded;
+
+            _portsTitleBase = lblPorts != null ? lblPorts.Text : "输入/输出端子";
+
+            // 摘下来（不 Dispose），重新装进新容器
+            panelRight.Controls.Clear();
+
+            panelRightTop = new Panel();
+            panelRightTop.Dock = DockStyle.Fill;
+            panelRightTop.Margin = new Padding(0);
+
+            // 与设计器里的添加顺序一致 → 逆序停靠后自上而下：lblParams / lblPorts / treePorts / 参数区(Fill)
+            panelRightTop.Controls.Add(nodeParamPanel);
+            panelRightTop.Controls.Add(treePorts);
+            panelRightTop.Controls.Add(lblPorts);
+            panelRightTop.Controls.Add(lblParams);
+
+            // 端子标题变成"展开 / 收起"开关（UI-R01：默认收起为一行摘要）
+            if (lblPorts != null)
+            {
+                lblPorts.Cursor = Cursors.Hand;
+                lblPorts.Click += OnPortsToggleClick;
+            }
+
+            panelSplitter = new Panel();
+            panelSplitter.Dock = DockStyle.Bottom;
+            panelSplitter.Height = 6;
+            panelSplitter.Cursor = Cursors.SizeNS;
+            panelSplitter.MouseDown += OnSplitterMouseDown;
+            panelSplitter.MouseMove += OnSplitterMouseMove;
+            panelSplitter.MouseUp += OnSplitterMouseUp;
+
+            resultPanel = new FlowResultPanel();
+            resultPanel.Dock = DockStyle.Bottom;
+            resultPanel.ShapeSelected += OnResultShapeSelected;
+            resultPanel.ZoomClicked += OnResultZoomClicked;
+            // 缩略帧来源：预览区当前显示的图像（不转移所有权，内部只读）
+            resultPanel.SetFrameProvider(() => flowPreview != null ? flowPreview.DisplayedImage : null);
+
+            panelRight.Controls.Add(panelRightTop);
+            panelRight.Controls.Add(panelSplitter);
+            panelRight.Controls.Add(resultPanel);
+
+            ApplyPortsState();
+            ApplyResultHeight();
+
+            // 窗口缩放时按逻辑值重算（150% DPI 下若存物理像素，换显示器就会"结果区突然变一半高"）
+            Resize += (s, e) => ApplyResultHeight();
+        }
+
+        /// <summary>96-DPI 逻辑像素 → 物理像素。</summary>
+        private int ScaleByDpi(int logical)
+        {
+            double scale = DeviceDpi <= 0 ? 1.0 : DeviceDpi / 96.0;
+            return (int)Math.Round(logical * scale);
+        }
+
+        /// <summary>把记忆的结果区高度应用到控件（受"至少给参数区留 160px"约束）。</summary>
+        private void ApplyResultHeight()
+        {
+            if (resultPanel == null || panelRight == null) return;
+            if (_heightBeforeZoom >= 0) return;   // 放大态下由 OnResultZoomClicked 接管
+
+            int minPx = ScaleByDpi(UiSettings.MinResultPanelHeight);
+            int px = ScaleByDpi(UiSettings.NormalizeResultPanelHeight(_resultHeightLogical));
+
+            int available = panelRight.Height - ScaleByDpi(160);
+            if (available > 0 && px > available) px = available;
+            if (px < minPx) px = minPx;
+
+            resultPanel.Height = px;
+        }
+
+        private void ApplyPortsState()
+        {
+            if (treePorts != null) treePorts.Visible = _portsExpanded;
+            if (lblPorts != null)
+                lblPorts.Text = _portsTitleBase + (_portsExpanded ? "　▼" : "　▶");
+        }
+
+        private void OnPortsToggleClick(object sender, EventArgs e)
+        {
+            _portsExpanded = !_portsExpanded;
+            ApplyPortsState();
+            SaveUiPrefs();
+        }
+
+        private void OnSplitterMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e == null || e.Button != MouseButtons.Left) return;
+
+            _draggingSplitter = true;
+            _dragStartScreenY = Control.MousePosition.Y;
+            _dragStartHeight = resultPanel.Height;
+        }
+
+        private void OnSplitterMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_draggingSplitter) return;
+
+            // 向上拖 = 结果区变大
+            int dy = _dragStartScreenY - Control.MousePosition.Y;
+            int h = _dragStartHeight + dy;
+
+            int minPx = ScaleByDpi(UiSettings.MinResultPanelHeight);
+            int maxPx = ScaleByDpi(UiSettings.MaxResultPanelHeight);
+            int available = panelRight.Height - ScaleByDpi(160);
+            if (available > 0 && available < maxPx) maxPx = available;
+            if (maxPx < minPx) maxPx = minPx;
+
+            if (h < minPx) h = minPx;
+            if (h > maxPx) h = maxPx;
+
+            resultPanel.Height = h;
+        }
+
+        private void OnSplitterMouseUp(object sender, MouseEventArgs e)
+        {
+            if (!_draggingSplitter) return;
+            _draggingSplitter = false;
+
+            // 物理像素 → 逻辑值再存（跨 DPI 的稳定性靠这一步）
+            double scale = DeviceDpi <= 0 ? 1.0 : DeviceDpi / 96.0;
+            _resultHeightLogical = UiSettings.NormalizeResultPanelHeight(
+                (int)Math.Round(resultPanel.Height / scale));
+
+            SaveUiPrefs();
+        }
+
+        /// <summary>「放大 / 恢复」结果区（UI-R10）：放大前的高度要记着，恢复时才能回到原位。</summary>
+        private void OnResultZoomClicked(object sender, EventArgs e)
+        {
+            if (resultPanel == null || panelRight == null) return;
+
+            if (_heightBeforeZoom < 0)
+            {
+                _heightBeforeZoom = resultPanel.Height;
+
+                int full = panelRight.Height - ScaleByDpi(60);
+                int minPx = ScaleByDpi(UiSettings.MinResultPanelHeight);
+                if (full < minPx) full = minPx;
+
+                resultPanel.Height = full;
+                resultPanel.SetZoomed(true);
+            }
+            else
+            {
+                resultPanel.Height = _heightBeforeZoom;
+                _heightBeforeZoom = -1;
+                resultPanel.SetZoomed(false);
+                ApplyResultHeight();
+            }
+        }
+
+        /// <summary>持久化右栏偏好（高度存逻辑值、端子区存三态；不碰其它字段）。</summary>
+        private void SaveUiPrefs()
+        {
+            try
+            {
+                AppConfig cfg = ConfigStore.Current;
+                if (cfg == null || cfg.Ui == null) return;
+
+                cfg.Ui.FlowResultPanelHeight = UiSettings.NormalizeResultPanelHeight(_resultHeightLogical);
+                cfg.Ui.FlowPortsState = _portsExpanded
+                    ? UiSettings.PortsStateExpanded
+                    : UiSettings.PortsStateCollapsed;
+
+                ConfigStore.Save();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("保存右栏布局偏好失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>探针用：当前结果区高度（物理像素）。</summary>
+        public int ResultPanelHeightPx { get { return resultPanel != null ? resultPanel.Height : 0; } }
+
+        /// <summary>探针用：参数区当前可视高度（物理像素）。</summary>
+        public int ParamsHeightPx { get { return nodeParamPanel != null ? nodeParamPanel.Height : 0; } }
+
+        /// <summary>探针用：右栏总高。</summary>
+        public int RightColumnHeightPx { get { return panelRight != null ? panelRight.Height : 0; } }
+
+        /// <summary>探针用：端子区是否展开。</summary>
+        public bool PortsExpanded { get { return _portsExpanded; } }
+
+        /// <summary>探针用：结果区高度记忆值（逻辑像素）。</summary>
+        public int ResultHeightLogical { get { return _resultHeightLogical; } }
+
+        /// <summary>探针用：直接设置结果区高度逻辑值（模拟拖分隔条后松手）。</summary>
+        public void SetResultHeightLogical(int logical)
+        {
+            _resultHeightLogical = UiSettings.NormalizeResultPanelHeight(logical);
+            ApplyResultHeight();
+            SaveUiPrefs();
+        }
+
+        /// <summary>探针用：切换端子区展开态。</summary>
+        public void TogglePorts()
+        {
+            OnPortsToggleClick(this, EventArgs.Empty);
+        }
+
+        #endregion
 
         #region 初始化
 
@@ -358,7 +612,7 @@ namespace VisionPlatform.UI
             }
 
             _selectedNode = null;
-            nodeParamPanel.SetNode(null);
+            ShowNodeInPanel(null);
             resultPanel?.Clear();           // 换流程：上一次运行的结果已不对应当前流程
             flowPreview.ClearHighlight();   // 同上：别让旧节点的高亮残留到新流程上
             RefreshPortTree(null);          // 换流程：端子树回到「未选中节点」
@@ -481,8 +735,11 @@ namespace VisionPlatform.UI
         {
             _selectedNode = (e != null) ? e.Node : null;
 
-            nodeParamPanel.SetNode(e.Node);
-            resultPanel?.Clear();           // 换节点：旧结果属于别的节点，先清掉等下一次运行
+            ShowNodeInPanel(e.Node);
+            // 换节点：**不清空再填**（会闪一下空白），直接从缓存回填该节点的最近一次结果；
+            // 从未运行过的节点由面板显示"该节点尚未运行"空态（UI-R08 / S6）。
+            resultPanel?.ShowNode(e != null && e.Node != null ? e.Node.Id : "",
+                                  e != null && e.Node != null ? e.Node.Name : "");
             flowPreview.ClearHighlight();   // 同上：旧高亮属于别的节点
 
             // 预览「选中节点」模式据此过滤该节点自身的输出
@@ -491,6 +748,7 @@ namespace VisionPlatform.UI
 
             RefreshPortTree(_selectedNode);
             UpdateRoiButton();
+            UpdateRoiOutline(_selectedNode);   // FR-12：选中的 OCR 节点常显 ROI 轮廓，切走即隐藏
         }
 
         private void OnCanvasChanged(object sender, FlowNodeEventArgs e)
@@ -514,6 +772,7 @@ namespace VisionPlatform.UI
             {
                 _selectedNode = null;
                 RefreshPortTree(null);
+                UpdateRoiOutline(null);   // 节点被删：轮廓不能留在图上指向一个不存在的节点
             }
         }
 
@@ -584,6 +843,9 @@ namespace VisionPlatform.UI
 
             // 参数面板改了「图像源 → 图片路径」：立刻出图，不必点运行
             PreviewImageSourceFile();
+
+            // 改了模板 ROI / 训练参数后，卡片的状态可能从「已就绪」变成「与设置不匹配」
+            RefreshTemplateCard();
         }
 
         /// <summary>
@@ -656,11 +918,16 @@ namespace VisionPlatform.UI
         /// <summary>
         /// 候选「矩形 ROI」参数组（模板区域 / ROI 裁剪 / 搜索区域）。仅作字段匹配模板，
         /// 实际是否可用由 <see cref="FindDrawSpecs"/> 按参数表字段判定。
+        /// <para>
+        /// 每行前 4 项是 X/Y/W/H 键，第 5 项是显示名，<strong>可选的</strong>第 6 项是「角度键」：
+        /// 有角度键就把这一组画成<strong>旋转矩形</strong>（<see cref="DrawShapeKind.RotatedRect"/>）。
+        /// 本期只给 OCR 的 RoiX..RoiAngle 打开；TemplateX / SearchX 仍走轴对齐矩形 —— 这是增量，不是替换。
+        /// </para>
         /// </summary>
         private static readonly string[][] RectCandidates =
         {
             new[] { "TemplateX", "TemplateY", "TemplateW", "TemplateH", "模板区域" },
-            new[] { "RoiX", "RoiY", "RoiW", "RoiH", "ROI 裁剪" },
+            new[] { "RoiX", "RoiY", "RoiW", "RoiH", "ROI 裁剪", "RoiAngle" },
             new[] { "SearchX", "SearchY", "SearchW", "SearchH", "搜索区域" }
         };
 
@@ -702,9 +969,15 @@ namespace VisionPlatform.UI
                     string[] c = RectCandidates[i];
                     if (!string.Equals(f.Key, c[0], StringComparison.Ordinal)) continue;
                     if (!HasKey(table, c[1]) || !HasKey(table, c[2]) || !HasKey(table, c[3])) continue;
+                    if (result.Exists(x => string.Equals(x.PrimaryKey, c[0], StringComparison.Ordinal))) continue;
 
                     string label = string.IsNullOrEmpty(groupTitle) ? c[4] : groupTitle;
-                    if (!result.Exists(x => string.Equals(x.PrimaryKey, c[0], StringComparison.Ordinal)))
+
+                    // 有角度键 → 旋转矩形；没有（旧配置 / 其余两组）→ 轴对齐矩形
+                    string angleKey = (c.Length > 5) ? c[5] : null;
+                    if (!string.IsNullOrEmpty(angleKey) && HasKey(table, angleKey))
+                        result.Add(DrawSpec.MakeRotatedRect(label, c[0], c[1], c[2], c[3], angleKey));
+                    else
                         result.Add(DrawSpec.MakeRect(label, c[0], c[1], c[2], c[3]));
                 }
 
@@ -739,6 +1012,7 @@ namespace VisionPlatform.UI
                     return 2;
                 case DrawShapeKind.Line: return 3;
                 case DrawShapeKind.Ring: return 4;
+                case DrawShapeKind.RotatedRect: return 1;   // 与 RoiX 组同优先级，排在模板区域之后、搜索区域之前
                 default: return 9;
             }
         }
@@ -754,6 +1028,17 @@ namespace VisionPlatform.UI
                     (float)node.GetDouble(spec.Y, 0.0),
                     (float)node.GetDouble(spec.W, 0.0),
                     (float)node.GetDouble(spec.H, 0.0));
+
+            if (spec.Kind == DrawShapeKind.RotatedRect)
+            {
+                // 参数是「未旋转时的左上角 + 尺寸 + 绕中心的角度」；几何是「中心 + 尺寸 + 角度」
+                float x = (float)node.GetDouble(spec.X, 0.0);
+                float y = (float)node.GetDouble(spec.Y, 0.0);
+                float w = (float)node.GetDouble(spec.W, 0.0);
+                float h = (float)node.GetDouble(spec.H, 0.0);
+                float a = (float)node.GetDouble(spec.Angle, 0.0);
+                return new RotatedRectShape(new PointF(x + w * 0.5f, y + h * 0.5f), w, h, a);
+            }
 
             if (spec.Kind == DrawShapeKind.Line)
                 return new LineSegmentShape(
@@ -791,6 +1076,18 @@ namespace VisionPlatform.UI
                         (int)Math.Round(ls.P1.X), (int)Math.Round(ls.P1.Y),
                         (int)Math.Round(ls.P2.X), (int)Math.Round(ls.P2.Y));
             }
+            else if (s.Kind == DrawShapeKind.RotatedRect)
+            {
+                // 直接读参数而不是从 cur 反推：RotatedRectShape 的宽高会被钳到 ≥1，
+                // 未配置的 ROI 会显示成「1×1」而不是「未设置」。
+                double x = node.GetDouble(s.X, 0.0), y = node.GetDouble(s.Y, 0.0);
+                double w = node.GetDouble(s.W, 0.0), h = node.GetDouble(s.H, 0.0);
+                double a = node.GetDouble(s.Angle, 0.0);
+                if (w > 0.0 && h > 0.0)
+                    value = string.Format("{0},{1} {2}×{3} {4}°",
+                        (int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(w), (int)Math.Round(h),
+                        a.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+            }
             else
             {
                 RingShape ring = (RingShape)cur;
@@ -803,10 +1100,384 @@ namespace VisionPlatform.UI
             return s.Label + "（" + value + "）";
         }
 
+        /// <summary>
+        /// 把节点交给参数面板，并顺手刷新模板状态卡片。
+        /// <para>
+        /// 刻意做成唯一入口（不再零散调用 <see cref="NodeParamPanel.SetNode"/>）：
+        /// 卡片挂在面板 body 上，任何"换了节点却不刷卡片"的漏刷都会表现为
+        /// "切到形状匹配节点却还显示上一个节点的模板状态"，这类 bug 极难复现。
+        /// </para>
+        /// </summary>
+        private void ShowNodeInPanel(FlowNode node)
+        {
+            nodeParamPanel.SetNode(node);
+            RefreshTemplateCard();
+        }
+
+        // =====================================================================
+        //  模板状态卡片与模板制作窗（FR-01/03/05，DEF-02/03）
+        // =====================================================================
+
+        /// <summary>节点对应的模板算法键；不是匹配类节点返回 null。</summary>
+        private static string TemplateAlgorithmOf(FlowNode node)
+        {
+            FlowNodeType type;
+            if (node == null || !node.TryGetType(out type)) return null;
+
+            if (type == FlowNodeType.ShapeMatch) return "ShapeMatch";
+            if (type == FlowNodeType.TemplateMatch) return "TemplateMatch";
+            return null;
+        }
+
+        /// <summary>
+        /// 节点配置里的模板 ROI（<strong>用户坐标原样</strong>，不做位置修正映射）。
+        /// 与模板资产比对"ROI 是否被改过"必须用它 —— 映射后的 ROI 是"这一帧该看哪里"，
+        /// 不是"模板当初框的是哪一块"。
+        /// </summary>
+        private static Rectangle ConfiguredTemplateRoi(FlowNode node)
+        {
+            if (node == null) return Rectangle.Empty;
+            return new Rectangle(
+                node.GetInt("TemplateX", 0), node.GetInt("TemplateY", 0),
+                node.GetInt("TemplateW", 0), node.GetInt("TemplateH", 0));
+        }
+
+        /// <summary>卸掉当前 banner 卡片（面板负责 Dispose 旧控件）。</summary>
+        private void ClearBannerCard()
+        {
+            if (_templateCard == null && _ocrCard == null) return;
+
+            nodeParamPanel.SetBanner(null);
+            _templateCard = null;
+            _templateCardNodeId = null;
+            _ocrCard = null;
+            _ocrCardNodeId = null;
+        }
+
+        /// <summary>
+        /// 解析节点的 OCR 模板目录为绝对路径。
+        /// <para>解析<strong>只有一个入口</strong>：参数语义是"相对程序运行目录的名字或相对路径"，
+        /// <c>Path.Combine</c> 遇绝对路径会直接返回它，所以两种情况一条表达式覆盖。
+        /// <b>不存在"新目录优先"的第二套逻辑</b> —— 那会让老 <c>TemplateDir</c> 被静默忽略（C2 红线）。</para>
+        /// </summary>
+        private static string ResolveOcrDir(FlowNode node)
+        {
+            string v = node != null ? node.GetString("TemplateDir", "OCRModel") : "OCRModel";
+            v = (v ?? "").Trim();
+            if (v.Length == 0) v = "OCRModel";
+
+            try { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, v); }
+            catch (Exception) { return v; }
+        }
+
+        private void OnOcrCardManage(object sender, EventArgs e)
+        {
+            OpenOcrTemplateEditor();
+        }
+
+        private void OnOcrCardOpenFolder(object sender, EventArgs e)
+        {
+            FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+            if (node == null) return;
+
+            string dir = ResolveOcrDir(node);
+            try
+            {
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+            }
+            catch (Exception ex)
+            {
+                SetStatus("无法打开模板目录：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 打开字符模板库窗体（模态）。
+        /// <para>窗体里改目录会抛 <c>DirChanged</c>，在这里立刻写回节点参数并落盘 ——
+        /// 不写回就是"在库里加了一批字符，回主界面一跑还是读老目录"。</para>
+        /// </summary>
+        private void OpenOcrTemplateEditor()
+        {
+            FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+            if (node == null)
+            {
+                MessageBox.Show(this, "请先在画布上选中一个「字符识别(OCR)」节点。", "字符模板库",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            FlowNodeType type;
+            if (!node.TryGetType(out type) || type != FlowNodeType.Ocr)
+            {
+                MessageBox.Show(this, "节点「" + node.Name + "」不是字符识别节点，没有字符模板库。", "字符模板库",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new OcrTemplateForm(node.GetString("TemplateDir", "OCRModel")))
+            {
+                dlg.DirChanged += (s, e) =>
+                {
+                    string value = dlg.CurrentDir;
+                    if (string.IsNullOrEmpty(value)) return;
+                    if (string.Equals(value, node.GetString("TemplateDir", "OCRModel"), StringComparison.Ordinal)) return;
+
+                    node.Set("TemplateDir", value);
+                    SaveFlows();
+                    SetStatus("模板目录已更新：" + value);
+                };
+
+                dlg.ShowDialog(this);
+            }
+
+            // 关窗后强制重扫一次：可能刚入库 / 刚迁移
+            if (_ocrCard != null) _ocrCard.Rescan();
+            RefreshTemplateCard();
+        }
+
+        /// <summary>
+        /// 按当前选中节点维护模板状态卡片。
+        /// <para>
+        /// 【生命周期铁律】<strong>只有节点 Id 变了才 Dispose 旧卡片、构造新卡片</strong>；
+        /// 节点没变时只更新文字，缩略图由卡片自己按"模板戳是否变化"决定要不要重算。
+        /// 理由见 <c>_templateCardNodeId</c> 的注释（旋转 ROI 编辑态是高频 SetNode 路径）。
+        /// </para>
+        /// </summary>
+        private void RefreshTemplateCard()
+        {
+            FlowNode node = nodeParamPanel.Node;
+            string algorithm = TemplateAlgorithmOf(node);
+
+            FlowNodeType nodeType;
+            bool isOcr = node != null && node.TryGetType(out nodeType) && nodeType == FlowNodeType.Ocr;
+
+            if (algorithm == null && !isOcr)
+            {
+                ClearBannerCard();
+                return;
+            }
+
+            // ---- OCR：字符模板库卡片（整目录扫描）----
+            if (isOcr)
+            {
+                string dir = ResolveOcrDir(node);
+
+                if (_ocrCard == null || !string.Equals(_ocrCardNodeId, node.Id, StringComparison.Ordinal))
+                {
+                    ClearBannerCard();
+
+                    _ocrCard = new OcrTemplateCard();
+                    _ocrCard.ManageRequested += OnOcrCardManage;
+                    _ocrCard.OpenFolderRequested += OnOcrCardOpenFolder;
+                    _ocrCardNodeId = node.Id;
+
+                    nodeParamPanel.SetBanner(_ocrCard);
+                    _ocrCard.Bind(dir);
+                }
+                else
+                {
+                    // 同一节点：只在目录变化时重扫（Bind 内部判等）
+                    _ocrCard.Bind(dir);
+                }
+                return;
+            }
+
+            // ---- 匹配类：单模板资产卡片 ----
+            if (_ocrCard != null)
+            {
+                ClearBannerCard();
+            }
+
+            FlowDefinition flow = CurrentFlow;
+            string flowId = (flow != null) ? flow.Id : "";
+
+            if (_templateCard == null
+                || !string.Equals(_templateCardNodeId, node.Id, StringComparison.Ordinal))
+            {
+                nodeParamPanel.SetBanner(null);
+                _templateCard = new TemplateStatusCard();
+                _templateCard.CreateRequested += OnCardCreateRequested;
+                _templateCard.DeleteRequested += OnCardDeleteRequested;
+                _templateCardNodeId = node.Id;
+                nodeParamPanel.SetBanner(_templateCard);
+            }
+
+            _templateCard.Bind(flowId, node.Id, algorithm, ConfiguredTemplateRoi(node));
+            _templateCard.Refresh();
+        }
+
+        /// <summary>参数面板的动作行：目前只有匹配类节点的「创建模板…」。</summary>
+        private void OnParamAction(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+
+            if (string.Equals(key, "CreateTemplate", StringComparison.Ordinal))
+            {
+                OpenTemplateEditor();
+                return;
+            }
+
+            if (string.Equals(key, "ManageOcrTemplates", StringComparison.Ordinal))
+            {
+                OpenOcrTemplateEditor();
+                return;
+            }
+
+            if (string.Equals(key, "OcrRescanTemplates", StringComparison.Ordinal))
+            {
+                FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+                string dir = ResolveOcrDir(node);
+                if (_ocrCard != null) _ocrCard.Rescan();
+                SetStatus("已重新扫描模板目录：" + dir);
+                return;
+            }
+
+            // RoiPick / RoiPreview 由预览区顶条与 T04 承接，这里不重复实现，也不静默吞掉
+            Logger.Info("参数面板动作未在本窗体实现：" + key);
+        }
+
+        private void OnCardCreateRequested(object sender, EventArgs e)
+        {
+            OpenTemplateEditor();
+        }
+
+        private void OnCardDeleteRequested(object sender, EventArgs e)
+        {
+            FlowNode node = nodeParamPanel.Node;
+            FlowDefinition flow = CurrentFlow;
+            if (node == null || flow == null) return;
+
+            DialogResult ask = MessageBox.Show(this,
+                "确定删除节点「" + node.Name + "」的模板吗？删除后该节点运行时会判定 NG（未配置模板），\n" +
+                "需要重新制作模板才能恢复。",
+                "删除模板", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+            if (ask != DialogResult.OK) return;
+
+            string message;
+            TemplateStore.Delete(flow.Id, node.Id, out message);
+
+            // 删完立刻刷卡片：不必等下一次运行（模板戳已变，运行期会在下一帧自动重训并改判 NG）
+            RefreshTemplateCard();
+            SetStatus(message);
+            Logger.Info(string.Format("删除模板：flow={0} node={1} → {2}", flow.Id, node.Id, message));
+        }
+
+        /// <summary>
+        /// 打开模板制作窗（模态）。训练用的是窗体独占的算法上下文，与正在跑的流程互不干扰。
+        /// </summary>
+        private void OpenTemplateEditor()
+        {
+            FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+            if (node == null)
+            {
+                MessageBox.Show(this, "请先在画布上选中一个「形状匹配」或「模板匹配」节点。", "创建模板",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string algorithm = TemplateAlgorithmOf(node);
+            if (algorithm == null)
+            {
+                MessageBox.Show(this, "节点「" + node.Name + "」不需要模板（只有形状匹配 / 模板匹配才有）。",
+                    "创建模板", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            FlowDefinition flow = CurrentFlow;
+            if (flow == null || string.IsNullOrEmpty(flow.Id))
+            {
+                MessageBox.Show(this, "当前没有打开的流程，模板无法关联到流程。", "创建模板",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dlg = new TemplateForm(
+                algorithm, flow.Id, node.Id,
+                ConfiguredTemplateRoi(node),
+                node.GetDouble("Contrast", 30),
+                node.GetInt("MaxFeatures", 1500),
+                node.GetDouble("MinFeatureDist", 2),
+                GrabPreviewFrame))
+            {
+                dlg.ShowDialog(this);
+
+                if (!string.IsNullOrEmpty(dlg.SavedStamp))
+                {
+                    // 模板图正是"这块 ROI"的像素 → 必须把 ROI 写回节点，否则运行期立刻判
+                    // 「模板与当前 ROI 不匹配」（用户刚点完保存就看到不匹配，最难自查）
+                    Rectangle savedRoi = dlg.SavedRoi;
+                    node.Set("TemplateX", savedRoi.Width > 0 ? savedRoi.X : 0);
+                    node.Set("TemplateY", savedRoi.Height > 0 ? savedRoi.Y : 0);
+                    node.Set("TemplateW", savedRoi.Width > 0 ? savedRoi.Width : 0);
+                    node.Set("TemplateH", savedRoi.Height > 0 ? savedRoi.Height : 0);
+
+                    SaveFlows();
+                    SetStatus(dlg.SavedMessage);
+                }
+            }
+
+            // 无论保存成功 / 取消 / 删除，都重刷一次：状态卡片的唯一真源是磁盘
+            RefreshTemplateCard();
+        }
+
+        /// <summary>
+        /// 把预览区当前显示的图像复制一份给模板窗（"抓取当前帧"）。
+        /// <para>必须 Clone：视图对图像持有所有权，直接把它的位图交出去，
+        /// 一旦预览区换图就会把模板窗正在用的图 Dispose 掉（表现为随机 GDI+ 崩溃）。</para>
+        /// </summary>
+        private Bitmap GrabPreviewFrame()
+        {
+            Bitmap cur = flowPreview.DisplayedImage;
+            if (cur == null) return null;
+
+            try { return (Bitmap)cur.Clone(); }
+            catch (Exception ex)
+            {
+                Logger.Error("抓取当前帧失败：" + ex.Message);
+                return null;
+            }
+        }
+
         /// <summary>「画几何」按钮可用态：仅当选中节点确实有可绘制的几何参数时可用。</summary>
         private void UpdateRoiButton()
         {
             flowPreview.SetRoiEnabled(FindDrawSpecs(_selectedNode ?? nodeParamPanel.Node).Count > 0);
+        }
+
+        /// <summary>
+        /// FR-12：选中节点时在预览图上<strong>常显</strong>它自己的 ROI 轮廓 + 角度/尺寸标签，
+        /// 切到别的节点即隐藏（<see cref="OnCanvasNodeSelected"/> 里每次都会重算）。
+        /// <para>
+        /// 只对「带角度的 RoiX 组」（= OCR 旋转 ROI）生效；模板区域 / 搜索区域仍是轴对齐，
+        /// 保持原有交互不变。复用 <see cref="RotatedRectShape"/>（<c>IsEditable=false</c>），不新造类型。
+        /// </para>
+        /// </summary>
+        private void UpdateRoiOutline(FlowNode node)
+        {
+            if (flowPreview == null) return;
+
+            DrawSpec spec = null;
+            if (node != null)
+            {
+                foreach (DrawSpec s in FindDrawSpecs(node))
+                {
+                    if (s.Kind == DrawShapeKind.RotatedRect) { spec = s; break; }
+                }
+            }
+
+            if (spec == null) { flowPreview.ClearRoiOutline(); return; }
+
+            // 未配置 ROI（宽或高为 0）时不画：0 的语义是「整帧」，画个 0 尺寸框只会误导
+            double w = node.GetDouble(spec.W, 0.0);
+            double h = node.GetDouble(spec.H, 0.0);
+            if (w <= 0.0 || h <= 0.0) { flowPreview.ClearRoiOutline(); return; }
+
+            RotatedRectShape rr = ReadCurrentGeometry(node, spec) as RotatedRectShape;
+            if (rr == null) { flowPreview.ClearRoiOutline(); return; }
+
+            flowPreview.SetRoiOutline(rr, FlowPreviewPanel.FormatRotatedRoiLabel(
+                (float)w, (float)h, (float)node.GetDouble(spec.Angle, 0.0)));
         }
 
         /// <summary>
@@ -957,6 +1628,40 @@ namespace VisionPlatform.UI
                 node.Set(spec.Y2, y2);
                 SyncAndReport(node, spec, string.Format("({0},{1})->({2},{3})", x1, y1, x2, y2));
             }
+            else if (spec.Kind == DrawShapeKind.RotatedRect)
+            {
+                RotatedRectShape rr = e.Shape as RotatedRectShape;
+                if (rr == null) { _drawSpec = null; return; }
+
+                int w = (int)Math.Round(rr.Width);
+                int h = (int)Math.Round(rr.Height);
+                if (w < 1) w = 1;
+                if (h < 1) h = 1;
+
+                // 几何（中心）→ 参数（未旋转时的左上角）：left = center − W/2，
+                // 用取整后的 w/h 反算，保证「读→写」往返不漂移（中心恒为 .0 / .5）。
+                int x = (int)Math.Round(rr.Center.X - w * 0.5);
+                int y = (int)Math.Round(rr.Center.Y - h * 0.5);
+                if (x < 0) x = 0;
+                if (y < 0) y = 0;
+
+                double angle = Math.Round(rr.AngleDeg, 2);   // 已是 (-180, 180]
+
+                node.Set(spec.X, x);
+                node.Set(spec.Y, y);
+                node.Set(spec.W, w);
+                node.Set(spec.H, h);
+                node.Set(spec.Angle, angle);
+
+                SyncAndReport(node, spec, string.Format("X={0}, Y={1}, {2}×{3}, {4}°",
+                    x, y, w, h, angle.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)));
+
+                // ⚠️ 旋转矩形是「编辑态」：用户松手会再提交一次，所以这里要把当前组还回去
+                //    （SyncAndReport 末尾会把它清空，那是给「一次画完就结束」的矩形/直线/圆环用的）。
+                _drawSpec = spec;
+
+                UpdateRoiOutline(node);   // FR-12：轮廓跟着新值走
+            }
             else // Ring
             {
                 RingShape ring = e.Shape as RingShape;
@@ -982,7 +1687,7 @@ namespace VisionPlatform.UI
         {
             // 参数面板正显示该节点时同步回填，避免界面与配置不一致
             FlowNode shown = nodeParamPanel.Node;
-            if (shown != null && shown.Id == node.Id) nodeParamPanel.SetNode(node);
+            if (shown != null && shown.Id == node.Id) ShowNodeInPanel(node);
 
             SaveFlows();
             SetStatus(string.Format("已更新「{0}」：{1}；{2}", spec.Label, valueText, OverlayClearedHint));
@@ -1044,7 +1749,7 @@ namespace VisionPlatform.UI
 
             // 参数面板正显示该节点时同步回填，避免界面与配置不一致
             FlowNode shown = nodeParamPanel.Node;
-            if (shown != null && shown.Id == src.Id) nodeParamPanel.SetNode(src);
+            if (shown != null && shown.Id == src.Id) ShowNodeInPanel(src);
 
             SaveFlows();
             SetStatus("已载入图片并绑定到图像源节点：" + Path.GetFileName(path));
@@ -1436,9 +2141,17 @@ namespace VisionPlatform.UI
                 {
                     if (IsDisposed) return;
 
+                    // 【文案唯一出口】画布卡片摘要、状态栏、预览顶条、预览覆盖层、结果区
+                    // 全部走 NodeResultText，任何一处都不要就地拼字符串 —— 否则"三处不一致"
+                    // 会随着下一次改动重新长出来（见 Architecture §3.3 D3）。
+                    int elapsed = snap.IsChainEnd ? snap.CycleMs : snap.ElapsedMs;
+                    string primary = NodeResultText.Primary(snap.Type, snap.Metrics, elapsed, snap.Summary);
+                    string compact = NodeResultText.Compact(snap.Type, snap.Metrics);
+
                     canvas.SetNodeStatus(snap.NodeId,
                                          FlowCanvasControl.ToRunState(snap.Status),
-                                         snap.IsChainEnd ? snap.CycleMs : snap.ElapsedMs);
+                                         elapsed,
+                                         compact);
 
                     FeedResultPanel(snap);
 
@@ -1452,8 +2165,10 @@ namespace VisionPlatform.UI
                     }
                     else
                     {
-                        SetStatus(string.Format("第 {0}/{1} 个节点：{2}　{3} ms",
-                            snap.Index, snap.Total, snap.NodeName, snap.ElapsedMs));
+                        // 与预览顶条逐字同源：节点名/状态/主判据/耗时都来自同一个 primary
+                        SetStatus(string.Format("第 {0}/{1} 个节点：{2}　{3} · {4}",
+                            snap.Index, snap.Total, snap.NodeName,
+                            NodeResultText.Badge(snap.Status), primary));
                     }
                 });
             }
@@ -1473,15 +2188,35 @@ namespace VisionPlatform.UI
         {
             if (resultPanel == null || snap == null) return;
 
+            FlowNodeType type = NodeTypeOf(snap.NodeId);
+
             string sel = _selectedNode != null ? _selectedNode.Id : "";
             if (!string.IsNullOrEmpty(sel) && !string.Equals(snap.NodeId, sel, StringComparison.Ordinal))
             {
                 // 看的是某个节点，但整链跑完了：连续运行下仍要实时刷新完整结果（矩形/阈值/类别等）
-                if (snap.IsChainEnd) { resultPanel.Apply(snap); return; }
+                if (snap.IsChainEnd) { resultPanel.Apply(snap, type); return; }
                 return;
             }
 
-            resultPanel.Apply(snap);
+            resultPanel.Apply(snap, type);
+        }
+
+        /// <summary>按节点 Id 查节点类型（结果区主判据文案要用它选字段）。</summary>
+        private FlowNodeType NodeTypeOf(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return FlowNodeType.ResultOutput;
+
+            FlowDefinition f = CurrentFlow;
+            if (f != null && f.Nodes != null)
+            {
+                foreach (FlowNode n in f.Nodes)
+                {
+                    if (n == null || !string.Equals(n.Id, nodeId, StringComparison.Ordinal)) continue;
+                    FlowNodeType t;
+                    if (n.TryGetType(out t)) return t;
+                }
+            }
+            return FlowNodeType.ResultOutput;
         }
 
         /// <summary>
@@ -1490,7 +2225,35 @@ namespace VisionPlatform.UI
         /// </summary>
         private void OnResultShapeSelected(string nodeId, int shapeIndex)
         {
+            if (string.IsNullOrEmpty(nodeId) || shapeIndex < 0)
+            {
+                flowPreview.ClearHighlight();
+                return;
+            }
+
+            // 预览里现在画的就是该节点的图形 → 直接高亮（这是"实时"路径，最常用）
+            if (string.Equals(flowPreview.CurrentNodeId, nodeId, StringComparison.Ordinal)
+                && flowPreview.CurrentOwnShapes)
+            {
+                flowPreview.SetHighlight(nodeId, shapeIndex);
+                return;
+            }
+
+            // 否则该节点的帧已被后续节点覆盖（连续运行不留历史帧）：用 1/4 缩略帧回看。
+            // 坐标换算是 ThumbGeometry 的事，这里只传原图坐标的图形。
+            NodeResultCache c = resultPanel != null ? resultPanel.GetCache(nodeId) : null;
+            if (c != null && c.Thumbnail != null)
+            {
+                flowPreview.ShowHistoricalFrame(c.Thumbnail, c.Shapes, nodeId, shapeIndex,
+                    "历史帧（1/4 缩略）：" + c.NodeName);
+                SetStatus("该节点的图像已被后续节点覆盖，正在用 1/4 缩略帧回看；要看全分辨率请点「运行本节点」。");
+                return;
+            }
+
+            // 连缩略帧都没有：不许静默失败，给一句能照做的提示。
+            // 两种原因：① 该节点本次运行没被点开过（缩略帧按需生成）；② 它还没跑过。
             flowPreview.SetHighlight(nodeId, shapeIndex);
+            SetStatus("该节点本次运行未抓取缩略图，先在画布上选中它并点「运行本节点」即可回看。");
         }
 
         /// <summary>一次启动彻底结束（回到 Idle）：复位按钮；若关窗被挂起则自动关闭。</summary>

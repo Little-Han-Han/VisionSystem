@@ -1,0 +1,260 @@
+using System;
+using System.Drawing;
+using System.Globalization;
+using System.Windows.Forms;
+using VisionPlatform.Flow;
+
+namespace VisionPlatform.UI
+{
+    /// <summary>结果行的种类。</summary>
+    public enum FlowResultRowKind
+    {
+        /// <summary>节点主行（两行高：节点名 + 状态 + 时间 / 主判据 + 耗时）。</summary>
+        Main,
+
+        /// <summary>明细行（一行高：第 k 个目标的键值串）。</summary>
+        Detail
+    }
+
+    /// <summary>
+    /// 结果区的一行（主行或明细行）。
+    /// <para>
+    /// 【为什么不用 DataGridView】它行高统一，做不到"主行 36 / 明细 22"；
+    /// 而"一节点一行 + 展开明细"正是要靠这两种行高来区分层级。
+    /// </para>
+    /// <para>
+    /// 【为什么只用 Label、不重写 OnPaint】自绘控件要同时维护三份白名单
+    /// （<c>UiStyle.IsSelfDrawn</c>、<c>Core/Lang.cs</c> 的第二份拷贝、<c>UiThemeManager.ReapplySelfDrawn</c>），
+    /// 漏一处就是"切主题后这块不自绘了/不跟主题了"。本控件内部全是标准 <see cref="Label"/>，
+    /// 走普通控件路径，主题切换由 <c>UiStyle</c> 自动遍历即可 —— 但语义色（OK/NG）仍要显式设置，
+    /// 因为通用遍历会把前景色统一成主文本色。
+    /// </para>
+    /// </summary>
+    public sealed class FlowResultRow : UserControl
+    {
+        /// <summary>主行高度（96-DPI 逻辑值，由 <see cref="FlowResultPanel"/> 按 DPI 换算后设置）。</summary>
+        public const int MainHeight = 36;
+
+        /// <summary>明细行高度。</summary>
+        public const int DetailHeight = 22;
+
+        // 主行第一行：序号 / 节点名 / 状态 / 时间
+        private readonly Label _lblIndex;
+        private readonly Label _lblName;
+        private readonly Label _lblBadge;
+        private readonly Label _lblTime;
+        // 主行第二行：主判据
+        private readonly Label _lblPrimary;
+        // 明细行：整行一个文本
+        private readonly Label _lblDetail;
+
+        private bool _expanded;
+
+        /// <summary>行种类。</summary>
+        public FlowResultRowKind Kind { get; private set; }
+
+        /// <summary>明细行的目标序号（从 0 开始）；主行为 -1。</summary>
+        public int DetailIndex { get; private set; }
+
+        /// <summary>本行被点击（主行 / 明细行都用它）。</summary>
+        public event EventHandler RowClicked;
+
+        /// <summary>创建主行。</summary>
+        public static FlowResultRow CreateMain()
+        {
+            return new FlowResultRow(FlowResultRowKind.Main, -1);
+        }
+
+        /// <summary>创建明细行。</summary>
+        public static FlowResultRow CreateDetail(int index)
+        {
+            return new FlowResultRow(FlowResultRowKind.Detail, index);
+        }
+
+        private FlowResultRow(FlowResultRowKind kind, int detailIndex)
+        {
+            Kind = kind;
+            DetailIndex = detailIndex;
+
+            SetStyle(ControlStyles.Selectable, true);
+            Cursor = Cursors.Hand;
+            Margin = new Padding(0);
+            Padding = new Padding(0);
+
+            if (kind == FlowResultRowKind.Main)
+            {
+                Height = MainHeight;
+
+                _lblIndex = MakeLabel("", 20, 0, 18, 18, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
+                _lblName = MakeLabel("", 22, 0, 108, 18, ContentAlignment.MiddleLeft, UiTheme.FontBody);
+                _lblName.AutoEllipsis = true;
+                _lblBadge = MakeLabel("", 132, 0, 40, 18, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
+                _lblTime = MakeLabel("", 0, 0, 96, 18, ContentAlignment.MiddleRight, UiTheme.FontBadgeSmall);
+                _lblTime.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                _lblTime.Left = Math.Max(172, Width - 96);
+
+                _lblPrimary = MakeLabel("", 22, 18, 258, 17, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
+                _lblPrimary.AutoEllipsis = true;
+                _lblPrimary.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+                Controls.Add(_lblIndex);
+                Controls.Add(_lblName);
+                Controls.Add(_lblBadge);
+                Controls.Add(_lblTime);
+                Controls.Add(_lblPrimary);
+            }
+            else
+            {
+                Height = DetailHeight;
+
+                _lblDetail = MakeLabel("", 28, 0, 258, DetailHeight - 2, ContentAlignment.MiddleLeft,
+                                       UiTheme.FontBadgeSmall);
+                _lblDetail.AutoEllipsis = true;
+                _lblDetail.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                Controls.Add(_lblDetail);
+            }
+
+            // Label 会自己吃掉鼠标事件，导致"点在文字上没反应、点空白才对"。所以把每个
+            // 子 Label 的 Click 都接到同一个转发上，保证整行任何位置都能点。
+            foreach (Control c in Controls)
+            {
+                c.Cursor = Cursors.Hand;
+                c.Click += OnChildClick;
+            }
+
+            ApplyTheme();
+        }
+
+        private Label MakeLabel(string text, int left, int top, int width, int height,
+                                ContentAlignment align, Font font)
+        {
+            var lbl = new Label();
+            lbl.Text = text;
+            lbl.AutoSize = false;
+            lbl.Location = new Point(left, top);
+            lbl.Size = new Size(width, height);
+            lbl.TextAlign = align;
+            lbl.Font = font;
+            lbl.BackColor = Color.Transparent;
+            lbl.ForeColor = UiTheme.ColorTextSecondary;
+            return lbl;
+        }
+
+        // =====================================================================
+        //  填充
+        // =====================================================================
+
+        /// <summary>填充主行内容。</summary>
+        public void ApplyMain(int index, string nodeName, FlowNodeStatus status, string primary,
+                              int elapsedMs, DateTime runAt, bool expanded, bool hasResult)
+        {
+            _expanded = expanded;
+
+            _lblIndex.Text = index.ToString(CultureInfo.InvariantCulture);
+
+            // 收起时显示 ▶、展开时显示 ▼，与端子区的 ▲/▼ 同一套视觉语言
+            _lblName.Text = (expanded ? "▼ " : "▶ ") + (nodeName ?? "");
+
+            string badge = NodeResultText.Badge(status);
+            _lblBadge.Text = badge;
+            _lblBadge.ForeColor = StatusColor(status);
+
+            _lblTime.Text = hasResult && runAt != DateTime.MinValue
+                ? runAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+                : "";
+
+            string cost = elapsedMs >= 0
+                ? " · " + elapsedMs.ToString(CultureInfo.InvariantCulture) + " ms"
+                : "";
+            _lblPrimary.Text = hasResult
+                ? (primary ?? "")
+                : "该节点尚未运行";
+            _lblPrimary.ForeColor = hasResult ? UiTheme.ColorTextPrimary : UiTheme.ColorDisabled;
+
+            // 未运行不显示耗时；有结果时 primary 里已经带了耗时，这里不再重复拼
+            if (!hasResult && cost.Length > 0) _lblPrimary.Text += cost;
+        }
+
+        /// <summary>填充明细行内容（键值对压成一行，绝不换行 —— 换行会把固定行高撑破）。</summary>
+        public void ApplyDetail(int displayIndex, string text)
+        {
+            _lblDetail.Text = displayIndex.ToString(CultureInfo.InvariantCulture) + "　" + (text ?? "");
+            _lblDetail.ForeColor = UiTheme.ColorTextPrimary;
+        }
+
+        /// <summary>本行是否为当前高亮行（视觉反馈：左缘强调色 + 主文本色）。</summary>
+        public void SetAccent(bool on)
+        {
+            BackColor = on ? UiTheme.ColorHeaderBg : Color.Transparent;
+            if (Kind == FlowResultRowKind.Main && _lblName != null)
+                _lblName.ForeColor = on ? UiTheme.ColorAccent : UiTheme.ColorTextPrimary;
+        }
+
+        /// <summary>重套主题（语义色必须最后覆盖，否则会被通用遍历冲掉）。</summary>
+        public void ApplyTheme()
+        {
+            BackColor = Color.Transparent;
+            ForeColor = UiTheme.ColorTextPrimary;
+
+            if (Kind == FlowResultRowKind.Main)
+            {
+                _lblIndex.ForeColor = UiTheme.ColorTextSecondary;
+                _lblName.ForeColor = UiTheme.ColorTextPrimary;
+                _lblTime.ForeColor = UiTheme.ColorTextSecondary;
+                _lblPrimary.ForeColor = UiTheme.ColorTextPrimary;
+                _lblBadge.ForeColor = StatusColor(FlowNodeStatus.Pending);
+            }
+            else
+            {
+                _lblDetail.ForeColor = UiTheme.ColorTextPrimary;
+            }
+        }
+
+        /// <summary>状态 → 语义色（一处定义，主行徽标与其它地方共用）。</summary>
+        internal static Color StatusColor(FlowNodeStatus status)
+        {
+            switch (status)
+            {
+                case FlowNodeStatus.Ok: return UiTheme.ColorOk;
+                case FlowNodeStatus.Ng: return UiTheme.ColorNg;
+                case FlowNodeStatus.Running: return UiTheme.ColorRunning;
+                case FlowNodeStatus.Warn: return UiTheme.ColorWarn;
+                case FlowNodeStatus.Skipped: return UiTheme.ColorWarn;
+                default: return UiTheme.ColorTextSecondary;
+            }
+        }
+
+        /// <summary>本行是否处于展开态（仅主行有意义）。</summary>
+        public bool Expanded { get { return _expanded; } }
+
+        /// <summary>
+        /// 显示 / 隐藏时间戳。窄宽度下（150% DPI，右栏内容宽约 228px）优先牺牲时间戳，
+        /// 保住"节点名 + 状态 + 主判据"这三样真正决定要不要点开看的东西。
+        /// </summary>
+        public void ShowTimestamp(bool show)
+        {
+            if (_lblTime != null) _lblTime.Visible = show;
+        }
+
+        // =====================================================================
+        //  点击转发
+        // =====================================================================
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            RaiseClicked();
+        }
+
+        private void OnChildClick(object sender, EventArgs e)
+        {
+            RaiseClicked();
+        }
+
+        private void RaiseClicked()
+        {
+            EventHandler h = RowClicked;
+            if (h != null) h(this, EventArgs.Empty);
+        }
+    }
+}

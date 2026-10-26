@@ -225,6 +225,14 @@ namespace VisionSystem.Controls
         /// <summary>用户通过拖拽新建了一个图形。</summary>
         public event EventHandler<ShapeEventArgs> ShapeCreated;
 
+        /// <summary>
+        /// 用户<strong>调整完一个图形并松手</strong>（拖动结束）。与 <see cref="ShapeCreated"/>
+        /// 的分工：后者只在「新画出来一次」触发，本事件每次拖动 / 缩放 / 旋转结束都触发。
+        /// <para>宿主据此<strong>落盘一次</strong>；拖动过程中只靠 <see cref="ShapesChanged"/> 刷预览，
+        /// 绝不每帧写配置（否则每帧都 SaveFlows）。</para>
+        /// </summary>
+        public event EventHandler<ShapeEventArgs> ShapeCommitted;
+
         /// <summary>显示的图像被替换。</summary>
         public event EventHandler ImageChanged;
 
@@ -375,6 +383,17 @@ namespace VisionSystem.Controls
         {
             get { return _mouseImagePoint; }
         }
+
+        /// <summary>
+        /// 是否抑制右键菜单（默认 <c>false</c>）。
+        /// <para>
+        /// 宿主在"正在绘制 / 编辑几何"期间置 <c>true</c>：那段时间右键是「取消 / 完成」的语义，
+        /// 再弹菜单既干扰操作也容易误点。退出这些状态必须置回 <c>false</c> ——
+        /// 漏复位不会报错、不会崩，只是右键菜单从此静默消失，属于最难查的一类问题。
+        /// </para>
+        /// </summary>
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool SuppressContextMenu { get; set; }
 
         /// <summary>图像尺寸（无图像时为 Empty）。</summary>
         [Browsable(false)]
@@ -698,6 +717,12 @@ namespace VisionSystem.Controls
 
             if (_draggingShape && _activeShape != null)
             {
+                // Shift 吸附 15°：读修饰键的职责只放在控件里（RotatedRectShape 不引用 WinForms），
+                // 且必须在 SetHandlePosition 之前设好，否则本帧的旋转不会吸附。
+                RotatedRectShape draggingRr = _activeShape as RotatedRectShape;
+                if (draggingRr != null)
+                    draggingRr.SnapStepDeg = ((ModifierKeys & Keys.Shift) == Keys.Shift) ? 15f : 0f;
+
                 if (_activeHandleIndex >= 0)
                 {
                     _activeShape.SetHandlePosition(_activeHandleIndex, imagePt);
@@ -753,11 +778,23 @@ namespace VisionSystem.Controls
 
             if (_draggingShape)
             {
+                IGeometryShape committed = _activeShape;
+
                 _draggingShape = false;
                 _activeShape = null;
                 _activeHandleIndex = -1;
                 Capture = false;
                 Invalidate();
+
+                // 松手 = 用户调整完了：此时才让宿主落盘一次（拖动过程只刷预览）。
+                // 顺手把吸附步长清 0，避免后续程序化 SetHandlePosition 被上一次的 Shift 状态影响。
+                if (committed != null)
+                {
+                    RotatedRectShape committedRr = committed as RotatedRectShape;
+                    if (committedRr != null) committedRr.SnapStepDeg = 0f;
+
+                    OnShapeCommitted(committed);
+                }
             }
         }
 
@@ -952,6 +989,9 @@ namespace VisionSystem.Controls
                 return;
             }
 
+            // 记住本次画的是哪种图形：下面触发的事件里宿主可能改 Mode（矩形路径会恢复原模式）
+            bool wasRotatedRect = (_mode == InteractionMode.DrawRotatedRect);
+
             // 过滤误点击产生的微小图形
             float dx = screenPt.X - _drawStartScreen.X;
             float dy = screenPt.Y - _drawStartScreen.Y;
@@ -962,6 +1002,11 @@ namespace VisionSystem.Controls
                 created.IsSelected = true;
                 _shapes.Add(created);
                 OnShapeCreated(created);
+
+                // 旋转矩形画完必须切回选择态：否则用户拖不到刚加的 8 个手柄（"画完没法转"）。
+                // 只对 DrawRotatedRect 生效 —— 其它绘制模式仍由宿主自己恢复原模式，行为一字不改。
+                if (wasRotatedRect && _mode == InteractionMode.DrawRotatedRect)
+                    Mode = InteractionMode.Select;
             }
 
             Invalidate();
@@ -1111,6 +1156,11 @@ namespace VisionSystem.Controls
         /// <summary>在指定位置弹出右键菜单。</summary>
         private void ShowContextMenu(Point location)
         {
+            // 宿主主动抑制右键菜单：ROI 绘制 / 编辑期间右键等于「取消 / 完成」，
+            // 此时再弹一个与当前操作无关的菜单纯属干扰（且会挡住「右键取消」的直觉）。
+            // 刻意做成属性而不是把 ViewerContextMenu 置 null —— 后者只有 getter，改不了。
+            if (SuppressContextMenu) return;
+
             if (_contextMenu == null) return;
             _contextMenu.Show(this, location);
         }
@@ -1723,6 +1773,12 @@ namespace VisionSystem.Controls
         private void OnShapeCreated(IGeometryShape shape)
         {
             EventHandler<ShapeEventArgs> handler = ShapeCreated;
+            if (handler != null) handler(this, new ShapeEventArgs(shape));
+        }
+
+        private void OnShapeCommitted(IGeometryShape shape)
+        {
+            EventHandler<ShapeEventArgs> handler = ShapeCommitted;
             if (handler != null) handler(this, new ShapeEventArgs(shape));
         }
 

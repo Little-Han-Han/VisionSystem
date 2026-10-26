@@ -7,6 +7,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using VisionPlatform.Camera;
 using VisionPlatform.Communication;
 using VisionPlatform.Core;
@@ -77,6 +78,9 @@ namespace VisionPlatform.Flow
         //   指纹变化或原生模板数为 0（句柄是新的）时，清空后重新灌入。
         private string _ocrTemplateDir;
         private string _ocrTemplateFingerprint;
+
+        /// <summary>上一轮模板加载的结构化结果（指纹未变时直接复用，避免每帧重建失败清单）。</summary>
+        private OcrTemplateLoadResult _ocrTemplateResult;
 
         /// <summary>结果产出事件（FlowForm 转发给 FlowOutputChannel）。</summary>
         public event EventHandler<FlowOutputEventArgs> OutputReady;
@@ -205,7 +209,10 @@ namespace VisionPlatform.Flow
 
             p.ElapsedMs = (int)sw.ElapsedMilliseconds;
 
-            // 节点内部已显式设置 Skipped 时保持原状，不要覆盖成 Ok
+            // 节点内部已显式设置 Skipped / Warn 时保持原状，不要覆盖成 Ok。
+            // ⚠️ 这是 Warn 唯一的"让位点"：此后任何覆盖 p.Status 的代码都必须先检查
+            //    是不是 Warn（Warn 只影响显示，绝不等于 NG，也不得被 Ok 抹平）。
+            //     判据见 Architecture「T07 红线②」。
             if (p.Status == FlowNodeStatus.Running)
                 p.Status = ok ? FlowNodeStatus.Ok : FlowNodeStatus.Ng;
 
@@ -603,7 +610,7 @@ namespace VisionPlatform.Flow
                     catch (Exception) { p.Frame = null; }
                 }
 
-                if (!roi.IsEmpty) p.Shapes.AddRange(FlowShapes.RoiOutline(roi));
+                if (!roi.IsEmpty) p.AuxShapes.AddRange(FlowShapes.RoiOutline(roi));
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture, "滤波：{0} 核={1}{2}{3}",
                     FilterType.Name(fp.Type), fp.Ksize,
@@ -685,7 +692,7 @@ namespace VisionPlatform.Flow
             foreach (BlobResult b in kept)
                 p.Shapes.Add(FlowShapes.BlobRect(b.Cx, b.Cy, b.Width, b.Height));
 
-            if (!roi.IsEmpty) p.Shapes.AddRange(FlowShapes.RoiOutline(roi));
+            if (!roi.IsEmpty) p.AuxShapes.AddRange(FlowShapes.RoiOutline(roi));
 
             // 输出：默认把 0/255 掩膜作为工作帧传给下游；关闭时保持原彩色帧继续往下传
             bool handed = false;
@@ -756,12 +763,21 @@ namespace VisionPlatform.Flow
             int idx = 0;
             foreach (DetectResult d in outp.Detections)
             {
+                idx++;
                 bool primary = (outp.Best != null) && object.ReferenceEquals(d, outp.Best);
-                string label = d.ClassName + " " + d.Score.ToString("F2", CultureInfo.InvariantCulture);
+                string label = string.Format(CultureInfo.InvariantCulture,
+                    "#{0} {1} {2:0.00}", idx, d.ClassName, d.Score);
                 var box = FlowShapes.DetectBox(d.X, d.Y, d.Width, d.Height, primary, label);
                 if (box != null) box.Name = label;   // Name 供悬浮提示，Label 供画布绘制
                 p.Shapes.Add(box);
-                idx++;
+            }
+
+            p.Metrics.TargetCount = outp.Detections.Count;
+            if (outp.Best != null)
+            {
+                p.Metrics.TopScore = outp.Best.Score;
+                p.Metrics.TopCx = outp.Best.X + outp.Best.Width * 0.5;
+                p.Metrics.TopCy = outp.Best.Y + outp.Best.Height * 0.5;
             }
 
             // 预览帧：克隆当前工作帧供流程预览区显示（检测不修改原图，叠加层由画布绘制）
@@ -841,20 +857,27 @@ namespace VisionPlatform.Flow
                     AcceptScore = node.GetDouble("AcceptScore", 0.6)
                 };
                 int maxCount = node.GetInt("MaxCount", 200);
-                bool showBoxes = node.GetBool("ShowBoxes", true);
+                // 回落默认值必须与 Schema 的默认值一致：NodeParamSchema.Ocr 里 ShowBoxes 默认 "0"。
+                // 老配置里若显式写了 1，GetBool 会取到 1，行为不受影响。
+                bool showBoxes = node.GetBool("ShowBoxes", false);
+                // 区域框 / 合并字符串框默认开（清晰度靠"看得见识别区域与整串结果"，
+                // 而不是靠把一行 30 个字符框全打开 —— 那是噪声）。
+                bool showRegionBox = node.GetBool("ShowRegionBox", true);
+                bool showStringBox = node.GetBool("ShowStringBox", true);
 
                 // ③ 模板目录（相对程序基目录，默认 bin/x64/Release/OCRModel）
                 string dirName = node.GetString("TemplateDir", "OCRModel");
                 if (string.IsNullOrWhiteSpace(dirName)) dirName = "OCRModel";
                 string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dirName);
 
-                OpResult<int> tpl = EnsureOcrTemplates(dir);
+                OpResult<OcrTemplateLoadResult> tpl = EnsureOcrTemplates(dir);
                 if (!tpl.Success)
                 {
                     p.Summary = "字符识别：" + Tail(tpl.Message);
                     return false;
                 }
-                bool hasTemplate = tpl.Value > 0;
+                OcrTemplateLoadResult lib = tpl.Value;
+                bool hasTemplate = lib != null && lib.HasTextTemplate;
 
                 // ④ 识别：一次调用同时拿到整段文本 + 平均置信度 + 每个字符的真实标签
                 OpResult<OcrResult> rr = _algo.RecognizeEx(gray, op, maxCount);
@@ -869,10 +892,44 @@ namespace VisionPlatform.Flow
                 List<OcrChar> chars = (rr.Value != null && rr.Value.Chars != null)
                                     ? rr.Value.Chars : new List<OcrChar>();
 
-                // ⑤ 字符框：数据源与文本同源（不再单独调 Segment，否则框上标签恒为 "? 0.00"）。
-                //    ShowBoxes 只控制「是否绘制」，不影响统计口径。
-                //    图像坐标：ROI 模式下要从 ROI 局部坐标还原到整帧坐标。
+                // ⑤ 主判据：文本 / 字符数 / 平均置信度（结果区第二行、画布卡片、预览覆盖层同源）
                 int charCount = chars.Count;
+                p.Metrics.Text = text;
+                p.Metrics.CharCount = charCount;
+                p.Metrics.MeanScore = meanScore;
+                p.Metrics.TextOnly = !hasTemplate;
+                p.Metrics.TextOnlyReason = hasTemplate ? null : (lib != null ? lib.Brief() : "未载入字符模板");
+                p.Metrics.TargetCount = charCount;
+
+                // ⑥ 区域框（OCR 作用区域，默认开）：即使识别失败也画，用户才知道"它在看哪一块"。
+                //    走 AuxShapes —— 它是输入几何，不是检测目标，不能占结果区明细行。
+                if (showRegionBox)
+                {
+                    Rectangle region = roi.IsEmpty
+                        ? new Rectangle(0, 0, frame.Width, frame.Height)
+                        : roi;
+                    var regionBox = FlowShapes.OcrRegionBox(region,
+                        "OCR 区域 " + region.Width + "×" + region.Height);
+                    if (regionBox != null) p.AuxShapes.Add(regionBox);
+                }
+
+                // ⑦ 合并字符串框（默认开）：按行归并，一行一个框，标签就是该行的识别文本。
+                //    逐字符框是另一个开关，默认关 —— "一行 30 个框"是噪声不是清晰。
+                if (showStringBox && chars.Count > 0)
+                {
+                    foreach (OcrLine line in GroupOcrLines(chars))
+                    {
+                        var lineBox = FlowShapes.OcrStringBox(
+                            new Rectangle((int)Math.Round(line.X + roi.X), (int)Math.Round(line.Y + roi.Y),
+                                          Math.Max(1, (int)Math.Round(line.W)), Math.Max(1, (int)Math.Round(line.H))),
+                            string.IsNullOrEmpty(line.Text) ? "?" : line.Text);
+                        if (lineBox != null) p.AuxShapes.Add(lineBox);
+                    }
+                }
+
+                // ⑧ 逐字符框（默认关；老配置显式写了 1 的保持开启）。
+                //    数据源与文本同源（不再单独调 Segment，否则框上标签恒为 "? 0.00"）。
+                //    图像坐标：ROI 模式下要从 ROI 局部坐标还原到整帧坐标。
                 if (showBoxes)
                 {
                     foreach (OcrChar c in chars)
@@ -885,7 +942,7 @@ namespace VisionPlatform.Flow
                     }
                 }
 
-                // ⑥ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）。
+                // ⑨ 预览帧：OCR 不改图，只克隆当前帧供预览（不调 ReplaceFrame）。
                 // 连续运行（CaptureFrames=false）下预览区不显示单节点帧，跳过以免每周期徒增一张整幅克隆（LOH 压力→卡顿）。
                 if (s.CaptureFrames && s.Current != null)
                 {
@@ -894,12 +951,19 @@ namespace VisionPlatform.Flow
                     catch (Exception) { p.Frame = null; }
                 }
 
-                // ⑦ 摘要
+                // ⑩ 摘要
                 string shown = text.Replace("\r", "").Replace("\n", "⏎");
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "字符识别：\"{0}\"（{1} 字符，平均置信度 {2:F2}）{3}",
                     shown, charCount, meanScore,
-                    hasTemplate ? "" : "；模板目录为空，仅做分割");
+                    hasTemplate ? "" : "；" + lib.Brief());
+
+                // ⑪ 空库 / 全失败 / 部分失败 → 只黄不红（Warn 让位点见 StepNext）：
+                //    OK 在本系统里是"检测通过"的语义，把"根本没识别"显示成 OK 会让操作员
+                //    把未识别工件判为良品 —— 这是误判风险，不是界面美化问题。
+                if (lib != null && lib.State != OcrTemplateState.Ok)
+                    p.Status = FlowNodeStatus.Warn;
+
                 return true;
             }
             finally
@@ -909,8 +973,100 @@ namespace VisionPlatform.Flow
             }
         }
 
-        // ---------------------- 发送数据 / 接收数据（绑定「通讯」界面里已配置的通讯）----------------------
+        /// <summary>OCR 的一行归并结果（局部坐标）。</summary>
+        private struct OcrLine
+        {
+            public double X;
+            public double Y;
+            public double W;
+            public double H;
+            public string Text;
+        }
 
+        /// <summary>
+        /// 把逐字符结果按<strong>行</strong>归并（同一行的字符合成一个框，标签 = 该行文本）。
+        /// <para>
+        /// 【为什么要归并】用户说的"结果不够清楚"，一半来自"只画了一堆小框，看不出整串是什么"。
+        /// 「合并字符串框」就是把这堆小框折成"一行一个框 + 一行文本"，看结果不必逐字拼。
+        /// </para>
+        /// <para>归并判据：垂直方向重叠占较矮者高度的 50% 以上视为同一行（对倾斜/高低不齐有容忍度）。</para>
+        /// </summary>
+        private static List<OcrLine> GroupOcrLines(List<OcrChar> chars)
+        {
+            var lines = new List<OcrLine>();
+            if (chars == null || chars.Count == 0) return lines;
+
+            var sorted = new List<OcrChar>(chars);
+            sorted.Sort(delegate (OcrChar a, OcrChar b)
+            {
+                int byY = a.Y.CompareTo(b.Y);
+                return byY != 0 ? byY : a.X.CompareTo(b.X);
+            });
+
+            var buffer = new List<OcrChar>();
+
+            foreach (OcrChar c in sorted)
+            {
+                if (buffer.Count == 0)
+                {
+                    buffer.Add(c);
+                    continue;
+                }
+
+                // 与当前行已累积区域的垂直重叠比例（占较矮者高度的 50% 以上算同一行）
+                double top = double.MaxValue, bottom = double.MinValue;
+                foreach (OcrChar b in buffer)
+                {
+                    if (b.Y < top) top = b.Y;
+                    if (b.Y + b.H > bottom) bottom = b.Y + b.H;
+                }
+
+                double overlap = Math.Min(bottom, c.Y + c.H) - Math.Max(top, c.Y);
+                double shorter = Math.Min(bottom - top, c.H);
+                bool sameLine = shorter > 0 && overlap > 0 && overlap * 2 >= shorter;
+
+                if (sameLine)
+                {
+                    buffer.Add(c);
+                }
+                else
+                {
+                    lines.Add(BuildLine(buffer));
+                    buffer.Clear();
+                    buffer.Add(c);
+                }
+            }
+
+            if (buffer.Count > 0) lines.Add(BuildLine(buffer));
+            return lines;
+        }
+
+        /// <summary>把同一行的字符压成一个外接框 + 拼接文本（按 X 排序，保证文本顺序正确）。</summary>
+        private static OcrLine BuildLine(List<OcrChar> chars)
+        {
+            chars.Sort(delegate (OcrChar a, OcrChar b) { return a.X.CompareTo(b.X); });
+
+            double left = double.MaxValue, top = double.MaxValue, right = double.MinValue, bottom = double.MinValue;
+            var sb = new StringBuilder();
+            foreach (OcrChar c in chars)
+            {
+                if (c.X < left) left = c.X;
+                if (c.Y < top) top = c.Y;
+                if (c.X + c.W > right) right = c.X + c.W;
+                if (c.Y + c.H > bottom) bottom = c.Y + c.H;
+                sb.Append(string.IsNullOrEmpty(c.Label) ? "?" : c.Label);
+            }
+
+            var line = new OcrLine();
+            line.X = left;
+            line.Y = top;
+            line.W = Math.Max(1, right - left);
+            line.H = Math.Max(1, bottom - top);
+            line.Text = sb.ToString();
+            return line;
+        }
+
+        // ---------------------- 发送数据 / 接收数据（绑定「通讯」界面里已配置的通讯）----------------------
         /// <summary>
         /// 发送数据：按名称绑定一条通讯，发固定文本 / 格式化文本，或写 Modbus 单个保持寄存器（FC06）。
         /// <para>不依赖图像：输入端子是可选直通，无输入帧也照常执行（纯通讯场景可独立成链）。</para>
@@ -1121,66 +1277,168 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>
-        /// 保证原生 OCR 上下文里已灌入 dir 目录下的字符模板；返回模板数量（0 = 目录为空，只做分割）。
+        /// 保证原生 OCR 上下文里已灌入 dir 目录下的字符模板，返回<strong>结构化加载结果</strong>。
         /// 目录不存在时自动创建。原生模板挂在算法上下文上且没有 save/load，
-        /// 因此用「目录路径 + 文件数 + 最后写入时间」指纹 + 原生模板计数双重判断是否需要重载：
-        /// 指纹变化（模板文件增删 / 改）或原生计数为 0（句柄被重建）都会清空重灌。
+        /// 因此用「目录路径 + 逐文件指纹」+ 原生模板计数双重判断是否需要重载：
+        /// 指纹变化（模板文件增删 / 改名 / 改内容）或原生计数为 0（句柄被重建）都会清空重灌。
         /// </summary>
-        private OpResult<int> EnsureOcrTemplates(string dir)
+        /// <remarks>
+        /// 【与旧实现的三点差异，全部是"不再静默"的落地】
+        /// ① 返回结构化结果（四态：空 / 全失败 / 部分失败 / 正常），不再返回裸 int；
+        /// ② 单张模板读不出来<strong>不再中断整批加载</strong>，而是记入 Failures 清单后继续 ——
+        ///    否则"1 张坏图"会让另外 11 张好图也用不上；
+        /// ③ 读失败的原因逐条保留（0 字节 / 不是有效图像 / 尺寸异常 / 读盘异常），
+        ///    只有"给不出原因"的失败才允许只报计数。
+        /// </remarks>
+        private OpResult<OcrTemplateLoadResult> EnsureOcrTemplates(string dir)
         {
             if (string.IsNullOrWhiteSpace(dir)) dir = "OCRModel";
 
             if (!Directory.Exists(dir))
             {
                 try { Directory.CreateDirectory(dir); }
-                catch (Exception ex) { return OpResult<int>.Fail("无法创建模板目录 " + dir + "：" + ex.Message); }
+                catch (Exception ex)
+                {
+                    return OpResult<OcrTemplateLoadResult>.Fail(
+                        "无法创建模板目录 " + dir + "：" + ex.Message);
+                }
             }
 
             List<string> files = ListOcrTemplateFiles(dir);
-
-            long stamp = 0;
-            foreach (string f in files)
-            {
-                long t = File.GetLastWriteTimeUtc(f).Ticks;
-                if (t > stamp) stamp = t;
-            }
-            string fingerprint = dir + "|" + files.Count + "|" + stamp;
+            string fingerprint = OcrTemplateFingerprint(dir, files);
 
             OpResult<int> cur = _algo.OcrTemplateCount();
-            if (!cur.Success) return cur;
+            if (!cur.Success) return OpResult<OcrTemplateLoadResult>.Fail(cur.Message);
 
+            // 命中缓存：目录、指纹都没变，且原生侧确实挂着模板 → 直接复用上一轮结果
             if (cur.Value > 0
+                && _ocrTemplateResult != null
                 && string.Equals(dir, _ocrTemplateDir, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(fingerprint, _ocrTemplateFingerprint, StringComparison.Ordinal))
             {
-                return cur;
+                _ocrTemplateResult.FromCache = true;
+                return OpResult<OcrTemplateLoadResult>.Ok(_ocrTemplateResult);
             }
 
             if (cur.Value > 0)
             {
                 OpResult clr = _algo.ClearOcrTemplates();
-                if (!clr.Success) return OpResult<int>.Fail(clr.Message);
+                if (!clr.Success) return OpResult<OcrTemplateLoadResult>.Fail(clr.Message);
             }
 
-            int added = 0;
+            var result = new OcrTemplateLoadResult
+            {
+                Dir = dir,
+                FileCount = files.Count,
+                ScannedAt = DateTime.Now
+            };
+
             foreach (string f in files)
             {
                 string label = Path.GetFileNameWithoutExtension(f);
-                if (string.IsNullOrEmpty(label)) continue;
-
-                using (Bitmap bmp = LoadTemplateBitmap(f))
+                if (string.IsNullOrEmpty(label))
                 {
-                    if (bmp == null) continue;
+                    result.Failures.Add(new OcrTemplateFailure
+                    {
+                        FileName = Path.GetFileName(f),
+                        Reason = "文件名为空"
+                    });
+                    continue;
+                }
+
+                string reason;
+                using (Bitmap bmp = LoadTemplateBitmap(f, out reason))
+                {
+                    if (bmp == null)
+                    {
+                        result.Failures.Add(new OcrTemplateFailure
+                        {
+                            FileName = Path.GetFileName(f),
+                            Reason = string.IsNullOrEmpty(reason) ? "不是有效图像" : reason
+                        });
+                        continue;
+                    }
+
                     OpResult r = _algo.AddOcrTemplate(bmp, label);
                     if (!r.Success)
-                        return OpResult<int>.Fail("加载模板 " + Path.GetFileName(f) + " 失败：" + r.Message);
-                    added++;
+                    {
+                        // 单张失败也只是"这张没进去"，不放弃整批（坏一张拖垮全库是最糟的体验）
+                        result.Failures.Add(new OcrTemplateFailure
+                        {
+                            FileName = Path.GetFileName(f),
+                            Reason = "原生加载失败（" + r.Message + "）"
+                        });
+                        continue;
+                    }
+                    result.LoadedCount++;
                 }
             }
 
-            _ocrTemplateDir = dir;
-            _ocrTemplateFingerprint = fingerprint;
-            return OpResult<int>.Ok(added);
+            // 一张都没成功时，下一帧必须重试（不能把"全失败"缓存成"已加载 0 个"）
+            if (result.LoadedCount > 0)
+            {
+                _ocrTemplateDir = dir;
+                _ocrTemplateFingerprint = fingerprint;
+                _ocrTemplateResult = result;
+            }
+            else
+            {
+                _ocrTemplateDir = dir;
+                _ocrTemplateFingerprint = "";
+                _ocrTemplateResult = result;
+            }
+
+            result.FromCache = false;
+            return OpResult<OcrTemplateLoadResult>.Ok(result);
+        }
+
+        /// <summary>
+        /// 模板重载指纹：<strong>逐文件 <c>文件名 + 字节数 + mtimeTicks</c> 的累积哈希</strong>。
+        /// <para>
+        /// 【为什么必须含文件名】旧指纹是 <c>dir|文件数|最新mtime</c>。Windows 下**重命名保留
+        /// <c>LastWriteTime</c>**，于是 <c>A.png → B.png</c> 之后"文件数不变、最新 mtime 不变"
+        /// → 指纹不变 → 不重载 → <strong>运行时仍然用旧标签 A</strong>。
+        /// 这是个静默错误：界面上（管理窗体自己扫目录）看着一切正常，只有识别结果不对。
+        /// </para>
+        /// <para>
+        /// 【为什么可复现】<paramref name="files"/> 来自 <see cref="ListOcrTemplateFiles"/>，
+        /// 它已按文件名 Ordinal 排序，所以同样的磁盘状态必然得到同样的哈希
+        /// （指纹一旦引入不确定性，就会变成"每次运行都重灌模板"，性能抖动但结果不变 —— 更难查）。
+        /// </para>
+        /// </summary>
+        private static string OcrTemplateFingerprint(string dir, List<string> files)
+        {
+            unchecked
+            {
+                long hash = 17;
+                if (files != null)
+                {
+                    foreach (string f in files)
+                    {
+                        long length = 0;
+                        long ticks = 0;
+                        try
+                        {
+                            var fi = new FileInfo(f);
+                            length = fi.Length;
+                            ticks = fi.LastWriteTimeUtc.Ticks;
+                        }
+                        catch (Exception)
+                        {
+                            // 读不到属性也要参与哈希（用 0 占位），避免"文件消失"被当成"没变化"
+                        }
+
+                        string key = Path.GetFileName(f) + "|"
+                                     + length.ToString(CultureInfo.InvariantCulture) + "|"
+                                     + ticks.ToString(CultureInfo.InvariantCulture);
+
+                        for (int i = 0; i < key.Length; i++)
+                            hash = hash * 31 + key[i];
+                        hash = hash * 31 + 0x9E3779B9;   // 分隔不同文件，防"拼接后同串"
+                    }
+                }
+                return dir + "|" + (files != null ? files.Count : 0) + "|" + hash.ToString("X16");
+            }
         }
 
         /// <summary>列出模板目录下的图片文件（按文件名排序，保证模板顺序稳定）。</summary>
@@ -1209,13 +1467,67 @@ namespace VisionPlatform.Flow
         /// </summary>
         private static Bitmap LoadTemplateBitmap(string path)
         {
+            string reason;
+            return LoadTemplateBitmap(path, out reason);
+        }
+
+        /// <summary>
+        /// 读一张模板图并给出<strong>可读的失败原因</strong>（供"失败清单"逐条展示）。
+        /// <para>
+        /// 【为什么必须给出原因】只报"1 个文件读取失败"等于没报 —— 用户既不知道是哪个文件，
+        /// 也不知道该删掉它还是换个格式。四类原因必须在文案上可区分：0 字节 / 不是图像 /
+        /// 尺寸异常 / 读盘异常。
+        /// </para>
+        /// </summary>
+        private static Bitmap LoadTemplateBitmap(string path, out string reason)
+        {
+            reason = "";
             try
             {
-                using (Image img = Image.FromFile(path))
-                    return new Bitmap(img);
+                var fi = new FileInfo(path);
+                if (fi.Exists && fi.Length == 0)
+                {
+                    reason = "0 字节";
+                    return null;
+                }
+
+                // 先读后拷（不锁文件）+ 读取侧归一化成身份灰度。
+                // 【为什么读取侧也要归一化】GDI+ 的 PNG 解码不保真像素格式（8bpp 存盘可能解回
+                // 32bppArgb），而手工放进目录的图（截图工具存的 24bpp PNG）压根不经过入库路径。
+                // 只修写入侧等于只修一半：凡是从磁盘读回来交给算法库的，这里都必须转一次。
+                Bitmap raw = TemplateStore.LoadBitmapNoLock(path);
+                if (raw == null)
+                {
+                    reason = "不是有效图像";
+                    return null;
+                }
+
+                if (!TemplateStore.IsIdentityGray(raw))
+                {
+                    Bitmap gray = TemplateStore.ConvertToIdentityGray(raw);
+                    raw.Dispose();
+                    raw = gray;
+                }
+
+                // 尺寸过小/过大的模板即便读出来也认不了字，按"读取失败"计入清单更诚实
+                if (raw.Width < OcrCharStore.MinSide || raw.Height < OcrCharStore.MinSide)
+                {
+                    reason = "尺寸过小（" + raw.Width + "×" + raw.Height + "）";
+                    raw.Dispose();
+                    return null;
+                }
+                if (raw.Width > OcrCharStore.MaxSide * 4 || raw.Height > OcrCharStore.MaxSide * 4)
+                {
+                    reason = "尺寸异常（" + raw.Width + "×" + raw.Height + "）";
+                    raw.Dispose();
+                    return null;
+                }
+
+                return raw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                reason = "读取异常（" + ex.Message + "）";
                 return null;
             }
         }
@@ -1520,8 +1832,14 @@ namespace VisionPlatform.Flow
                 MinFeatureDist = node.GetDouble("MinFeatureDist", 2)
             };
 
-            Rectangle template = ApplyRoi(s, node, "TemplateX", "TemplateY", "TemplateW", "TemplateH");
-            string sig = ShapeSignature(template, train);
+            // 训练参数签名：<strong>只含三个训练参数</strong>，不含 ROI、不含匹配参数。
+            // 旧实现把 ApplyRoi 映射后的 ROI 塞进签名，上游位置修正没触发 warp（偏差 < 0.05 阈值、
+            // 但 Transform.IsValid 仍为 true）时映射结果每帧可能 ±1px 抖动 → 签名每帧变 → 每帧重训。
+            // 现在模板来自落盘资产、ROI 变了由「模板戳 / 资产不匹配」判定，这条抖动路径被彻底切断。
+            string flowId = (s.Flow != null) ? s.Flow.Id : "";
+            Rectangle configuredRoi = ConfiguredRoi(node, "TemplateX", "TemplateY", "TemplateW", "TemplateH");
+            string stamp = TemplateStore.StampOf(flowId, node.Id);
+            string sig = BuildModelSignature(stamp, ShapeTrainSignature(train));
 
             TrainedModel cache;
             bool cached = _models.TryGetValue(node.Id, out cache);
@@ -1530,42 +1848,60 @@ namespace VisionPlatform.Flow
                                  && cache.Template != null;
             bool slotMine = string.Equals(_shapeModelOwner, node.Id, StringComparison.Ordinal);
 
-            // 需要重训的三种情况：① 尚未训练；② 训练参数 / 模板 ROI 变了；③ 原生槽位被别的匹配节点抢占。
+            int retrainMs = 0;
+            bool retrained = false;   // 本轮是否真的重训过（Release 下重训可能 <1ms，不能靠 ms>0 判断）
+
+            // 需要重训的三种情况：① 尚未训练；② 训练参数变了 / 模板资产被替换（戳变）；③ 原生槽位被抢占。
             if (!signatureSame || !slotMine)
             {
-                // 决定「用哪一帧训练」——这是 P0-2 的关键：
-                //   · 首次训练 / 参数或 ROI 变了 → 用【当前帧】的模板 ROI（等同「示教一次」）
-                //   · 只是槽位被别人抢走 → 用【缓存的模板图】重训
-                // ⚠️ 绝不能拿当前帧当模板再在同一帧上匹配：那是自匹配，得分恒≈1.0，
-                //    MinScore 形同虚设，等于这个算法根本没在工作。
-                Bitmap trainFrame = signatureSame ? cache.Template : s.Current;
-                Rectangle trainRoi = signatureSame ? Rectangle.Empty : template;
-
-                // 槽位上若已是别人的模型，先显式释放再训练，避免原生侧叠加占用（句柄内存泄漏）
-                if (!string.IsNullOrEmpty(_shapeModelOwner) && !slotMine)
-                    _algo.ClearShapeModel();
-
-                var cr = _algo.CreateShapeModel(trainFrame, trainRoi, train);
-                if (cr == null || !cr.Success)
-                {
-                    p.Summary = "形状匹配：训练失败(" + (cr != null ? cr.Message : "无返回") + ")";
-                    return false;
-                }
-
-                // 缓存训练基准：只在「首次 / 参数变更」这两种情况下用当前帧刷新模板图
                 if (!signatureSame)
                 {
+                    // 唯一训练来源 = 落盘资产。<strong>绝不再拿当前帧当示教帧</strong>（隐式示教的病根：
+                    // 拿当前帧当模板又在同一帧上匹配 = 自匹配，得分恒 ≈1.0，MinScore 形同虚设）。
+                    TemplateLoadError loadError;
+                    string loadMessage;
+                    TemplateAsset asset = TemplateStore.Load(flowId, node.Id, "ShapeMatch", configuredRoi,
+                                                             out loadError, out loadMessage);
+                    if (asset == null)
+                    {
+                        if (cache != null && cache.Template != null) cache.Template.Dispose();
+                        _models.Remove(node.Id);
+
+                        // DEF-03：无模板资产 → 节点 NG 且文案明确，流程其余节点继续执行
+                        p.Summary = "形状匹配：" + DescribeTemplateFailure(loadError, loadMessage);
+                        return false;
+                    }
+
                     if (cache == null)
                     {
                         cache = new TrainedModel();
                         _models[node.Id] = cache;
                     }
                     if (cache.Template != null) cache.Template.Dispose();
-                    cache.Template = CropTemplate(s.Current, template);
+
+                    cache.Template = asset.Template;   // 所有权移交缓存，随 ClearTrainedModels 释放
+                    cache.Meta = asset.Meta;
                     cache.Signature = sig;
                 }
 
+                // 槽位上若已是别人的模型，先显式释放再训练，避免原生侧叠加占用（句柄内存泄漏）
+                if (!string.IsNullOrEmpty(_shapeModelOwner) && !slotMine)
+                    _algo.ClearShapeModel();
+
+                var tsw = Stopwatch.StartNew();
+                var cr = _algo.CreateShapeModel(cache.Template, Rectangle.Empty, train);
+                tsw.Stop();
+                retrainMs = (int)tsw.ElapsedMilliseconds;
+
+                if (cr == null || !cr.Success)
+                {
+                    p.Summary = "形状匹配：训练失败(" + (cr != null ? cr.Message : "无返回") + ")"
+                                + (retrainMs > 0 ? "（重训 " + retrainMs + " ms）" : "");
+                    return false;
+                }
+
                 _shapeModelOwner = node.Id;
+                retrained = true;
             }
 
             var param = new ShapeParam
@@ -1597,12 +1933,25 @@ namespace VisionPlatform.Flow
             for (int i = 0; i < matches.Count; i++)
             {
                 ShapeMatchResult m = matches[i];
-                p.Shapes.Add(FlowShapes.MatchBox(m.Cx, m.Cy, m.Width, m.Height, m.Angle, i == 0));
+                // 框标签：序号 + 分数（UI-R04 的「标准」档；详细度切换在预览区做，
+                // 这里只给出完整信息，简略档由预览区按 Label 前缀裁剪）
+                string label = string.Format(CultureInfo.InvariantCulture, "#{0} {1:0.00}", i + 1, m.Score);
+                p.Shapes.Add(FlowShapes.MatchBox(m.Cx, m.Cy, m.Width, m.Height, m.Angle, i == 0, label));
+            }
+
+            // 主判据：目标数 / 最高分 / 最高分目标坐标（结果区第二行与画布标签同源）
+            p.Metrics.TargetCount = matches.Count;
+            if (matches.Count > 0)
+            {
+                p.Metrics.TopScore = matches[0].Score;
+                p.Metrics.TopCx = matches[0].Cx;
+                p.Metrics.TopCy = matches[0].Cy;
+                p.Metrics.AngleDeg = matches[0].Angle;
             }
 
             if (matches.Count == 0)
             {
-                p.Summary = "形状匹配：未找到目标";
+                p.Summary = "形状匹配：未找到目标" + RetrainSuffix(retrained, retrainMs);
                 return false;
             }
 
@@ -1610,8 +1959,10 @@ namespace VisionPlatform.Flow
             s.SetPose(matches[0].Cx, matches[0].Cy, matches[0].Angle, matches[0].Scale);
             s.SetNodePose(node.Id, matches[0].Cx, matches[0].Cy, matches[0].Angle, matches[0].Scale);
 
+            // 摘要里带重训耗时：多形状匹配节点共用原生单槽位时每帧会重训 N 次，
+            // 现场只能靠这一项把"掉帧"归因到"重训"而不是"相机慢"。
             p.Summary = string.Format(CultureInfo.InvariantCulture, "形状匹配：{0} 个，最高 {1:F3}",
-                                      matches.Count, matches[0].Score);
+                                      matches.Count, matches[0].Score) + RetrainSuffix(retrained, retrainMs);
             return true;
         }
 
@@ -1637,9 +1988,11 @@ namespace VisionPlatform.Flow
 
             double minScore = node.GetDouble("MinScore", 0.8);
 
-            // 训练：在整帧上按模板 ROI 训练（不裁剪，坐标无需换算）
-            Rectangle template = ApplyRoi(s, node, "TemplateX", "TemplateY", "TemplateW", "TemplateH");
-            string sig = TemplateSignature(template);
+            // 训练来源 = 落盘资产（不再是当前帧）。NCC 没有训练参数，签名里只有模板戳。
+            string flowId = (s.Flow != null) ? s.Flow.Id : "";
+            Rectangle configuredRoi = ConfiguredRoi(node, "TemplateX", "TemplateY", "TemplateW", "TemplateH");
+            string stamp = TemplateStore.StampOf(flowId, node.Id);
+            string sig = BuildModelSignature(stamp, "NCC");
 
             TrainedModel cache;
             bool cached = _models.TryGetValue(node.Id, out cache);
@@ -1648,36 +2001,53 @@ namespace VisionPlatform.Flow
                                  && cache.Template != null;
             bool slotMine = string.Equals(_nccModelOwner, node.Id, StringComparison.Ordinal);
 
-            // 【P0-1 修复】模板【训练一次、匹配多次】。
-            // 旧代码每帧都拿【当前帧】当模板再去同一帧上匹配 → 得分恒≈1.0，MinScore 过滤形同虚设，
-            // 等于这个算法根本没在工作。重训只在这三种情况下发生：
-            //   ① 尚未训练；② 模板 ROI 变了；③ 原生模板槽位被别的模板匹配节点抢占。
+            int retrainMs = 0;
+            bool retrained = false;   // 本轮是否真的重训过（Release 下重训可能 <1ms，不能靠 ms>0 判断）
+
             if (!signatureSame || !slotMine)
             {
-                // 用缓存的模板图重训（槽位被抢时），否则用当前帧做「示教帧」
-                Bitmap trainFrame = signatureSame ? cache.Template : s.Current;
-                Rectangle trainRoi = signatureSame ? Rectangle.Empty : template;
-
-                OpResult tr = _algo.TrainTemplate(trainFrame, trainRoi);
-                if (tr == null || !tr.Success)
-                {
-                    p.Summary = "模板匹配：未训练模板（" + (tr != null ? tr.Message : "无返回") + "）";
-                    return false;
-                }
-
                 if (!signatureSame)
                 {
+                    TemplateLoadError loadError;
+                    string loadMessage;
+                    TemplateAsset asset = TemplateStore.Load(flowId, node.Id, "TemplateMatch", configuredRoi,
+                                                             out loadError, out loadMessage);
+                    if (asset == null)
+                    {
+                        if (cache != null && cache.Template != null) cache.Template.Dispose();
+                        _models.Remove(node.Id);
+
+                        // DEF-03：无模板资产 → 节点 NG 且文案明确，流程其余节点继续执行
+                        p.Summary = "模板匹配：" + DescribeTemplateFailure(loadError, loadMessage);
+                        return false;
+                    }
+
                     if (cache == null)
                     {
                         cache = new TrainedModel();
                         _models[node.Id] = cache;
                     }
                     if (cache.Template != null) cache.Template.Dispose();
-                    cache.Template = CropTemplate(s.Current, template);
+
+                    cache.Template = asset.Template;
+                    cache.Meta = asset.Meta;
                     cache.Signature = sig;
                 }
 
+                var tsw = Stopwatch.StartNew();
+                OpResult tr = _algo.TrainTemplate(cache.Template, Rectangle.Empty);
+                tsw.Stop();
+                retrainMs = (int)tsw.ElapsedMilliseconds;
+
+                if (tr == null || !tr.Success)
+                {
+                    p.Summary = "模板匹配：训练失败（" + (tr != null ? tr.Message : "无返回") + "）"
+                                + RetrainSuffix(retrained, retrainMs);
+                    return false;
+                }
+
                 _nccModelOwner = node.Id;
+                retrained = true;
             }
 
             // 搜索：有搜索 ROI 时先裁剪，结果坐标【必须加回左上角偏移】再画图形
@@ -1717,8 +2087,11 @@ namespace VisionPlatform.Flow
 
                 if (r == null || score < minScore)
                 {
+                    // 未达阈值也要把"最高得分"报出来：这是调阈值时唯一的依据
+                    p.Metrics.TargetCount = 0;
+                    p.Metrics.NccScore = score;
                     p.Summary = string.Format(CultureInfo.InvariantCulture,
-                        "模板匹配：未找到目标，最高得分 {0:F3}", score);
+                        "模板匹配：未找到目标，最高得分 {0:F3}", score) + RetrainSuffix(retrained, retrainMs);
                     return false;
                 }
 
@@ -1729,14 +2102,20 @@ namespace VisionPlatform.Flow
                 var box = new Rectangle((int)Math.Round(bx), (int)Math.Round(by),
                                         Math.Max(1, (int)Math.Round(r.Width)),
                                         Math.Max(1, (int)Math.Round(r.Height)));
-                p.Shapes.Add(FlowShapes.NccBox(box, true));
+                p.Shapes.Add(FlowShapes.NccBox(box, true,
+                    string.Format(CultureInfo.InvariantCulture, "#1 {0:0.00}", score)));
+
+                // 主判据：得分 + 角度（NCC 只平移，角度恒 0）+ 目标数
+                p.Metrics.TargetCount = 1;
+                p.Metrics.NccScore = score;
+                p.Metrics.AngleDeg = 0.0;
 
                 // 记录实时位姿（NCC 不支持旋转 / 缩放，角度恒 0、缩放恒 1）
                 s.SetPose(bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
                 s.SetNodePose(node.Id, bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "模板匹配：得分 {0:F3} @({1:F0},{2:F0})", score, bx, by);
+                    "模板匹配：得分 {0:F3} @({1:F0},{2:F0})", score, bx, by) + RetrainSuffix(retrained, retrainMs);
                 return true;
             }
             finally
@@ -1857,15 +2236,30 @@ namespace VisionPlatform.Flow
                 if (maxCount > 0 && kept.Count > maxCount) kept.RemoveRange(maxCount, kept.Count - maxCount);
 
                 // ROI 裁剪后，Blob 坐标相对裁剪图；加回裁剪区左上角还原到工作帧坐标
-                foreach (BlobResult b in kept)
+                // 标签 = 序号 + 面积 + 圆度（UI-R05）：三样是判断"这块是不是目标"的最小充分信息
+                for (int i = 0; i < kept.Count; i++)
                 {
+                    BlobResult b = kept[i];
                     double cx = b.Cx + usedRoi.X;
                     double cy = b.Cy + usedRoi.Y;
-                    p.Shapes.Add(FlowShapes.BlobRect(cx, cy, b.Width, b.Height));
+                    string label = string.Format(CultureInfo.InvariantCulture,
+                        "#{0} {1:0}px² · {2:0.00}", i + 1, b.Area, Circularity(b));
+                    p.Shapes.Add(FlowShapes.BlobRect(cx, cy, b.Width, b.Height, label));
                 }
 
+                // 主判据：数量 + 最大面积（及该目标的圆度）。必须在任何 return false 之前填好，
+                // 否则"期望个数不符"时结果区只剩一句文案、看不到实际数了几个。
+                p.Metrics.TargetCount = kept.Count;
+                if (kept.Count > 0)
+                {
+                    p.Metrics.MaxArea = kept[0].Area;
+                    p.Metrics.MaxCircularity = Circularity(kept[0]);
+                }
+
+                // ROI 轮廓是「输入几何」而不是「检测目标」：走 AuxShapes，
+                // 否则结果区会多出 4 条"边线"行，与"12 个 Blob"永久对不上（UI-R05）。
                 if (!usedRoi.IsEmpty)
-                    p.Shapes.AddRange(FlowShapes.RoiOutline(usedRoi));
+                    p.AuxShapes.AddRange(FlowShapes.RoiOutline(usedRoi));
 
                 // 判定：期望个数范围 + 单个面积范围（0 = 不限）
                 double expectMin = node.GetDouble("ExpectMin", 0);
@@ -1980,7 +2374,7 @@ namespace VisionPlatform.Flow
             CaliperLineResult r = lr.Value;
 
             // 可视化：投影窗口（未命中灰）+ 命中点 + 拟合直线
-            p.Shapes.AddRange(FlowShapes.CaliperWindows(r.Points));
+            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points));
             p.Shapes.AddRange(FlowShapes.CaliperHits(r.Points));
             IGeometryShape fit = FlowShapes.CaliperLine(r.Line);
             if (fit != null) p.Shapes.Add(fit);
@@ -2079,7 +2473,7 @@ namespace VisionPlatform.Flow
 
             CaliperCircleResult r = cr.Value;
 
-            p.Shapes.AddRange(FlowShapes.CaliperWindows(r.Points));
+            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points));
             p.Shapes.AddRange(FlowShapes.CaliperHits(r.Points));
             IGeometryShape fit = FlowShapes.CaliperCircle(r.Circle);
             if (fit != null) p.Shapes.Add(fit);
@@ -2725,37 +3119,110 @@ namespace VisionPlatform.Flow
         // =====================================================================
 
         /// <summary>
-        /// 一个匹配节点的训练缓存：<strong>模板图 + 训练参数签名</strong>。
-        /// 模板图是「第一次训练那一帧」的模板 ROI 副本（示教帧），
-        /// 之后所有帧都拿它当基准去匹配 —— 这就是「训练一次、匹配多次」。
+        /// 一个匹配节点的训练缓存：<strong>模板图 + 训练签名 + 元数据</strong>。
+        /// 模板图来自落盘的模板资产（<see cref="TemplateStore"/>），<strong>不再来自当前帧</strong> ——
+        /// 这才叫"训练一次、匹配多次"：模板来自"当初示教的那一块像素"，而不是"这一帧长什么样"。
         /// </summary>
         private sealed class TrainedModel
         {
-            /// <summary>训练参数签名（变则重训）。</summary>
+            /// <summary>训练签名：<c>"T@&lt;模板戳&gt;|&lt;训练参数签名&gt;"</c>（不含 ApplyRoi 的映射结果）。</summary>
             public string Signature = "";
 
-            /// <summary>训练基准图（模板 ROI 副本；释放时机见 <see cref="ClearTrainedModels"/>）。</summary>
+            /// <summary>模板基准图（来自模板资产；释放时机见 <see cref="ClearTrainedModels"/>）。</summary>
             public Bitmap Template = null;
-        }
 
-        /// <summary>形状匹配的训练参数签名（模板 ROI + 训练三参数）。</summary>
-        private static string ShapeSignature(Rectangle roi, ShapeTrainParam train)
-        {
-            return string.Format(CultureInfo.InvariantCulture,
-                "{0},{1},{2},{3}|C={4}|F={5}|D={6}",
-                roi.X, roi.Y, roi.Width, roi.Height,
-                train.Contrast, train.MaxFeatures, train.MinFeatureDist);
-        }
-
-        /// <summary>模板匹配（NCC）的训练参数签名（只有模板 ROI）。</summary>
-        private static string TemplateSignature(Rectangle roi)
-        {
-            return string.Format(CultureInfo.InvariantCulture,
-                "{0},{1},{2},{3}", roi.X, roi.Y, roi.Width, roi.Height);
+            /// <summary>模板元数据（状态卡片与日志用；可能为 null）。</summary>
+            public TemplateMeta Meta = null;
         }
 
         /// <summary>
-        /// 裁出模板 ROI 的副本作为训练基准图；ROI 无效（宽高为 0 或完全在图外）时退化为整帧副本。
+        /// 组装训练签名：<c>"T@" + 模板戳 + "|" + 训练参数签名</c>。
+        /// <para>
+        /// 模板戳是 <c>json + png</c> 的 <c>mtime + length</c>，所以"删除模板 / 重做模板 /
+        /// 外部拷贝覆盖"三条路径都会让戳变化 → 签名变化 → 下一帧自动重训并重新加载。
+        /// <strong>不引入任何跨对象通知机制</strong>。
+        /// </para>
+        /// </summary>
+        private static string BuildModelSignature(string stamp, string trainSignature)
+        {
+            return "T@" + (string.IsNullOrEmpty(stamp) ? "0" : stamp) + "|"
+                   + (string.IsNullOrEmpty(trainSignature) ? "-" : trainSignature);
+        }
+
+        /// <summary>形状匹配的训练参数签名：<c>"C=30|F=1500|D=2"</c>（只含训练参数，不含 ROI）。</summary>
+        private static string ShapeTrainSignature(ShapeTrainParam train)
+        {
+            if (train == null) return "-";
+            return string.Format(CultureInfo.InvariantCulture,
+                "C={0:0.###}|F={1}|D={2:0.###}",
+                train.Contrast, train.MaxFeatures, train.MinFeatureDist);
+        }
+
+        /// <summary>
+        /// 读节点配置里的 ROI（<strong>用户坐标，原样</strong>，不做位置修正映射）。
+        /// <para>
+        /// 与模板资产比对"ROI 是否被改过"必须用配置值：<see cref="ApplyRoi"/> 会把
+        /// <c>Offset</c> 与位置修正变换叠进去，那是"这一帧该看哪里"，不是"模板当初框的是哪一块"。
+        /// 混淆两者就会出现"工件移动后模板被判失效"的误报。
+        /// </para>
+        /// </summary>
+        private static Rectangle ConfiguredRoi(FlowNode node,
+                                               string kx, string ky, string kw, string kh)
+        {
+            if (node == null) return Rectangle.Empty;
+
+            int x = node.GetInt(kx, 0);
+            int y = node.GetInt(ky, 0);
+            int w = node.GetInt(kw, 0);
+            int h = node.GetInt(kh, 0);
+            return new Rectangle(x, y, w, h);
+        }
+
+        /// <summary>
+        /// 模板不可用时给用户看的一句话（三类原因文案不同 —— PRD 6.3）。
+        /// 「未配置模板，请先创建模板」是 DEF-03 的规定文案，改动前先看需求。
+        /// </summary>
+        private static string DescribeTemplateFailure(TemplateLoadError error, string message)
+        {
+            switch (error)
+            {
+                case TemplateLoadError.FileMissing:
+                    return "未配置模板，请先创建模板";
+
+                case TemplateLoadError.MismatchWithNode:
+                    return "模板与当前 ROI 不匹配，请重新创建模板";
+
+                case TemplateLoadError.CorruptedOrVersionMismatch:
+                    return "模板文件损坏或版本不兼容，请重新创建模板（" + Tail(message) + "）";
+
+                default:
+                    return string.IsNullOrEmpty(message) ? "模板不可用，请重新创建模板" : message;
+            }
+        }
+
+        /// <summary>重训耗时后缀：只在真的重训过时出现（否则每帧都写"重训 0ms"反而干扰判读）。</summary>
+        private static string RetrainSuffix(int retrainMs)
+        {
+            return retrainMs > 0 ? "（重训 " + retrainMs + " ms）" : "";
+        }
+
+        /// <summary>
+        /// 重训后缀：<strong>只要真的重训过就一定有标记</strong>。
+        /// <para>
+        /// 【为什么不能只看 <paramref name="retrainMs"/> &gt; 0】Release 下训练常在同一毫秒内完成，
+        /// 于是"重训过但耗时 0"和"压根没重训"在摘要上是同一句话 —— 而这两件事的排查价值完全相反：
+        /// 后者说明模型复用正常，前者可能意味着每帧都在重训（掉帧的真凶）。
+        /// </para>
+        /// </summary>
+        private static string RetrainSuffix(bool retrained, int retrainMs)
+        {
+            if (!retrained) return "";
+            return retrainMs > 0 ? "（重训 " + retrainMs + " ms）" : "（重训 <1 ms）";
+        }
+
+        /// <summary>
+        /// 裁出模板 ROI 的副本；ROI 无效（宽高为 0 或完全在图外）时退化为整帧副本。
+        /// 运行期已不再用它训练（模板来自资产），保留给"从当前帧取一块"的旧调用点与诊断。
         /// </summary>
         private static Bitmap CropTemplate(Bitmap src, Rectangle roi)
         {

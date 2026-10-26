@@ -52,7 +52,13 @@ namespace VisionPlatform.UI
         Ok,
 
         /// <summary>不合格，红底白字 "NG"。</summary>
-        Ng
+        Ng,
+
+        /// <summary>
+        /// 执行成功但结果不能用于判良品（如 OCR 模板库为空只做了分割），黄底白字 "警告"。
+        /// <para>刻意不复用 OK：把"根本没识别"显示成 OK 会让操作员把未识别工件判成良品。</para>
+        /// </summary>
+        Warn
     }
 
     /// <summary>界面主题模式：深色 / 浅色（用户在「系统设置 → 界面主题」里切换）。</summary>
@@ -487,6 +493,12 @@ namespace VisionPlatform.UI
                     label.BackColor = ColorNg;
                     label.ForeColor = Color.White;
                     label.Text = "NG";
+                    label.Visible = true;
+                    break;
+                case UiVerdict.Warn:
+                    label.BackColor = ColorWarn;
+                    label.ForeColor = Color.White;
+                    label.Text = "警告";
                     label.Visible = true;
                     break;
                 default:

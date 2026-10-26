@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using VisionSystem.Controls.Rendering;
 
 namespace VisionSystem.Controls.Geometry
@@ -14,8 +15,11 @@ namespace VisionSystem.Controls.Geometry
         /// <summary>允许的最小边长（图像像素）。</summary>
         public const float MinSize = 1f;
 
-        /// <summary>旋转手柄的控制点序号。</summary>
-        public const int RotateHandleIndex = 4;
+        /// <summary>
+        /// 旋转手柄的控制点序号。<strong>8 = 「4 角(0..3) + 4 边中点(4..7) + 旋转(8)」</strong>；
+        /// 原为 4，加入边中点手柄后 4..7 让给上下左右，旋转挪到 8。
+        /// </summary>
+        public const int RotateHandleIndex = 8;
 
         /// <summary>创建空旋转矩形。</summary>
         public RotatedRectShape()
@@ -72,6 +76,19 @@ namespace VisionSystem.Controls.Geometry
         }
 
         public string Name { get; set; }
+
+        /// <summary>
+        /// 可选标签文本：非空时在<strong>旋转后的左上角</strong>外侧绘制（文字保持水平）。
+        /// <para>空值不画，保证既有生产用法（<c>FlowShapes.MatchBox</c> 的结果框）视觉零变化。</para>
+        /// </summary>
+        public string Label { get; set; }
+
+        /// <summary>
+        /// 旋转吸附步长（度）；0 = 不吸附。由宿主（<c>ImageViewer</c> 读 Shift）按需设置，
+        /// 几何类不引用 WinForms。
+        /// </summary>
+        public float SnapStepDeg { get; set; }
+
         public object Tag { get; set; }
         public Color StrokeColor { get; set; } = Color.DeepSkyBlue;
         public float LineWidth { get; set; } = 2f;
@@ -188,6 +205,35 @@ namespace VisionSystem.Controls.Geometry
             {
                 g.DrawLine(axisPen, vp.ImageToControl(Center), vp.ImageToControl(axisEnd));
             }
+
+            // 标签：样式照抄 RectangleShape.Draw 的标签段（9pt Bold + 半透明黑底 + 顶部越界落框内），
+            // 但**文字保持水平**（大角度下旋转文字不可读），定位在旋转后的左上角顶点外侧。
+            // g.Save/Restore 包裹：让本段改成任何绘制方式都不会把 Graphics 状态泄漏给同帧的其它图形。
+            if (!string.IsNullOrEmpty(Label))
+            {
+                GraphicsState state = g.Save();
+                try
+                {
+                    using (var font = new Font("Segoe UI", 9f, FontStyle.Bold))
+                    using (var textBrush = new SolidBrush(Color.FromArgb(235, StrokeColor.R, StrokeColor.G, StrokeColor.B)))
+                    using (var bgBrush = new SolidBrush(Color.FromArgb(170, 0, 0, 0)))
+                    {
+                        PointF anchor = screen[0];      // 旋转后的左上角（屏幕坐标）
+                        SizeF sz = g.MeasureString(Label, font);
+
+                        float bx = anchor.X;
+                        float by = anchor.Y - sz.Height - 3f;
+                        if (by < 0f) by = anchor.Y + 3f;     // 顶部越界则画在框内
+
+                        g.FillRectangle(bgBrush, bx, by, sz.Width + 6f, sz.Height + 3f);
+                        g.DrawString(Label, font, textBrush, bx + 3f, by + 1f);
+                    }
+                }
+                finally
+                {
+                    g.Restore(state);
+                }
+            }
         }
 
         public bool HitTest(PointF imagePt, float tolerance)
@@ -212,14 +258,23 @@ namespace VisionSystem.Controls.Geometry
         public IList<ShapeHandle> GetHandles()
         {
             PointF[] corners = GetCorners();
-            var list = new List<ShapeHandle>(5);
+            var list = new List<ShapeHandle>(9);
 
+            // 0..3 四个角点：索引与顺序保持现状不动（与 RectangleShape 的 0..3 对齐）
             for (int i = 0; i < 4; i++)
                 list.Add(new ShapeHandle(corners[i], HandleKind.Resize, i, "C" + i));
 
-            // 旋转手柄：位于局部 +X 轴外侧
+            // 4..7 四个边中点，顺序 T / R / B / L（与 RectangleShape 的 4..7 同序同语义）
+            float hw = _width * 0.5f;
+            float hh = _height * 0.5f;
+            list.Add(new ShapeHandle(ToWorld(new PointF(0f, -hh)), HandleKind.Resize, 4, "T"));
+            list.Add(new ShapeHandle(ToWorld(new PointF(hw, 0f)), HandleKind.Resize, 5, "R"));
+            list.Add(new ShapeHandle(ToWorld(new PointF(0f, hh)), HandleKind.Resize, 6, "B"));
+            list.Add(new ShapeHandle(ToWorld(new PointF(-hw, 0f)), HandleKind.Resize, 7, "L"));
+
+            // 8 = 旋转手柄：位于局部 +X 轴外侧
             float margin = Math.Max(_width, _height) * 0.18f;
-            PointF rotatePos = ToWorld(new PointF(_width * 0.5f + margin, 0f));
+            PointF rotatePos = ToWorld(new PointF(hw + margin, 0f));
             list.Add(new ShapeHandle(rotatePos, HandleKind.Rotate, RotateHandleIndex, "Rotate"));
 
             return list;
@@ -229,7 +284,19 @@ namespace VisionSystem.Controls.Geometry
         {
             if (handleIndex == RotateHandleIndex)
             {
-                AngleDeg = (float)(Math.Atan2(imagePt.Y - Center.Y, imagePt.X - Center.X) * 180.0 / Math.PI);
+                float deg = (float)(Math.Atan2(imagePt.Y - Center.Y, imagePt.X - Center.X) * 180.0 / Math.PI);
+
+                // 吸附（Shift）：只在旋转分支里做；步长由宿主按当前修饰键设置
+                if (SnapStepDeg > 0.5f)
+                    deg = (float)Math.Round(deg / SnapStepDeg) * SnapStepDeg;
+
+                AngleDeg = deg;      // setter 负责归一化到 (-180, 180]
+                return;
+            }
+
+            if (handleIndex >= 4 && handleIndex <= 7)
+            {
+                ResizeFromEdge(handleIndex, imagePt);
                 return;
             }
 
@@ -252,6 +319,51 @@ namespace VisionSystem.Controls.Geometry
             Center = new PointF((fixedCorner.X + imagePt.X) * 0.5f, (fixedCorner.Y + imagePt.Y) * 0.5f);
         }
 
+        /// <summary>
+        /// 边中点手柄（4=T 5=R 6=B 7=L）：<strong>只改一个维度</strong>、对边固定、角度不变。
+        /// <para>
+        /// 必须先把拖动点反旋转到<strong>局部坐标</strong>再算：在图像坐标里直接加减，
+        /// 带角度时会算到另一个轴上（矩形会"斜着变形"）。
+        /// </para>
+        /// </summary>
+        private void ResizeFromEdge(int handleIndex, PointF imagePt)
+        {
+            PointF local = ToLocal(imagePt);        // 相对当前中心、已消除旋转
+            float hw = _width * 0.5f;
+            float hh = _height * 0.5f;
+
+            float newHw = hw;
+            float newHh = hh;
+            var centerLocal = new PointF(0f, 0f);
+
+            switch (handleIndex)
+            {
+                case 4:   // T：局部上边（y = -hh）动，下边（y = +hh）固定
+                    newHh = Math.Abs(hh - local.Y) * 0.5f;
+                    centerLocal.Y = (hh + local.Y) * 0.5f;
+                    break;
+
+                case 5:   // R：局部右边（x = +hw）动，左边（x = -hw）固定
+                    newHw = Math.Abs(local.X + hw) * 0.5f;
+                    centerLocal.X = (local.X - hw) * 0.5f;
+                    break;
+
+                case 6:   // B：局部下边（y = +hh）动，上边（y = -hh）固定
+                    newHh = Math.Abs(local.Y + hh) * 0.5f;
+                    centerLocal.Y = (local.Y - hh) * 0.5f;
+                    break;
+
+                default:  // 7 = L：局部左边（x = -hw）动，右边（x = +hw）固定
+                    newHw = Math.Abs(hw - local.X) * 0.5f;
+                    centerLocal.X = (hw + local.X) * 0.5f;
+                    break;
+            }
+
+            Width = newHw * 2f;
+            Height = newHh * 2f;
+            Center = ToWorld(centerLocal);          // 角度不变，只把新中心放回世界坐标
+        }
+
         public IGeometryShape Clone()
         {
             var copy = new RotatedRectShape(Center, _width, _height, _angleDeg);
@@ -264,6 +376,7 @@ namespace VisionSystem.Controls.Geometry
         {
             if (target == null) return;
             target.Name = Name;
+            target.Label = Label;
             target.Tag = Tag;
             target.StrokeColor = StrokeColor;
             target.LineWidth = LineWidth;
