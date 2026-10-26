@@ -85,15 +85,17 @@ namespace VisionPlatform.UI
             {
                 Height = MainHeight;
 
-                _lblIndex = MakeLabel("", 20, 0, 18, 18, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
-                _lblName = MakeLabel("", 22, 0, 108, 18, ContentAlignment.MiddleLeft, UiTheme.FontBody);
+                // 【字号层级】不要用 FontBadgeSmall（14pt 粗体，是视图右下角 OK/NG 徽标专用）：
+                // 塞进 17~18px 高的行内 Label 会被裁切、两行互相压，现场看就是"结果区糊成一团"。
+                _lblIndex = MakeLabel("", 20, 0, 18, 18, ContentAlignment.MiddleLeft, UiTheme.FontSmall);
+                _lblName = MakeLabel("", 22, 0, 118, 18, ContentAlignment.MiddleLeft, UiTheme.FontGroupTitle);
                 _lblName.AutoEllipsis = true;
-                _lblBadge = MakeLabel("", 132, 0, 40, 18, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
-                _lblTime = MakeLabel("", 0, 0, 96, 18, ContentAlignment.MiddleRight, UiTheme.FontBadgeSmall);
+                _lblBadge = MakeLabel("", 142, 0, 42, 18, ContentAlignment.MiddleLeft, UiTheme.FontGroupTitle);
+                _lblTime = MakeLabel("", 0, 0, 96, 18, ContentAlignment.MiddleRight, UiTheme.FontSmall);
                 _lblTime.Anchor = AnchorStyles.Top | AnchorStyles.Right;
                 _lblTime.Left = Math.Max(172, Width - 96);
 
-                _lblPrimary = MakeLabel("", 22, 18, 258, 17, ContentAlignment.MiddleLeft, UiTheme.FontBadgeSmall);
+                _lblPrimary = MakeLabel("", 22, 18, 258, 17, ContentAlignment.MiddleLeft, UiTheme.FontBody);
                 _lblPrimary.AutoEllipsis = true;
                 _lblPrimary.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
@@ -108,7 +110,7 @@ namespace VisionPlatform.UI
                 Height = DetailHeight;
 
                 _lblDetail = MakeLabel("", 28, 0, 258, DetailHeight - 2, ContentAlignment.MiddleLeft,
-                                       UiTheme.FontBadgeSmall);
+                                       UiTheme.FontSmall);
                 _lblDetail.AutoEllipsis = true;
                 _lblDetail.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
                 Controls.Add(_lblDetail);

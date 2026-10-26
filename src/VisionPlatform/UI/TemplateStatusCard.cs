@@ -28,8 +28,16 @@ namespace VisionPlatform.UI
         /// <summary>卡片高度（<c>Dock=Top</c> 只吃高度，高度必须由卡片自己给）。</summary>
         public const int CardHeight = 108;
 
-        private const int ThumbW = 104;
-        private const int ThumbH = 78;
+        // 版面常量（与 OcrTemplateCard 对齐：缩略图在左、文字在右、动作按钮单独一行）
+        private const int ThumbW = 88;
+        private const int ThumbH = 66;
+        private const int TextLeft = 104;
+        private const int TextRightPad = 8;
+        private const int ButtonTop = 78;
+        private const int ButtonH = 26;
+        private const int BtnRedoW = 72;
+        private const int BtnDeleteW = 64;
+        private const int BtnGap = 6;
 
         private readonly PictureBox _thumb;
         private readonly Label _lblState;
@@ -65,7 +73,7 @@ namespace VisionPlatform.UI
             Padding = new Padding(0);
 
             _thumb = new PictureBox();
-            _thumb.Location = new Point(8, 10);
+            _thumb.Location = new Point(8, 8);
             _thumb.Size = new Size(ThumbW, ThumbH);
             _thumb.SizeMode = PictureBoxSizeMode.Zoom;
             _thumb.TabStop = false;
@@ -74,25 +82,27 @@ namespace VisionPlatform.UI
             Controls.Add(_thumb);
 
             _lblState = MakeLabel(UiTheme.FontBody, true);
-            _lblState.Location = new Point(120, 8);
+            _lblState.Location = new Point(TextLeft, 6);
             _lblState.Size = new Size(96, 22);
             Controls.Add(_lblState);
 
-            _lblDetail = MakeLabel(UiTheme.FontBadgeSmall, false);
-            _lblDetail.Location = new Point(120, 32);
-            _lblDetail.Size = new Size(220, 20);
+            // 明细/原因用 8.5pt 小字：FontBadgeSmall 是 14pt 的 OK/NG 徽标字体，
+            // 拿它写明细会在 288px 右栏里被省略号吃掉（见 UiTheme.FontSmall 注释）。
+            _lblDetail = MakeLabel(UiTheme.FontSmall, false);
+            _lblDetail.Location = new Point(TextLeft, 28);
+            _lblDetail.Size = new Size(150, 18);
             Controls.Add(_lblDetail);
 
-            _lblReason = MakeLabel(UiTheme.FontBadgeSmall, false);
-            _lblReason.Location = new Point(120, 52);
-            _lblReason.Size = new Size(220, 46);
+            _lblReason = MakeLabel(UiTheme.FontSmall, false);
+            _lblReason.Location = new Point(TextLeft, 46);
+            _lblReason.Size = new Size(150, 30);
             Controls.Add(_lblReason);
 
             _btnRedo = new UiButton();
             _btnRedo.Text = "重做";
             _btnRedo.Kind = UiButtonKind.Neutral;
-            _btnRedo.Size = new Size(64, 26);
-            _btnRedo.Location = new Point(220, 8);
+            _btnRedo.Size = new Size(BtnRedoW, ButtonH);
+            _btnRedo.Location = new Point(8, ButtonTop);
             _btnRedo.Click += (s, e) =>
             {
                 EventHandler h = CreateRequested;
@@ -103,8 +113,8 @@ namespace VisionPlatform.UI
             _btnDelete = new UiButton();
             _btnDelete.Text = "删除";
             _btnDelete.Kind = UiButtonKind.Stop;
-            _btnDelete.Size = new Size(64, 26);
-            _btnDelete.Location = new Point(220, 8);
+            _btnDelete.Size = new Size(BtnDeleteW, ButtonH);
+            _btnDelete.Location = new Point(8 + BtnRedoW + BtnGap, ButtonTop);
             _btnDelete.Click += (s, e) =>
             {
                 EventHandler h = DeleteRequested;
@@ -264,10 +274,11 @@ namespace VisionPlatform.UI
             _btnDelete.Visible = has;
             _btnRedo.Visible = true;
 
-            _btnRedo.Location = new Point(Math.Max(120, Width - 76), 8);
-            _btnDelete.Location = new Point(Math.Max(120, Width - 148), 8);
-            _lblDetail.Width = Math.Max(60, Width - 132);
-            _lblReason.Width = Math.Max(60, Width - 132);
+            // 文字区宽度跟着卡片走；按钮位置在构造期已定（独立一行，不随宽度变化、也不会压住文字）
+            int textW = Math.Max(60, Width - TextLeft - TextRightPad);
+            _lblState.Width = textW;
+            _lblDetail.Width = textW;
+            _lblReason.Width = textW;
         }
 
         /// <summary>

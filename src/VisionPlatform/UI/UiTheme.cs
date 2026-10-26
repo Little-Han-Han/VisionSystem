@@ -304,6 +304,22 @@ namespace VisionPlatform.UI
             get { return _fontBadgeSmall ?? (_fontBadgeSmall = new Font(FamilyBody, 14f, FontStyle.Bold)); }
         }
 
+        private static Font _fontSmall;
+
+        /// <summary>
+        /// 辅助说明文字（卡片明细 / 路径 / 失败原因）：微软雅黑 8.5 pt Regular。
+        /// <para>
+        /// 【为什么必须单独一个】上面那个 <see cref="FontBadgeSmall"/> 虽然叫 "Small"，
+        /// 实际是 <strong>14 pt 粗体</strong>的 OK/NG 大徽标字体 —— 拿它写明细行，
+        /// 右栏 288px 宽下"3 个字符 · 3 张样本"会被省略号吃掉一半，
+        /// 现场看到的就是"状态卡只有一个字 + 三个按钮"。名字具有误导性，这里显式分开。
+        /// </para>
+        /// </summary>
+        public static Font FontSmall
+        {
+            get { return _fontSmall ?? (_fontSmall = new Font(FamilyBody, 8.5f, FontStyle.Regular)); }
+        }
+
         private static Font _fontToolbar;
 
         /// <summary>工具栏（导航栏）条目：微软雅黑 10.5 pt Bold。

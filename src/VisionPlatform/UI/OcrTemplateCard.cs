@@ -25,8 +25,16 @@ namespace VisionPlatform.UI
         /// <summary>卡片高度（与 <see cref="TemplateStatusCard.CardHeight"/> 对齐的视觉常量）。</summary>
         public const int CardHeight = 108;
 
-        private const int ThumbW = 104;
-        private const int ThumbH = 78;
+        // 版面常量（改这里就够了，ApplyLayout 只按它们摆位）
+        private const int ThumbW = 88;      // 缩略图宽（比 TemplateStatusCard 的 104 略窄：
+        private const int ThumbH = 66;      //   本卡片多一行按钮，横向要把位置让出来）
+        private const int TextLeft = 104;   // 文字列起点 = 缩略图右边距 8 + 宽 88 + 8
+        private const int TextRightPad = 8;
+        private const int ButtonTop = 78;   // 按钮单独一行：文字在上、动作在下，互不遮挡
+        private const int ButtonH = 26;
+        private const int BtnManageW = 76;
+        private const int BtnSmallW = 52;
+        private const int BtnGap = 6;
 
         private readonly PictureBox _thumb;
         private readonly Label _lblState;
@@ -35,6 +43,8 @@ namespace VisionPlatform.UI
         private readonly UiButton _btnManage;
         private readonly UiButton _btnRescan;
         private readonly UiButton _btnOpen;
+
+        private readonly ToolTip _tip;
 
         private string _dir = "";
         private int _scanToken;
@@ -58,7 +68,7 @@ namespace VisionPlatform.UI
             Padding = new Padding(0);
 
             _thumb = new PictureBox();
-            _thumb.Location = new Point(8, 10);
+            _thumb.Location = new Point(8, 8);
             _thumb.Size = new Size(ThumbW, ThumbH);
             _thumb.SizeMode = PictureBoxSizeMode.Zoom;
             _thumb.TabStop = false;
@@ -67,25 +77,25 @@ namespace VisionPlatform.UI
             Controls.Add(_thumb);
 
             _lblState = MakeLabel(UiTheme.FontBody, true);
-            _lblState.Location = new Point(120, 8);
+            _lblState.Location = new Point(TextLeft, 6);
             _lblState.Size = new Size(150, 22);
             Controls.Add(_lblState);
 
-            _lblDetail = MakeLabel(UiTheme.FontBadgeSmall, false);
-            _lblDetail.Location = new Point(120, 32);
-            _lblDetail.Size = new Size(220, 20);
+            _lblDetail = MakeLabel(UiTheme.FontSmall, false);
+            _lblDetail.Location = new Point(TextLeft, 28);
+            _lblDetail.Size = new Size(150, 18);
             Controls.Add(_lblDetail);
 
-            _lblPath = MakeLabel(UiTheme.FontBadgeSmall, false);
-            _lblPath.Location = new Point(120, 52);
-            _lblPath.Size = new Size(220, 46);
+            _lblPath = MakeLabel(UiTheme.FontSmall, false);
+            _lblPath.Location = new Point(TextLeft, 46);
+            _lblPath.Size = new Size(150, 30);
             Controls.Add(_lblPath);
 
-            _btnManage = MakeButton("管理…", UiButtonKind.Neutral);
+            _btnManage = MakeButton("管理…", UiButtonKind.Neutral, BtnManageW);
             _btnManage.Click += (s, e) => Raise(ManageRequested);
             Controls.Add(_btnManage);
 
-            _btnRescan = MakeButton("重扫", UiButtonKind.Neutral);
+            _btnRescan = MakeButton("重扫", UiButtonKind.Neutral, BtnSmallW);
             _btnRescan.Click += (s, e) =>
             {
                 BeginScan(force: true);
@@ -93,9 +103,13 @@ namespace VisionPlatform.UI
             };
             Controls.Add(_btnRescan);
 
-            _btnOpen = MakeButton("打开", UiButtonKind.Neutral);
+            _btnOpen = MakeButton("打开", UiButtonKind.Neutral, BtnSmallW);
             _btnOpen.Click += (s, e) => Raise(OpenFolderRequested);
             Controls.Add(_btnOpen);
+
+            _tip = new ToolTip();
+            _tip.AutoPopDelay = 15000;      // 路径/原因较长，读的时间要够
+            _tip.InitialDelay = 400;
 
             UiTheme.Changed += OnThemeChanged;
             ApplyColors();
@@ -114,13 +128,14 @@ namespace VisionPlatform.UI
             return l;
         }
 
-        private static UiButton MakeButton(string text, UiButtonKind kind)
+        /// <summary>三个动作按钮的尺寸（位置由 <see cref="ApplyLayout"/> 统一摆）。</summary>
+        private static UiButton MakeButton(string text, UiButtonKind kind, int width)
         {
             var b = new UiButton();
             b.Text = text;
             b.Kind = kind;
-            b.Size = new Size(52, 26);
-            b.Location = new Point(212, 8);
+            b.Size = new Size(width, ButtonH);
+            b.Location = new Point(8, ButtonTop);
             return b;
         }
 
@@ -241,9 +256,41 @@ namespace VisionPlatform.UI
             _lblState.Text = state;
             _lblState.ForeColor = color;
             _lblDetail.Text = detail;
-            _lblPath.Text = path;
+            _lblPath.Text = ShortenPath(path);
             SetThumbnail(thumbnail);
             ApplyLayout();
+
+            // 右栏只有 ~288px，绝对路径与失败原因必然被省略号截断；
+            // 悬停给出完整内容，避免"看不全 = 不知道读的是哪个目录"。
+            if (_tip != null)
+            {
+                _tip.SetToolTip(_lblState, state ?? "");
+                _tip.SetToolTip(_lblDetail, detail ?? "");
+                _tip.SetToolTip(_lblPath, path ?? "");
+            }
+        }
+
+        /// <summary>
+        /// 路径显示用"末两段"代替绝对路径（<c>…\VisionPlatform\OcrChars</c>）。
+        /// <para>右栏宽度有限，"C:\Users\admin\AppData\Roaming" 这段前缀对"读的是哪个目录"毫无信息量，
+        /// 却会把真正有信息量的目录名挤到省略号后面。完整路径走 tooltip。</para>
+        /// </summary>
+        private static string ShortenPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+
+            string[] lines = path.Replace("\r", "").Split('\n');
+            string first = lines.Length > 0 ? lines[0].TrimEnd() : "";
+            if (first.Length == 0) return path;
+
+            string[] parts = first.TrimEnd('\\', '/').Split('\\', '/');
+            string head = parts.Length >= 2
+                ? "…\\" + parts[parts.Length - 2] + "\\" + parts[parts.Length - 1]
+                : first;
+
+            // 第二行（失败示例）原样保留：它本身就是"文件名 — 原因"，不含前缀
+            if (lines.Length <= 1) return head;
+            return head + "\n" + lines[1];
         }
 
         /// <summary>缩略图：24bpp 落地、旧图先 Dispose（照抄 TemplateStatusCard 的三个坑处理）。</summary>
@@ -276,17 +323,45 @@ namespace VisionPlatform.UI
             }
         }
 
+        /// <summary>
+        /// 按当前宽度摆放文字与按钮。
+        /// <para>
+        /// 【为什么必须判空 —— 这里曾是一枚"选中 OCR 节点就报错"的雷】
+        /// <see cref="ApplyLayout"/> 由 <see cref="OnResize"/> 调用，而构造函数里
+        /// <c>Height = CardHeight</c> 就会改变尺寸并**立刻**触发一次 <c>OnResize</c> ——
+        /// 那一刻 <c>_btnManage</c> 等字段还没 new 出来，直接访问 <c>.Location</c> 就是
+        /// <c>NullReferenceException</c>。它不在任何 try 里，所以表现为"一拖 OCR 模块/一选中 OCR 节点就弹错"。
+        /// </para>
+        /// <para>
+        /// 【为什么按钮单独占一行】右栏宽度只有 ~288 px，缩略图占掉左侧 88 px 后，
+        /// 若把三个按钮（合计 192 px）也放在第一行右侧，文字区会被完全盖住 ——
+        /// 现场看到的就是"状态卡只有三个按钮、一个字的模板信息都没有"。
+        /// </para>
+        /// </summary>
         private void ApplyLayout()
         {
-            int w = Width;
-            int right = Math.Max(120, w - 168);
-            _btnManage.Location = new Point(right, 8);
-            _btnRescan.Location = new Point(right + 56, 8);
-            _btnOpen.Location = new Point(right + 112, 8);
+            // ① 构造期保护：字段还没建好（OnResize 先于字段赋值触发）
+            if (_btnManage == null || _btnRescan == null || _btnOpen == null) return;
+            if (_lblState == null || _lblDetail == null || _lblPath == null) return;
 
-            _lblDetail.Width = Math.Max(60, w - 132);
-            _lblPath.Width = Math.Max(60, w - 132);
-            _lblState.Width = Math.Max(60, right - 124);
+            // ② 已释放保护：切换节点时卡片会被 Dispose，父容器重排仍可能再触发一次 OnResize
+            if (IsDisposed) return;
+
+            int w = Width;
+
+            // 文字列：从缩略图右边距一直铺到卡片右边缘（按钮不在这条带上，永远不会压住）
+            int textW = Math.Max(60, w - TextLeft - TextRightPad);
+            _lblState.Width = textW;
+            _lblDetail.Width = textW;
+            _lblPath.Width = textW;
+
+            // 按钮行：从左往右依次排列，与缩略图/文字分属两行
+            int x = 8;
+            _btnManage.Location = new Point(x, ButtonTop);
+            x += BtnManageW + BtnGap;
+            _btnRescan.Location = new Point(x, ButtonTop);
+            x += BtnSmallW + BtnGap;
+            _btnOpen.Location = new Point(x, ButtonTop);
         }
 
         private static void Raise(EventHandler h)
@@ -320,6 +395,7 @@ namespace VisionPlatform.UI
             if (disposing)
             {
                 UiTheme.Changed -= OnThemeChanged;
+                if (_tip != null) _tip.Dispose();
                 Image img = _thumb.Image;
                 _thumb.Image = null;
                 if (img != null) img.Dispose();

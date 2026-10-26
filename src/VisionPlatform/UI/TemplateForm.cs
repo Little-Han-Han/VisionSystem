@@ -368,9 +368,10 @@ namespace VisionPlatform.UI
             var tip = new Label();
             tip.Text = hint;
             tip.AutoSize = false;
-            tip.Size = new Size(300, 30);
+            tip.Size = new Size(300, 32);
             tip.Margin = new Padding(4, 0, 0, 4);
-            tip.Font = UiTheme.FontBadgeSmall;
+            // 用 8.5pt 小字：FontBadgeSmall 是 14pt 的 OK/NG 徽标字体，提示文字会被截掉一半
+            tip.Font = UiTheme.FontSmall;
             tip.ForeColor = UiTheme.ColorTextSecondary;
             parent.Controls.Add(tip);
 

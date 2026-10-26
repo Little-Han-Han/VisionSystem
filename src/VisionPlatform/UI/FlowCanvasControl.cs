@@ -1219,7 +1219,7 @@ namespace VisionPlatform.UI
             {
                 var rectMark = new RectangleF(r.Right - 10f - markW, y1, markW, SummaryRowH);
                 using (Brush b = new SolidBrush(markColor))
-                    g.DrawString(mark, UiTheme.FontButton, b, rectMark, sfFar);
+                    g.DrawString(mark, UiTheme.FontMono, b, rectMark, sfFar);
             }
 
             // ---- 第二行：耗时（仅在有结果时显示）----
