@@ -162,10 +162,16 @@ namespace VisionPlatform.UI
                 _lblName.Top = 0;  _lblName.Height = h1;
                 _lblTime.Top = 0;  _lblTime.Height = h1;
 
-                // 右起预留"状态 44 + 时间 96 + 间隔 8"
-                _lblName.Width = Math.Max(48, Width - 22 - 148);
-                _lblTime.Left = Math.Max(_lblBadge.Right + 4, Width - 96);
-                _lblTime.Width = Math.Max(60, Width - _lblTime.Left);
+                // 右起排布：耗时(64) → 状态(42) → 剩下全给节点名。
+                // 右栏只有 300px，固定 x（原来 badge 钉在 142）会让名字永远只有 108px。
+                int timeW = 64;
+                _lblTime.Width = timeW;
+                _lblTime.Left = Math.Max(120, Width - timeW - 6);
+
+                _lblBadge.Width = 42;
+                _lblBadge.Left = Math.Max(96, _lblTime.Left - _lblBadge.Width - 6);
+
+                _lblName.Width = Math.Max(48, _lblBadge.Left - 22 - 6);
 
                 _lblPrimary.Top = h1;
                 _lblPrimary.Height = h2;
@@ -220,20 +226,14 @@ namespace VisionPlatform.UI
             _lblBadge.Text = badge;
             _lblBadge.ForeColor = StatusColor(status);
 
-            _lblTime.Text = hasResult && runAt != DateTime.MinValue
-                ? runAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+            // 第一行右端 = 耗时（毫秒）。调参时每天都要看这个数；
+            // "几点跑的" 在日志库里能查，不值得占主判据那一行的宽度。
+            _lblTime.Text = hasResult && elapsedMs >= 0
+                ? elapsedMs.ToString(CultureInfo.InvariantCulture) + " ms"
                 : "";
 
-            string cost = elapsedMs >= 0
-                ? " · " + elapsedMs.ToString(CultureInfo.InvariantCulture) + " ms"
-                : "";
-            _lblPrimary.Text = hasResult
-                ? (primary ?? "")
-                : "该节点尚未运行";
+            _lblPrimary.Text = hasResult ? (primary ?? "") : "该节点尚未运行";
             _lblPrimary.ForeColor = hasResult ? UiTheme.ColorTextPrimary : UiTheme.ColorDisabled;
-
-            // 未运行不显示耗时；有结果时 primary 里已经带了耗时，这里不再重复拼
-            if (!hasResult && cost.Length > 0) _lblPrimary.Text += cost;
         }
 
         /// <summary>填充明细行内容（键值对压成一行，绝不换行 —— 换行会把固定行高撑破）。</summary>

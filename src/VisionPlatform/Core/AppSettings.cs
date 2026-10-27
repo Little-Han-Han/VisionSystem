@@ -276,13 +276,21 @@ namespace VisionPlatform.Core
             return LabelDetailStandard;
         }
 
-        /// <summary>结果区高度默认值（逻辑像素）。</summary>
-        public const int DefaultResultPanelHeight = 180;
-        /// <summary>结果区高度下界（逻辑像素）。</summary>
-        public const int MinResultPanelHeight = 120;
+        /// <summary>
+        /// 结果区高度默认值（逻辑像素）。
+        /// <para>
+        /// 【为什么从 180 提到 260】右栏只有 300px 宽，"一节点一行 + 展开明细"的形态下
+        /// 180px 只够放主行 + 5 条明细（BLOB / 形状匹配动辄十几个目标），现场看就是"结果不全"。
+        /// 260 可稳定放下主行 + 8 条；再多靠滚动（行区本身 AutoScroll）。
+        /// </para>
+        /// </summary>
+        public const int DefaultResultPanelHeight = 260;
+
+        /// <summary>结果区高度下界（逻辑像素）：至少放得下主行 + 4 条明细。</summary>
+        public const int MinResultPanelHeight = 180;
 
         /// <summary>结果区高度上界（逻辑像素）。</summary>
-        public const int MaxResultPanelHeight = 380;
+        public const int MaxResultPanelHeight = 460;
 
         /// <summary>端子区状态：未设置。</summary>
         public const int PortsStateUnset = 0;

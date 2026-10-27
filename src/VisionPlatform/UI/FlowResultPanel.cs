@@ -33,7 +33,6 @@ namespace VisionPlatform.UI
         private const int ThumbRebuildIntervalMs = 400;
 
         private Panel panelHead;
-        private Label lblTitle;
         private Label lblNode;
         private UiButton btnZoom;
         private FlowLayoutPanel rows;
@@ -141,16 +140,12 @@ namespace VisionPlatform.UI
             panelHead.Height = 26;
             panelHead.Padding = new Padding(6, 0, 6, 0);
 
-            lblTitle = new Label();
-            lblTitle.Dock = DockStyle.Left;
-            lblTitle.Width = 60;
-            lblTitle.AutoSize = false;
-            lblTitle.Text = "输出结果";
-            lblTitle.TextAlign = ContentAlignment.MiddleLeft;
-
+            // 【为什么去掉「输出结果」四个字】右栏只有 300px，标题白吃 60px，
+            // 挤得节点名只剩 100px、耗时被省略号截成 "7…"。这块区域本身有边框和底色，
+            // 不需要标题自证身份 —— 宽度全部还给节点名。
             btnZoom = new UiButton();
             btnZoom.Dock = DockStyle.Right;
-            btnZoom.Width = 52;
+            btnZoom.Width = 46;
             btnZoom.Text = "放大";
             btnZoom.Kind = UiButtonKind.Neutral;
             btnZoom.Click += OnZoomClicked;
@@ -160,10 +155,9 @@ namespace VisionPlatform.UI
             lblNode.AutoEllipsis = true;
             lblNode.TextAlign = ContentAlignment.MiddleLeft;
 
-            // 逆序停靠：先加 Fill，再加两侧
+            // 逆序停靠：先加 Fill，再加右侧按钮
             panelHead.Controls.Add(lblNode);
             panelHead.Controls.Add(btnZoom);
-            panelHead.Controls.Add(lblTitle);
 
             // ---- 中部：行容器（一节点一行 + 展开明细）----
             rows = new FlowLayoutPanel();
@@ -178,8 +172,9 @@ namespace VisionPlatform.UI
             // ---- 底条：整链结论 OK/NG + 链尾摘要 ----
             panelFoot = new Panel();
             panelFoot.Dock = DockStyle.Bottom;
-            panelFoot.Height = 44;
-            panelFoot.Padding = new Padding(6, 2, 6, 2);
+            panelFoot.Height = 26;          // 单行即可；44px 在窄面板里白吃两条明细
+            panelFoot.Padding = new Padding(6, 0, 6, 0);
+            panelFoot.Visible = false;      // 没跑完整链之前不占地方（见 UpdateFoot）
 
             lblVerdict = new Label();
             lblVerdict.Dock = DockStyle.Left;
@@ -209,9 +204,9 @@ namespace VisionPlatform.UI
             ForeColor = UiTheme.ColorTextPrimary;
 
             panelHead.BackColor = UiTheme.ColorHeaderBg;
-            lblTitle.ForeColor = UiTheme.ColorTextSecondary;
-            lblTitle.Font = UiTheme.FontGroupTitle;
-            lblTitle.BackColor = UiTheme.ColorHeaderBg;
+            // 顶条只剩"节点名 + 放大"，配色统一取主文本色
+            lblNode.ForeColor = UiTheme.ColorTextPrimary;
+            lblNode.Font = UiTheme.FontGroupTitle;
             lblNode.ForeColor = UiTheme.ColorTextPrimary;
             lblNode.Font = UiTheme.FontBody;
             lblNode.BackColor = UiTheme.ColorHeaderBg;
@@ -320,6 +315,11 @@ namespace VisionPlatform.UI
 
             UiTheme.StyleBadge(lblVerdict, _verdict);
             lblChain.Text = _chainText;
+
+            // 【为什么按需显示】右栏只有 300px 宽、结果区通常 240~300px 高，
+            // 一条空底栏（26px）白吃一整条明细；没跑完整链之前不该占位。
+            if (panelFoot != null)
+                panelFoot.Visible = !string.IsNullOrEmpty(_chainText) || _verdict != UiVerdict.None;
         }
 
         /// <summary>
@@ -353,6 +353,7 @@ namespace VisionPlatform.UI
             _expandedNodeId = "";
 
             if (lblNode != null) lblNode.Text = "等待运行…";
+            if (panelFoot != null) panelFoot.Visible = false;   // 底条只在有整链结论时出现
 
             if (rows != null)
             {
@@ -389,9 +390,9 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            // 顶条只放"这是谁"：节点名 + 第几个。耗时交给主行右端（那里每天都要看）
             lblNode.Text = string.Format(CultureInfo.InvariantCulture,
-                "{0}　第 {1}/{2} 个　{3} ms",
-                c.NodeName, c.Index, c.Total, c.ElapsedMs);
+                "{0}　第 {1}/{2} 个", c.NodeName, c.Index, c.Total);
 
             RebuildRows(c);
         }
@@ -415,8 +416,10 @@ namespace VisionPlatform.UI
             FlowResultRow main = FlowResultRow.CreateMain();
             main.RowClicked += OnMainRowClicked;
 
+            // -1 = 不要耗时：耗时已在主行右端单独显示，判据行要留宽度给数字
+            //（"12 个 · 最大面积 1842 px² · 圆度 0.86 · 7 ms" 在 288px 下会截掉最后两位）
             string primary = c != null
-                ? NodeResultText.Primary(c.Type, c.Metrics, c.ElapsedMs, c.Summary)
+                ? NodeResultText.Primary(c.Type, c.Metrics, -1, c.Summary)
                 : "";
 
             main.ApplyMain(c != null ? c.Index : 0,
@@ -482,7 +485,10 @@ namespace VisionPlatform.UI
             if (avail < 60) avail = rows.ClientSize.Width;
             if (avail < 60) return;
 
-            bool showTime = avail >= 280;   // 窄宽度（150% DPI）下优先牺牲时间戳
+            // 右端现在是"耗时"（约 5 个字符），不再是 8 位时间戳 ——
+            // 门槛从 280 降到 210：300px 右栏（avail≈271）必须看得见耗时，
+            // 否则"这节点跑了几毫秒"在主行上彻底消失（原来就是这样丢的）。
+            bool showTime = avail >= 210;
             foreach (Control c in rows.Controls)
             {
                 c.Width = Math.Max(60, avail - 2);
