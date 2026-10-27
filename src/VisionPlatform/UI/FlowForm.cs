@@ -63,18 +63,15 @@ namespace VisionPlatform.UI
         // ---------------------------------------------------------------------
         //  右栏结构（UI-R01）：全部代码构建，**不动 FlowForm.Designer.cs**
         //  该工程有"VS 重序列化吃掉事件订阅"的事故史（DEF-01 就是这么坏的两个按钮），
-        //  所以设计器里的 lblParams / lblPorts / treePorts / nodeParamPanel 在构造期
+        //  所以设计器里的 nodeParamPanel 在构造期
         //  从 panelRight 摘下来，重新装进这里新建的容器。
         // ---------------------------------------------------------------------
         private Panel panelRightTop;        // 上：参数标题 + 端子标题 + 端子树 + 参数面板(Fill)
         private Panel panelSplitter;        // 中：6px 可拖动分隔条
-        private string _portsTitleBase = "";   // 端子标题原文（展开/收起时追加 ▼/▶）
         private int _resultHeightLogical;      // 结果区高度（96-DPI 逻辑像素，见 UiSettings）
-        private bool _portsExpanded;
         private bool _draggingSplitter;
         private int _dragStartScreenY;
         private int _dragStartHeight;
-        private int _heightBeforeZoom = -1;    // >=0 表示处于"放大"态，值为放大前的高度
 
         public FlowForm()
         {
@@ -179,13 +176,6 @@ namespace VisionPlatform.UI
                 ConfigStore.Current != null && ConfigStore.Current.Ui != null
                     ? ConfigStore.Current.Ui.FlowResultPanelHeight
                     : 0);
-            _portsExpanded = UiSettings.NormalizePortsState(
-                ConfigStore.Current != null && ConfigStore.Current.Ui != null
-                    ? ConfigStore.Current.Ui.FlowPortsState
-                    : 0) == UiSettings.PortsStateExpanded;
-
-            _portsTitleBase = lblPorts != null ? lblPorts.Text : "输入/输出端子";
-
             // 摘下来（不 Dispose），重新装进新容器
             panelRight.Controls.Clear();
 
@@ -193,18 +183,12 @@ namespace VisionPlatform.UI
             panelRightTop.Dock = DockStyle.Fill;
             panelRightTop.Margin = new Padding(0);
 
-            // 与设计器里的添加顺序一致 → 逆序停靠后自上而下：lblParams / lblPorts / treePorts / 参数区(Fill)
+            // 【右栏只放两件事：参数 + 结果】
+            // 原来的「输入/输出端子」树（lblPorts + treePorts）已按用户要求整体去掉：
+            // 它占掉右栏顶部 300+px，而参数区/结果区才是每天要看的东西。
+            // 端子契约仍在 FlowPortSchema / FlowValidator 里生效，只是不再用树展示。
+            // 参数面板自带标题（"节点参数　节点名"），外层不再重复一块"节点参数"
             panelRightTop.Controls.Add(nodeParamPanel);
-            panelRightTop.Controls.Add(treePorts);
-            panelRightTop.Controls.Add(lblPorts);
-            panelRightTop.Controls.Add(lblParams);
-
-            // 端子标题变成"展开 / 收起"开关（UI-R01：默认收起为一行摘要）
-            if (lblPorts != null)
-            {
-                lblPorts.Cursor = Cursors.Hand;
-                lblPorts.Click += OnPortsToggleClick;
-            }
 
             panelSplitter = new Panel();
             panelSplitter.Dock = DockStyle.Bottom;
@@ -217,7 +201,6 @@ namespace VisionPlatform.UI
             resultPanel = new FlowResultPanel();
             resultPanel.Dock = DockStyle.Bottom;
             resultPanel.ShapeSelected += OnResultShapeSelected;
-            resultPanel.ZoomClicked += OnResultZoomClicked;
             // 缩略帧来源：预览区当前显示的图像（不转移所有权，内部只读）
             resultPanel.SetFrameProvider(() => flowPreview != null ? flowPreview.DisplayedImage : null);
 
@@ -243,10 +226,14 @@ namespace VisionPlatform.UI
         private void ApplyResultHeight()
         {
             if (resultPanel == null || panelRight == null) return;
-            if (_heightBeforeZoom >= 0) return;   // 放大态下由 OnResultZoomClicked 接管
 
             int minPx = ScaleByDpi(UiSettings.MinResultPanelHeight);
-            int px = ScaleByDpi(UiSettings.NormalizeResultPanelHeight(_resultHeightLogical));
+
+            // 【默认 = 占右栏 1/3】用户要求"结果用表格显示、占比 1/3"。
+            // 只有"没被用户拖过"（配置里还是默认值）时才按 1/3 算；拖过就尊重记忆值。
+            int px = (_resultHeightLogical == UiSettings.DefaultResultPanelHeight)
+                ? Math.Max(1, panelRight.Height / 3)
+                : ScaleByDpi(UiSettings.NormalizeResultPanelHeight(_resultHeightLogical));
 
             int available = panelRight.Height - ScaleByDpi(160);
             if (available > 0 && px > available) px = available;
@@ -255,18 +242,12 @@ namespace VisionPlatform.UI
             resultPanel.Height = px;
         }
 
+        /// <summary>
+        /// 端子区的显隐（<strong>已废弃</strong>：右栏不再显示「输入/输出端子」树，见 BuildRightColumn）。
+        /// 保留空实现只为兼容旧调用点；<c>FlowPortsState</c> 配置项仍照旧写入（老配置不改结构）。
+        /// </summary>
         private void ApplyPortsState()
         {
-            if (treePorts != null) treePorts.Visible = _portsExpanded;
-            if (lblPorts != null)
-                lblPorts.Text = _portsTitleBase + (_portsExpanded ? "　▼" : "　▶");
-        }
-
-        private void OnPortsToggleClick(object sender, EventArgs e)
-        {
-            _portsExpanded = !_portsExpanded;
-            ApplyPortsState();
-            SaveUiPrefs();
         }
 
         private void OnSplitterMouseDown(object sender, MouseEventArgs e)
@@ -312,30 +293,6 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>「放大 / 恢复」结果区（UI-R10）：放大前的高度要记着，恢复时才能回到原位。</summary>
-        private void OnResultZoomClicked(object sender, EventArgs e)
-        {
-            if (resultPanel == null || panelRight == null) return;
-
-            if (_heightBeforeZoom < 0)
-            {
-                _heightBeforeZoom = resultPanel.Height;
-
-                int full = panelRight.Height - ScaleByDpi(60);
-                int minPx = ScaleByDpi(UiSettings.MinResultPanelHeight);
-                if (full < minPx) full = minPx;
-
-                resultPanel.Height = full;
-                resultPanel.SetZoomed(true);
-            }
-            else
-            {
-                resultPanel.Height = _heightBeforeZoom;
-                _heightBeforeZoom = -1;
-                resultPanel.SetZoomed(false);
-                ApplyResultHeight();
-            }
-        }
-
         /// <summary>持久化右栏偏好（高度存逻辑值、端子区存三态；不碰其它字段）。</summary>
         private void SaveUiPrefs()
         {
@@ -345,9 +302,8 @@ namespace VisionPlatform.UI
                 if (cfg == null || cfg.Ui == null) return;
 
                 cfg.Ui.FlowResultPanelHeight = UiSettings.NormalizeResultPanelHeight(_resultHeightLogical);
-                cfg.Ui.FlowPortsState = _portsExpanded
-                    ? UiSettings.PortsStateExpanded
-                    : UiSettings.PortsStateCollapsed;
+                // 端子树已移除：恒写"收起"，保留字段只为老配置结构不变
+                cfg.Ui.FlowPortsState = UiSettings.PortsStateCollapsed;
 
                 ConfigStore.Save();
             }
@@ -366,9 +322,6 @@ namespace VisionPlatform.UI
         /// <summary>探针用：右栏总高。</summary>
         public int RightColumnHeightPx { get { return panelRight != null ? panelRight.Height : 0; } }
 
-        /// <summary>探针用：端子区是否展开。</summary>
-        public bool PortsExpanded { get { return _portsExpanded; } }
-
         /// <summary>探针用：结果区高度记忆值（逻辑像素）。</summary>
         public int ResultHeightLogical { get { return _resultHeightLogical; } }
 
@@ -378,12 +331,6 @@ namespace VisionPlatform.UI
             _resultHeightLogical = UiSettings.NormalizeResultPanelHeight(logical);
             ApplyResultHeight();
             SaveUiPrefs();
-        }
-
-        /// <summary>探针用：切换端子区展开态。</summary>
-        public void TogglePorts()
-        {
-            OnPortsToggleClick(this, EventArgs.Empty);
         }
 
         #endregion
@@ -447,7 +394,7 @@ namespace VisionPlatform.UI
         /// </summary>
         private void RefreshPortTree(FlowNode node)
         {
-            if (treePorts == null) return;
+            if (treePorts == null || treePorts.Parent == null) return;   // 端子树已不在界面里
 
             treePorts.BeginUpdate();
             treePorts.Nodes.Clear();

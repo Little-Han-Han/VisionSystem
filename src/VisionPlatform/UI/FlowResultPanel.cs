@@ -34,8 +34,11 @@ namespace VisionPlatform.UI
 
         private Panel panelHead;
         private Label lblNode;
-        private UiButton btnZoom;
         private FlowLayoutPanel rows;
+        private Panel panelCols;
+        private Label colIndex;
+        private Label colMetric;
+        private Label colGeo;
         private Panel panelFoot;
         private Label lblVerdict;
         private Label lblChain;
@@ -53,7 +56,6 @@ namespace VisionPlatform.UI
 
         // 当前展开的节点（展开只对一个节点有效，避免多节点同时展开把面板撑爆）
         private string _expandedNodeId = "";
-        private bool _zoomed;
 
         private Func<Bitmap> _frameProvider;
 
@@ -67,7 +69,6 @@ namespace VisionPlatform.UI
         public event Action<string, int> ShapeSelected;
 
         /// <summary>点「放大 / 恢复」（UI-R10）；高度切换由宿主负责。</summary>
-        public event EventHandler ZoomClicked;
 
         public FlowResultPanel()
         {
@@ -84,7 +85,6 @@ namespace VisionPlatform.UI
         public string ShownNodeId { get { return _shownNodeId; } }
 
         /// <summary>是否处于放大态。</summary>
-        public bool IsZoomed { get { return _zoomed; } }
 
         /// <summary>当前渲染的明细行数。</summary>
         public int DetailRowCount
@@ -143,13 +143,6 @@ namespace VisionPlatform.UI
             // 【为什么去掉「输出结果」四个字】右栏只有 300px，标题白吃 60px，
             // 挤得节点名只剩 100px、耗时被省略号截成 "7…"。这块区域本身有边框和底色，
             // 不需要标题自证身份 —— 宽度全部还给节点名。
-            btnZoom = new UiButton();
-            btnZoom.Dock = DockStyle.Right;
-            btnZoom.Width = 46;
-            btnZoom.Text = "放大";
-            btnZoom.Kind = UiButtonKind.Neutral;
-            btnZoom.Click += OnZoomClicked;
-
             lblNode = new Label();
             lblNode.Dock = DockStyle.Fill;
             lblNode.AutoEllipsis = true;
@@ -157,7 +150,22 @@ namespace VisionPlatform.UI
 
             // 逆序停靠：先加 Fill，再加右侧按钮
             panelHead.Controls.Add(lblNode);
-            panelHead.Controls.Add(btnZoom);
+
+            // ---- 列标题：序号 / 判据 / 位置·尺寸 ----
+            // 【为什么要表头】结果区现在是"主行 + N 条明细"的表格：没有表头，
+            // 12 行数字就是一串无列义的字符；有表头才能"扫一眼比大小"。
+            panelCols = new Panel();
+            panelCols.Dock = DockStyle.Top;
+            panelCols.Height = 22;
+            panelCols.Padding = new Padding(0);
+
+            colIndex = MakeColLabel("序号", FlowResultRow.ColIndexX, FlowResultRow.ColIndexW, ContentAlignment.MiddleRight);
+            colMetric = MakeColLabel("判据", FlowResultRow.ColMetricX, FlowResultRow.ColMetricW, ContentAlignment.MiddleLeft);
+            colGeo = MakeColLabel("位置 · 尺寸", FlowResultRow.ColGeoX, 120, ContentAlignment.MiddleLeft);
+
+            panelCols.Controls.Add(colGeo);
+            panelCols.Controls.Add(colMetric);
+            panelCols.Controls.Add(colIndex);
 
             // ---- 中部：行容器（一节点一行 + 展开明细）----
             rows = new FlowLayoutPanel();
@@ -192,6 +200,7 @@ namespace VisionPlatform.UI
             // 逆序停靠：rows(Fill) → panelFoot(Bottom) → panelHead(Top)
             Controls.Add(rows);
             Controls.Add(panelFoot);
+            Controls.Add(panelCols);
             Controls.Add(panelHead);
 
             ResumeLayout(false);
@@ -204,7 +213,16 @@ namespace VisionPlatform.UI
             ForeColor = UiTheme.ColorTextPrimary;
 
             panelHead.BackColor = UiTheme.ColorHeaderBg;
-            // 顶条只剩"节点名 + 放大"，配色统一取主文本色
+            // 列标题条：比行底色深一档，明确"这是表头"
+            if (panelCols != null) panelCols.BackColor = UiTheme.ColorHeaderBg;
+            if (colIndex != null) colIndex.ForeColor = UiTheme.ColorTextSecondary;
+            if (colMetric != null) colMetric.ForeColor = UiTheme.ColorTextSecondary;
+            if (colGeo != null) colGeo.ForeColor = UiTheme.ColorTextSecondary;
+            if (colIndex != null) colIndex.Font = UiTheme.FontSmall;
+            if (colMetric != null) colMetric.Font = UiTheme.FontSmall;
+            if (colGeo != null) colGeo.Font = UiTheme.FontSmall;
+
+            // 顶条只剩"节点名"，配色统一取主文本色
             lblNode.ForeColor = UiTheme.ColorTextPrimary;
             lblNode.Font = UiTheme.FontGroupTitle;
             lblNode.ForeColor = UiTheme.ColorTextPrimary;
@@ -227,13 +245,6 @@ namespace VisionPlatform.UI
                 var row = c as FlowResultRow;
                 if (row != null) row.ApplyTheme();
             }
-        }
-
-        /// <summary>切换放大态（宿主改完高度后调用；这里只更新按钮文案）。</summary>
-        public void SetZoomed(bool zoomed)
-        {
-            _zoomed = zoomed;
-            btnZoom.Text = zoomed ? "恢复" : "放大";
         }
 
         // =====================================================================
@@ -438,8 +449,11 @@ namespace VisionPlatform.UI
                 int limit = Math.Min(c.Shapes.Count, MaxDetailRows);
                 for (int i = 0; i < limit; i++)
                 {
+                    string metric, geo;
+                    DescribeShapeParts(c.Shapes[i], out metric, out geo);
+
                     FlowResultRow detail = FlowResultRow.CreateDetail(i);
-                    detail.ApplyDetail(i + 1, DescribeShape(c.Shapes[i]));
+                    detail.ApplyDetail(i + 1, metric, geo);
                     detail.RowClicked += OnDetailRowClicked;
                     rows.Controls.Add(detail);
                 }
@@ -447,14 +461,14 @@ namespace VisionPlatform.UI
                 if (c.Shapes.Count > limit || c.ShapesTruncated)
                 {
                     FlowResultRow more = FlowResultRow.CreateDetail(-1);
-                    more.ApplyDetail(0, "（共 " + c.Shapes.Count + " 条，仅显示前 " + limit + " 条）");
+                    more.ApplyDetailNote("（共 " + c.Shapes.Count + " 条，仅显示前 " + limit + " 条）");
                     rows.Controls.Add(more);
                 }
             }
             else if (expanded && c != null)
             {
                 FlowResultRow none = FlowResultRow.CreateDetail(-1);
-                none.ApplyDetail(0, "该节点没有可定位的目标");
+                none.ApplyDetailNote("该节点没有可定位的目标");
                 rows.Controls.Add(none);
             }
 
@@ -462,6 +476,19 @@ namespace VisionPlatform.UI
 
             rows.ResumeLayout(true);
             ResumeLayout(true);
+        }
+
+        /// <summary>列标题小标签（与明细行同一组列位置常量）。</summary>
+        private static Label MakeColLabel(string text, int left, int width, ContentAlignment align)
+        {
+            var lbl = new Label();
+            lbl.Text = text;
+            lbl.AutoSize = false;
+            lbl.Location = new Point(left, 0);
+            lbl.Size = new Size(width, 22);
+            lbl.TextAlign = align;
+            lbl.AutoEllipsis = true;
+            return lbl;
         }
 
         private void OnRowsResize(object sender, EventArgs e)
@@ -477,17 +504,26 @@ namespace VisionPlatform.UI
         {
             if (rows == null) return;
 
-            // 【为什么"总是"预留竖直滚动条宽度】若按 VerticalScroll.Visible 动态扣，
-            // 会出现"先按无滚动条算宽 → 行变宽 → 撑出横向滚动条 → 宽度又变 → 滚动条消失"的来回抖动，
-            // 结果就是横向滚动条一会儿有一会儿没有（探针里表现为 60 行时冒出来）。
-            // 恒定预留 17px，代价是行略窄，收益是"永远不出现横向滚动"这个硬约束成立。
+            // 【必须恒定预留竖直滚动条宽度】若按 VerticalScroll.Visible 动态扣，
+            // 会出现"先按无滚动条算宽 → 行变宽 → 撑出横向滚动条 → 宽度又变 → 滚动条消失"的抖动，
+            // 最终可能停在"横向滚动条一直亮着"的状态（60 行探针会挂）。
+            // 恒定预留 17px 的代价是窄 17px，靠下面的列宽常量把它吃回来。
             int avail = rows.ClientSize.Width - SystemInformation.VerticalScrollBarWidth;
-            if (avail < 60) avail = rows.ClientSize.Width;
             if (avail < 60) return;
 
             // 右端现在是"耗时"（约 5 个字符），不再是 8 位时间戳 ——
             // 门槛从 280 降到 210：300px 右栏（avail≈271）必须看得见耗时，
             // 否则"这节点跑了几毫秒"在主行上彻底消失（原来就是这样丢的）。
+            // 列标题跟着行宽一起让位（窄面板下判据列收窄，位置列不被挤成省略号）
+            if (colGeo != null)
+            {
+                int metricW = FlowResultRow.ColMetricW;
+                if (avail < 240) metricW = Math.Max(60, FlowResultRow.ColGeoX - FlowResultRow.ColMetricX - 10);
+                if (colMetric != null) colMetric.Width = metricW;
+                colGeo.Left = colMetric != null ? colMetric.Right + 6 : FlowResultRow.ColGeoX;
+                colGeo.Width = Math.Max(60, avail - colGeo.Left - 2);
+            }
+
             bool showTime = avail >= 210;
             foreach (Control c in rows.Controls)
             {
@@ -542,12 +578,6 @@ namespace VisionPlatform.UI
             }
 
             FireShapeSelected(c.NodeId, row.DetailIndex);
-        }
-
-        private void OnZoomClicked(object sender, EventArgs e)
-        {
-            EventHandler h = ZoomClicked;
-            if (h != null) h(this, EventArgs.Empty);
         }
 
         private void FireShapeSelected(string nodeId, int shapeIndex)
@@ -606,45 +636,67 @@ namespace VisionPlatform.UI
         //  取数辅助
         // =====================================================================
 
-        /// <summary>明细行文本：目标的关键几何/数值，压成一行（288px 内不换行）。</summary>
-        private static string DescribeShape(IGeometryShape s)
+        /// <summary>
+        /// 明细行的三列内容：<c>判据</c>（分数 / 面积·圆度…）与 <c>位置·尺寸</c>。
+        /// <para>
+        /// 【为什么拆两段】结果区改成了三列表格（序号 / 判据 / 位置·尺寸）。
+        /// 原来拼成一整行，列对不齐，"多个目标"时数字像一串乱码；
+        /// 拆开后每一列各自对齐，扫一眼就能比大小。
+        /// </para>
+        /// </summary>
+        private static void DescribeShapeParts(IGeometryShape s, out string metric, out string geo)
         {
-            if (s == null) return "";
+            metric = "";
+            geo = "";
+            if (s == null) return;
 
             var rect = s as RectangleShape;
             if (rect != null)
             {
-                string label = string.IsNullOrEmpty(rect.Label) ? "" : rect.Label + "　";
-                return string.Format(CultureInfo.InvariantCulture, "{0}({1:0},{2:0}) {3:0}×{4:0}",
-                    label, rect.X, rect.Y, rect.Width, rect.Height);
+                metric = StripIndexPrefix(rect.Label);
+                geo = string.Format(CultureInfo.InvariantCulture, "({0:0},{1:0}) {2:0}×{3:0}",
+                    rect.X, rect.Y, rect.Width, rect.Height);
+                return;
             }
 
             var rr = s as RotatedRectShape;
             if (rr != null)
             {
-                string label = string.IsNullOrEmpty(rr.Label) ? "" : rr.Label + "　";
-                return string.Format(CultureInfo.InvariantCulture,
-                    "{0}({1:0},{2:0}) {3:0}×{4:0} {5:0.0}°",
-                    label, rr.Center.X, rr.Center.Y, rr.Width, rr.Height, rr.AngleDeg);
+                metric = StripIndexPrefix(rr.Label);
+                geo = string.Format(CultureInfo.InvariantCulture, "({0:0},{1:0}) {2:0}×{3:0} {4:0.0}°",
+                    rr.Center.X, rr.Center.Y, rr.Width, rr.Height, rr.AngleDeg);
+                return;
             }
 
             var line = s as LineSegmentShape;
             if (line != null)
             {
-                return string.Format(CultureInfo.InvariantCulture, "({0:0},{1:0})→({2:0},{3:0})",
+                geo = string.Format(CultureInfo.InvariantCulture, "({0:0},{1:0})→({2:0},{3:0})",
                     line.P1.X, line.P1.Y, line.P2.X, line.P2.Y);
+                return;
             }
 
             var circle = s as CircleShape;
             if (circle != null)
             {
-                return string.Format(CultureInfo.InvariantCulture, "C=({0:0},{1:0}) R={2:0}",
+                geo = string.Format(CultureInfo.InvariantCulture, "C=({0:0},{1:0}) R={2:0}",
                     circle.Center.X, circle.Center.Y, circle.Radius);
+                return;
             }
 
-            string geo = s.ToGeometryString();
-            if (!string.IsNullOrEmpty(geo)) return geo;
-            return string.IsNullOrEmpty(s.Name) ? s.GetType().Name : s.Name;
+            // 兜底：其它图形把几何串塞进 geo 列（有"序号列"了，不再重复 #1）
+            geo = s.ToGeometryString();
+        }
+
+        /// <summary>去掉标签开头的 <c>#1 </c> 前缀（序号已经有独立一列）。</summary>
+        private static string StripIndexPrefix(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return "";
+
+            if (label[0] != '#') return label;
+
+            int sp = label.IndexOf(' ');
+            return (sp > 0 && sp < label.Length - 1) ? label.Substring(sp + 1) : label;
         }
 
         /// <summary>摘要压成一行（行控件不显示换行）。</summary>

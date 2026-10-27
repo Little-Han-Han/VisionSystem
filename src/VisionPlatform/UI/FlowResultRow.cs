@@ -38,6 +38,18 @@ namespace VisionPlatform.UI
         /// <summary>明细行高度。</summary>
         public const int DetailHeight = 22;
 
+        // 三列的位置/宽度（表头与明细行共用同一组常量，否则"表头一格、内容一格"必然错位）
+        /// <summary>序号列起点。</summary>
+        public const int ColIndexX = 8;
+        /// <summary>序号列宽（够放"序号"两个字，28px 会把表头挤成"序…"）。</summary>
+        public const int ColIndexW = 34;
+        /// <summary>判据列起点。</summary>
+        public const int ColMetricX = 42;
+        /// <summary>判据列宽（够放 "1842px² · 0.86"；再宽就把位置列挤成省略号）。</summary>
+        public const int ColMetricW = 96;
+        /// <summary>位置/尺寸列起点（右栏 300px 下该列仍有 ~120px，放得下 "(100,200) 40×30"）。</summary>
+        public const int ColGeoX = 142;
+
         // 主行第一行：序号 / 节点名 / 状态 / 时间
         private readonly Label _lblIndex;
         private readonly Label _lblName;
@@ -45,8 +57,10 @@ namespace VisionPlatform.UI
         private readonly Label _lblTime;
         // 主行第二行：主判据
         private readonly Label _lblPrimary;
-        // 明细行：整行一个文本
-        private readonly Label _lblDetail;
+        // 明细行：三列（序号 / 判据 / 位置·尺寸）—— 与表头列位置严格对齐
+        private readonly Label _lblColIndex;
+        private readonly Label _lblColMetric;
+        private readonly Label _lblColGeo;
 
         private bool _expanded;
 
@@ -110,10 +124,18 @@ namespace VisionPlatform.UI
             {
                 Height = DetailHeight;
 
-                _lblDetail = MakeLabel("", 28, 0, 258, DetailHeight - 2, ContentAlignment.MiddleLeft,
-                                       UiTheme.FontSmall);
-                _lblDetail.AutoEllipsis = true;
-                Controls.Add(_lblDetail);
+                _lblColIndex = MakeLabel("", ColIndexX, 0, ColIndexW, DetailHeight - 2,
+                                         ContentAlignment.MiddleRight, UiTheme.FontSmall);
+                _lblColMetric = MakeLabel("", ColMetricX, 0, ColMetricW, DetailHeight - 2,
+                                          ContentAlignment.MiddleLeft, UiTheme.FontSmall);
+                _lblColMetric.AutoEllipsis = true;
+                _lblColGeo = MakeLabel("", ColGeoX, 0, 120, DetailHeight - 2,
+                                       ContentAlignment.MiddleLeft, UiTheme.FontSmall);
+                _lblColGeo.AutoEllipsis = true;
+
+                Controls.Add(_lblColIndex);
+                Controls.Add(_lblColMetric);
+                Controls.Add(_lblColGeo);
             }
 
             // Label 会自己吃掉鼠标事件，导致"点在文字上没反应、点空白才对"。所以把每个
@@ -152,7 +174,7 @@ namespace VisionPlatform.UI
             }
             else
             {
-                if (_lblDetail == null) return;
+                if (_lblColIndex == null || _lblColMetric == null || _lblColGeo == null) return;
             }
 
             if (Kind == FlowResultRowKind.Main)
@@ -182,9 +204,18 @@ namespace VisionPlatform.UI
             }
             else
             {
-                _lblDetail.Top = 0;
-                _lblDetail.Height = Height;
-                _lblDetail.Width = Math.Max(60, Width - 30);
+                int h = Math.Max(14, Height);
+                _lblColIndex.Top = 0; _lblColIndex.Height = h;
+                _lblColMetric.Top = 0; _lblColMetric.Height = h;
+                _lblColGeo.Top = 0; _lblColGeo.Height = h;
+
+                _lblColGeo.Width = Math.Max(60, Width - ColGeoX - 6);
+
+                // 窄到放不下三列时（<200px），判据列让一让，别把位置列挤成省略号
+                int metricW = ColMetricW;
+                if (Width < 240) metricW = Math.Max(60, ColGeoX - ColMetricX - 20);
+                _lblColMetric.Width = metricW;
+                _lblColGeo.Left = _lblColMetric.Right + 6;
             }
         }
 
@@ -240,10 +271,25 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>填充明细行内容（键值对压成一行，绝不换行 —— 换行会把固定行高撑破）。</summary>
-        public void ApplyDetail(int displayIndex, string text)
+        public void ApplyDetail(int displayIndex, string metric, string geo)
         {
-            _lblDetail.Text = displayIndex.ToString(CultureInfo.InvariantCulture) + "　" + (text ?? "");
-            _lblDetail.ForeColor = UiTheme.ColorTextPrimary;
+            _lblColIndex.Text = displayIndex > 0
+                ? displayIndex.ToString(CultureInfo.InvariantCulture) : "";
+            _lblColMetric.Text = metric ?? "";
+            _lblColGeo.Text = geo ?? "";
+
+            Color fg = (displayIndex > 0) ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary;
+            _lblColMetric.ForeColor = fg;
+            _lblColGeo.ForeColor = UiTheme.ColorTextSecondary;
+        }
+
+        /// <summary>通栏说明行（"共 N 条，仅显示前 M 条"），占满整行不与列对齐。</summary>
+        public void ApplyDetailNote(string text)
+        {
+            _lblColIndex.Text = "";
+            _lblColMetric.Text = text ?? "";
+            _lblColMetric.ForeColor = UiTheme.ColorTextSecondary;
+            _lblColGeo.Text = "";
         }
 
         /// <summary>本行是否为当前高亮行（视觉反馈：左缘强调色 + 主文本色）。</summary>
@@ -271,7 +317,8 @@ namespace VisionPlatform.UI
             }
             else
             {
-                _lblDetail.ForeColor = UiTheme.ColorTextPrimary;
+                _lblColMetric.ForeColor = UiTheme.ColorTextPrimary;
+                _lblColGeo.ForeColor = UiTheme.ColorTextSecondary;
             }
         }
 
