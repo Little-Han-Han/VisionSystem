@@ -84,6 +84,9 @@ namespace VisionPlatform.UI
             if (kind == FlowResultRowKind.Main)
             {
                 Height = MainHeight;
+                // 主行铺一层卡片底色：它和下面 N 条明细行必须"一眼分得开"，
+                // 否则 12 条结果看起来就是 13 行等价的文字。
+                BackColor = UiTheme.ColorCardBg;
 
                 // 【字号层级】不要用 FontBadgeSmall（14pt 粗体，是视图右下角 OK/NG 徽标专用）：
                 // 塞进 17~18px 高的行内 Label 会被裁切、两行互相压，现场看就是"结果区糊成一团"。
@@ -246,7 +249,8 @@ namespace VisionPlatform.UI
         /// <summary>本行是否为当前高亮行（视觉反馈：左缘强调色 + 主文本色）。</summary>
         public void SetAccent(bool on)
         {
-            BackColor = on ? UiTheme.ColorHeaderBg : Color.Transparent;
+            BackColor = on ? UiTheme.ColorHeaderBg
+                            : (Kind == FlowResultRowKind.Main ? UiTheme.ColorCardBg : Color.Transparent);
             if (Kind == FlowResultRowKind.Main && _lblName != null)
                 _lblName.ForeColor = on ? UiTheme.ColorAccent : UiTheme.ColorTextPrimary;
         }
@@ -254,7 +258,7 @@ namespace VisionPlatform.UI
         /// <summary>重套主题（语义色必须最后覆盖，否则会被通用遍历冲掉）。</summary>
         public void ApplyTheme()
         {
-            BackColor = Color.Transparent;
+            BackColor = Kind == FlowResultRowKind.Main ? UiTheme.ColorCardBg : Color.Transparent;
             ForeColor = UiTheme.ColorTextPrimary;
 
             if (Kind == FlowResultRowKind.Main)
