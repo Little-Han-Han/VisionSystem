@@ -66,6 +66,10 @@ namespace VisionPlatform.UI
         //  所以设计器里的 nodeParamPanel 在构造期
         //  从 panelRight 摘下来，重新装进这里新建的容器。
         // ---------------------------------------------------------------------
+        private Panel panelRightSplit;      // 右栏左缘的竖直分隔条（可拖宽右栏）
+        private bool _draggingRightSplit;
+        private int _dragStartX;
+        private int _dragStartWidth;
         private Panel panelRightTop;        // 上：参数标题 + 端子标题 + 端子树 + 参数面板(Fill)
         private Panel panelSplitter;        // 中：6px 可拖动分隔条
         private int _resultHeightLogical;      // 结果区高度（96-DPI 逻辑像素，见 UiSettings）
@@ -204,10 +208,21 @@ namespace VisionPlatform.UI
             // 缩略帧来源：预览区当前显示的图像（不转移所有权，内部只读）
             resultPanel.SetFrameProvider(() => flowPreview != null ? flowPreview.DisplayedImage : null);
 
+            // 右栏左缘的竖直分隔条：拖它调右栏宽度（结果表格三列需要空间）
+            panelRightSplit = new Panel();
+            panelRightSplit.Dock = DockStyle.Left;
+            panelRightSplit.Width = 5;
+            panelRightSplit.Cursor = Cursors.SizeWE;
+            panelRightSplit.MouseDown += OnRightSplitDown;
+            panelRightSplit.MouseMove += OnRightSplitMove;
+            panelRightSplit.MouseUp += OnRightSplitUp;
+
             panelRight.Controls.Add(panelRightTop);
             panelRight.Controls.Add(panelSplitter);
             panelRight.Controls.Add(resultPanel);
+            panelRight.Controls.Add(panelRightSplit);   // 最后加 → 停靠在最左
 
+            ApplyRightWidth();
             ApplyPortsState();
             ApplyResultHeight();
 
@@ -231,8 +246,9 @@ namespace VisionPlatform.UI
 
             // 【默认 = 占右栏 1/3】用户要求"结果用表格显示、占比 1/3"。
             // 只有"没被用户拖过"（配置里还是默认值）时才按 1/3 算；拖过就尊重记忆值。
+            // 默认占比 45%：参数表常常填不满（尤其选中简单节点时），把余量给结果表
             int px = (_resultHeightLogical == UiSettings.DefaultResultPanelHeight)
-                ? Math.Max(1, panelRight.Height / 3)
+                ? Math.Max(ScaleByDpi(240), panelRight.Height * 45 / 100)
                 : ScaleByDpi(UiSettings.NormalizeResultPanelHeight(_resultHeightLogical));
 
             int available = panelRight.Height - ScaleByDpi(160);
@@ -246,6 +262,66 @@ namespace VisionPlatform.UI
         /// 端子区的显隐（<strong>已废弃</strong>：右栏不再显示「输入/输出端子」树，见 BuildRightColumn）。
         /// 保留空实现只为兼容旧调用点；<c>FlowPortsState</c> 配置项仍照旧写入（老配置不改结构）。
         /// </summary>
+        /// <summary>应用右栏宽度（逻辑值 → 物理像素，夹在 320~680 逻辑像素）。</summary>
+        private void ApplyRightWidth()
+        {
+            if (panelRight == null) return;
+
+            int logical = UiSettings.NormalizeRightWidth(
+                ConfigStore.Current != null && ConfigStore.Current.Ui != null
+                    ? ConfigStore.Current.Ui.FlowRightWidth
+                    : 0);
+
+            panelRight.Width = ScaleByDpi(logical);
+        }
+
+        private void OnRightSplitDown(object sender, MouseEventArgs e)
+        {
+            if (e == null || e.Button != MouseButtons.Left) return;
+            _draggingRightSplit = true;
+            _dragStartX = Control.MousePosition.X;
+            _dragStartWidth = panelRight.Width;
+        }
+
+        private void OnRightSplitMove(object sender, MouseEventArgs e)
+        {
+            if (!_draggingRightSplit) return;
+
+            // 向左拖 = 右栏变宽
+            int dx = _dragStartX - Control.MousePosition.X;
+            int w = _dragStartWidth + dx;
+
+            int minPx = ScaleByDpi(UiSettings.MinRightWidth);
+            int maxPx = ScaleByDpi(UiSettings.MaxRightWidth);
+            if (w < minPx) w = minPx;
+            if (w > maxPx) w = maxPx;
+
+            panelRight.Width = w;
+        }
+
+        private void OnRightSplitUp(object sender, MouseEventArgs e)
+        {
+            if (!_draggingRightSplit) return;
+            _draggingRightSplit = false;
+
+            // 落盘（存逻辑值，换 DPI 不变形）
+            try
+            {
+                AppConfig cfg = ConfigStore.Current;
+                if (cfg != null && cfg.Ui != null)
+                {
+                    double scale = DeviceDpi <= 0 ? 1.0 : DeviceDpi / 96.0;
+                    cfg.Ui.FlowRightWidth = UiSettings.NormalizeRightWidth(
+                        (int)Math.Round(panelRight.Width / scale));
+                    ConfigStore.Save(cfg);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("保存右栏宽度失败：" + ex.Message);
+            }
+        }
+
         private void ApplyPortsState()
         {
         }
@@ -318,6 +394,23 @@ namespace VisionPlatform.UI
 
         /// <summary>探针用：参数区当前可视高度（物理像素）。</summary>
         public int ParamsHeightPx { get { return nodeParamPanel != null ? nodeParamPanel.Height : 0; } }
+
+        /// <summary>探针用：右栏当前宽度（物理像素）。</summary>
+        public int RightColumnWidthPx { get { return panelRight != null ? panelRight.Width : 0; } }
+
+        /// <summary>探针用：设置右栏宽度（逻辑像素，模拟拖分隔条松手）。</summary>
+        public void SetRightWidthLogical(int logical)
+        {
+            if (panelRight == null) return;
+            int v = UiSettings.NormalizeRightWidth(logical);
+            panelRight.Width = ScaleByDpi(v);
+            try
+            {
+                AppConfig cfg = ConfigStore.Current;
+                if (cfg != null && cfg.Ui != null) { cfg.Ui.FlowRightWidth = v; ConfigStore.Save(cfg); }
+            }
+            catch (Exception) { }
+        }
 
         /// <summary>探针用：右栏总高。</summary>
         public int RightColumnHeightPx { get { return panelRight != null ? panelRight.Height : 0; } }

@@ -133,9 +133,6 @@
     <Compile Include="UI\OcrTemplateForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="UI\FlowResultRow.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
     <Compile Include="UI\NodeResultCache.cs" />
     <Compile Include="UI\ShapeLabelStyle.cs" />
     <Compile Include="UI\TemplateForm.cs">

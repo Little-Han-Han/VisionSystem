@@ -106,7 +106,7 @@ namespace VisionPlatform.UI
             this.panelRight.Location = new System.Drawing.Point(855, 0);
             this.panelRight.Name = "panelRight";
             this.panelRight.Padding = new System.Windows.Forms.Padding(6);
-            this.panelRight.Size = new System.Drawing.Size(300, 637);
+            this.panelRight.Size = new System.Drawing.Size(400, 637);
             this.panelRight.TabIndex = 1;
             // 
             // nodeParamPanel

@@ -286,6 +286,32 @@ namespace VisionPlatform.Core
         /// </summary>
         public const int DefaultResultPanelHeight = 260;
 
+        /// <summary>
+        /// 右栏宽度（<strong>逻辑像素</strong>，默认 400）。
+        /// <para>右栏要同时装"参数表 + 结果表格"：300px 宽时表格三列必然挤，
+        /// 所以给一条可拖的竖直分隔条，并把宽度记在配置里。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int FlowRightWidth { get; set; }
+
+        /// <summary>右栏宽度默认值（逻辑像素）。</summary>
+        public const int DefaultRightWidth = 400;
+
+        /// <summary>右栏宽度下界（再窄表格就没法看了）。</summary>
+        public const int MinRightWidth = 320;
+
+        /// <summary>右栏宽度上界（再宽画布就没了）。</summary>
+        public const int MaxRightWidth = 680;
+
+        /// <summary>归一化右栏宽度：缺失（0）补默认，越界夹到 320~680。</summary>
+        public static int NormalizeRightWidth(int value)
+        {
+            if (value <= 0) return DefaultRightWidth;
+            if (value < MinRightWidth) return MinRightWidth;
+            if (value > MaxRightWidth) return MaxRightWidth;
+            return value;
+        }
+
         /// <summary>结果区高度下界（逻辑像素）：至少放得下主行 + 4 条明细。</summary>
         public const int MinResultPanelHeight = 180;
 
@@ -342,6 +368,7 @@ namespace VisionPlatform.Core
             FlowResultPanelHeight = DefaultResultPanelHeight;
             FlowPortsState = PortsStateCollapsed;
             FlowLabelDetail = LabelDetailStandard;
+            FlowRightWidth = DefaultRightWidth;
         }
 
         /// <summary>把最大并行流程数钳制到 1~8（0 / 99 之类的越界值都会被纠正）。
@@ -384,6 +411,7 @@ namespace VisionPlatform.Core
             clone.FlowPortsState = NormalizePortsState(FlowPortsState);
             // 标注详细度同理：归一化后再带过去，否则保存时会被清成 0（= 未设置）
             clone.FlowLabelDetail = NormalizeLabelDetail(FlowLabelDetail);
+            clone.FlowRightWidth = NormalizeRightWidth(FlowRightWidth);
             if (ViewBindings != null) clone.ViewBindings = new List<string>(ViewBindings);
             return clone;
         }
@@ -727,6 +755,8 @@ namespace VisionPlatform.Core
             cfg.Ui.FlowPortsState = UiSettings.NormalizePortsState(cfg.Ui.FlowPortsState);
             // 标注详细度：老配置没有该字段 → 反序列化得 0 → 归一化为"标准"
             cfg.Ui.FlowLabelDetail = UiSettings.NormalizeLabelDetail(cfg.Ui.FlowLabelDetail);
+            // 右栏宽度：老配置没有该字段 → 反序列化得 0 → 补默认 400
+            cfg.Ui.FlowRightWidth = UiSettings.NormalizeRightWidth(cfg.Ui.FlowRightWidth);
             if (cfg.Flows == null) cfg.Flows = new FlowSettings();
             if (cfg.Flows.Flows == null) cfg.Flows.Flows = new List<FlowDefinition>();
             if (cfg.Comm == null) cfg.Comm = CommSettings.CreateDefault();
