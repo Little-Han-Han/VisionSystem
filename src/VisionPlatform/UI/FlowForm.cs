@@ -2246,6 +2246,14 @@ namespace VisionPlatform.UI
                 {
                     if (IsDisposed) return;
 
+                    // 位置修正首次示教了基准 → 必须立刻落盘，否则下次运行又示教成 0 偏差
+                    //（用户视角就是"位置修正完全没有反应"）。
+                    if (snap.BaselineTaught)
+                    {
+                        SaveFlows();
+                        SetStatus("已示教位置修正基准并保存（之后每次运行都按它比较）");
+                    }
+
                     // 【文案唯一出口】画布卡片摘要、状态栏、预览顶条、预览覆盖层、结果区
                     // 全部走 NodeResultText，任何一处都不要就地拼字符串 —— 否则"三处不一致"
                     // 会随着下一次改动重新长出来（见 Architecture §3.3 D3）。

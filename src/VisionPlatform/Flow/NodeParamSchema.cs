@@ -404,6 +404,14 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("RefAngle", "基准角(°)", -360, 360, 2, 0.5m, "0", "仅手动示教时生效"));
             t.Fields.Add(Bool("EnableAngle", "启用旋转修正", "1", "关闭则只平移不旋转"));
 
+            // 【自动示教的基准必须落盘】否则"点一次跑一次"的用法里，每次运行都会被当成首帧
+            // 重新示教 → dX/dY 恒为 0 → 现场看到的就是"位置修正完全没反应"。
+            t.Fields.Add(Dbl("AutoRefX", "已示教基准 X", -100000, 100000, 1, 1m, "0",
+                "自动基准：首次运行示教后写回，此后一直用它做比较", true));
+            t.Fields.Add(Dbl("AutoRefY", "已示教基准 Y", -100000, 100000, 1, 1m, "0", "", true));
+            t.Fields.Add(Dbl("AutoRefA", "已示教基准角(°)", -360, 360, 2, 0.5m, "0", "", true));
+            t.Fields.Add(Bool("AutoRefSet", "基准已示教", "0", "", true));
+
             t.Fields.Add(Group("下游 ROI 如何跟随"));
             t.Fields.Add(Enum("Follow", "跟随方式", "Roi",
                 new[] { "ROI 偏移（默认，推荐）", "整图对齐（重采样）" }, new[] { "Roi", "Warp" },
@@ -419,7 +427,7 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("MaxAngle", "角度上限(°)", 0, 360, 2, 0.5m, "0"));
             t.Fields.Add(Dbl("MaxScaleDev", "缩放偏差上限", 0, 10, 3, 0.05m, "0"));
 
-            t.FooterNote = "自动基准在运行期首次取得上游匹配结果后锁定，之后保持不变（等同示教一次）；"
+            t.FooterNote = "自动基准在**首次运行**时示教并写回本节点，之后一直用它比较（重新示教请把「基准已示教」置 0）；"
                          + "换型号请在流程界面重新运行或清除基准缓存。修正结果只存在于运行期，不会写回节点参数。";
             return t;
         }

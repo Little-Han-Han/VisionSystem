@@ -60,6 +60,13 @@ namespace VisionPlatform.Flow
         /// <summary>是否为一次完整运行的链尾快照。</summary>
         public bool IsChainEnd;
 
+        /// <summary>
+        /// 本次运行是否「首次示教了位置修正基准」。
+        /// <para>宿主看到它要立刻把流程写盘 —— 不落盘的话下次运行又会重新示教，
+        /// dX/dY 恒为 0（现场表现："位置修正完全没反应"）。</para>
+        /// </summary>
+        public bool BaselineTaught;
+
         /// <summary>整链结论（仅链尾快照有效）。</summary>
         public bool Passed;
 
@@ -686,6 +693,7 @@ namespace VisionPlatform.Flow
                 snap.Passed = res.Success && res.Passed;
                 snap.ChainSummary = res.Summary ?? "";
                 snap.CycleMs = res.ElapsedMs;
+                snap.BaselineTaught = res.BaselineTaught;
                 if (res.Shapes != null) snap.AllShapes = new List<IGeometryShape>(res.Shapes);
             }
 

@@ -40,6 +40,12 @@ namespace VisionPlatform.Flow
         /// <summary>总耗时（毫秒）。</summary>
         public int ElapsedMs { get; set; }
 
+        /// <summary>
+        /// 本次运行是否"示教了位置修正基准"（自动基准首次运行）。
+        /// <para>宿主据此把基准写盘 —— 否则下次运行又会重新示教，dX/dY 永远是 0。</para>
+        /// </summary>
+        public bool BaselineTaught { get; set; }
+
         public FlowRunResult()
         {
             Message = "";
@@ -62,6 +68,9 @@ namespace VisionPlatform.Flow
     {
         private readonly VisionAlgo _algo;
         private readonly Dictionary<string, double[]> _autoRefs;
+
+        /// <summary>本轮是否示教了位置修正基准（宿主据此落盘，避免下次又示教成 0 偏差）。</summary>
+        private bool _baselineTaught;
         private bool _disposed;
 
         // 匹配模型训练缓存（P0-1 / P0-2）：
@@ -119,6 +128,7 @@ namespace VisionPlatform.Flow
             // 连续运行由调用方在循环外清空一次、循环内传 false，保证单轮连续运行的
             // 「首次示教」基准不被每帧清空（见 FlowRunController.LoopCore）。
             if (clearAutoRefs) ClearAutoReferences();
+            _baselineTaught = false;
 
             var s = new FlowRunSession();
             s.Flow = flow;
@@ -255,6 +265,7 @@ namespace VisionPlatform.Flow
             result.Success = true;
             result.Passed = session.Passed;
             result.Summary = string.Join("；", session.Summaries);
+            result.BaselineTaught = _baselineTaught;
             return result;
         }
 
@@ -1640,22 +1651,42 @@ namespace VisionPlatform.Flow
                     return true;
                 }
 
-                // Auto 基准按节点 Id 缓存在执行器内存里：首次取上游结果，之后保持不变
-                // （等价于「示教一次」），这样后续帧才能得到有意义的偏差量。
-                double[] latched;
-                if (_autoRefs.TryGetValue(node.Id, out latched))
+                // Auto 基准：**必须落盘**，否则"点一次跑一次"的用法里每次运行都被当成首帧，
+                // dX/dY 恒为 0 —— 现场看到的就是"位置修正完全没反应"（VisionMaster/HALCON 也是
+                // "示教一次、之后一直比"）。三层优先级：节点参数（已示教）→ 本进程缓存 → 示教当前帧。
+                bool refSet = node.GetBool("AutoRefSet", false);
+                if (refSet)
                 {
-                    rx = latched[0];
-                    ry = latched[1];
-                    ra = latched[2];
+                    rx = node.GetDouble("AutoRefX", 0);
+                    ry = node.GetDouble("AutoRefY", 0);
+                    ra = node.GetDouble("AutoRefA", 0);
                 }
                 else
                 {
-                    rx = curX;
-                    ry = curY;
-                    ra = curA;
-                    _autoRefs[node.Id] = new[] { rx, ry, ra };
-                    autoFirstLatch = true;
+                    double[] latched;
+                    if (_autoRefs.TryGetValue(node.Id, out latched))
+                    {
+                        rx = latched[0];
+                        ry = latched[1];
+                        ra = latched[2];
+                    }
+                    else
+                    {
+                        // 首次示教：写回节点参数（内存里的 FlowDefinition 已变），
+                        // 由宿主在运行结束后落盘；同时缓存一份，供本轮后续帧使用。
+                        rx = curX;
+                        ry = curY;
+                        ra = curA;
+
+                        node.Set("AutoRefX", rx.ToString("F3", CultureInfo.InvariantCulture));
+                        node.Set("AutoRefY", ry.ToString("F3", CultureInfo.InvariantCulture));
+                        node.Set("AutoRefA", ra.ToString("F3", CultureInfo.InvariantCulture));
+                        node.Set("AutoRefSet", "1");
+
+                        _autoRefs[node.Id] = new[] { rx, ry, ra };
+                        autoFirstLatch = true;
+                        _baselineTaught = true;
+                    }
                 }
             }
 
