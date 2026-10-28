@@ -63,6 +63,9 @@ namespace VisionPlatform.UI
         // =====================================================================
 
         /// <summary>绑定要编辑的节点；null 或无参数表的节点显示空态。</summary>
+        /// <summary>当前正在编辑的节点（null = 空态）。宿主据此刷新"参数推导的布局预览"。</summary>
+        public FlowNode CurrentNode { get { return _node; } }
+
         public void SetNode(FlowNode node)
         {
             _node = null;

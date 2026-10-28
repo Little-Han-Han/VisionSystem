@@ -270,8 +270,16 @@ namespace VisionPlatform.Flow
             // 输入：图像（内部转灰度）；输出：原图透传 + 字符数量 + 识别文本。
             // 字符框以叠加层（FlowShapes）画在画布上，端子只承载标量 / 图像 / 文本。
 
+            // 【Pose 端子：与卡尺/匹配保持一致，可选】连上它只是"把定位结果显式接进来"；
+            // 真正的位置修正走链内全局变换（FlowRunSession.Transform），所以不连也能被修正 ——
+            // 这点必须写清楚，否则用户会以为"没连 Pose 就没修正"。
             Register(FlowNodeType.Ocr,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输入图像", FlowPortKind.Image, true),
+                    P("Pose", "定位位姿", FlowPortKind.Pose, false,
+                      "可选：位置修正由链内全局变换统一应用；此处连线用于显式表达依赖关系")
+                },
                 new List<FlowPortDef>
                 {
                     P("Image", "输出图像", FlowPortKind.Image, false),

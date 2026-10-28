@@ -79,6 +79,10 @@ namespace VisionPlatform.UI
 
         /// <summary>当前帧要画的两组图形：检测目标 + 辅助几何（ROI 轮廓 / OCR 区域）。</summary>
         private List<IGeometryShape> _curShapes = new List<IGeometryShape>();
+
+        // 节点参数推导出的「布局预览」（卡尺扫描线 + 投影窗口等）：
+        // 与运行结果分开存，运行开始时清掉，避免把"示意"当成"实测"。
+        private List<IGeometryShape> _layoutShapes = new List<IGeometryShape>();
         private List<IGeometryShape> _curAux = new List<IGeometryShape>();
 
         /// <summary>「轮廓」开关：只控制标记为 <see cref="FlowShapes.AuxContourName"/> 的辅助几何。</summary>
@@ -424,6 +428,38 @@ namespace VisionPlatform.UI
         public void SetSelectedNodeId(string nodeId)
         {
             _selectedNodeId = nodeId ?? "";
+        }
+
+        /// <summary>
+        /// 显示"由节点参数推导的布局"（卡尺扫描线与投影窗口、ROI 轮廓等），<strong>不需要先运行</strong>。
+        /// <para>
+        /// 【为什么单独一层】它不是运行结果，不能混进 <c>_curShapes</c>（那会被当成实测目标计数），
+        /// 也不能跟着「轮廓」开关一起消失 —— 调 X1/Y1/投影长度时它必须一直在。
+        /// </para>
+        /// </summary>
+        /// <param name="shapes">布局图形；null/空 = 清除。</param>
+        /// <param name="info">顶条提示（如"卡尺 10 个 · 投影 20px · 半宽 2px"）；null = 不改。</param>
+        public void ShowNodeLayout(List<IGeometryShape> shapes, string info)
+        {
+            _layoutShapes = shapes ?? new List<IGeometryShape>();
+
+            if (info != null && lblInfo != null)
+            {
+                lblInfo.Text = info;
+                lblInfo.Visible = info.Length > 0;
+            }
+
+            RebuildShapes();
+            viewer.Invalidate();
+        }
+
+        /// <summary>清掉布局预览（切到别的节点 / 开始运行 / 清空时调用）。</summary>
+        public void ClearNodeLayout()
+        {
+            if (_layoutShapes.Count == 0) return;
+            _layoutShapes = new List<IGeometryShape>();
+            RebuildShapes();
+            viewer.Invalidate();
         }
 
         /// <summary>当前显示模式。</summary>
@@ -873,6 +909,7 @@ namespace VisionPlatform.UI
 
             // 叠加层模板一并清空：否则此刻点「轮廓」/「标注」会把上一个流程的图形重新画出来
             _curShapes = new List<IGeometryShape>();
+            _layoutShapes = new List<IGeometryShape>();
             _curAux = new List<IGeometryShape>();
             _hlNodeId = "";
             _hlIndex = -1;
@@ -1047,6 +1084,13 @@ namespace VisionPlatform.UI
             for (int i = 0; i < _curShapes.Count; i++)
             {
                 IGeometryShape s = ShapeLabelStyle.Render(_curShapes[i], level);
+                if (s != null) viewer.Shapes.Add(s);
+            }
+
+            // 布局预览层：与「轮廓」开关无关（它就是给调参看的，关掉等于瞎调）
+            for (int i = 0; i < _layoutShapes.Count; i++)
+            {
+                IGeometryShape s = _layoutShapes[i];
                 if (s != null) viewer.Shapes.Add(s);
             }
 

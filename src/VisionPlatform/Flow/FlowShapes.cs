@@ -41,6 +41,9 @@ namespace VisionPlatform.Flow
         /// <summary>卡尺投影窗口（命中）。</summary>
         public static readonly Color ColorWindowHit = Color.FromArgb(120, 220, 255);
 
+        /// <summary>未运行时的卡尺布局预览（浅青，虚线框）：与"运行结果"区分开，不冒充命中。</summary>
+        public static readonly Color ColorCaliperLayout = Color.FromArgb(150, 160, 235);
+
         /// <summary>命中边缘点（黄）。</summary>
         public static readonly Color ColorEdgeHit = Color.FromArgb(255, 235, 59);
 
@@ -104,22 +107,142 @@ namespace VisionPlatform.Flow
             return s;
         }
 
-        /// <summary>卡尺投影窗口（每个卡尺一条虚线；未命中用灰色区分）。</summary>
-        public static List<IGeometryShape> CaliperWindows(IEnumerable<CaliperPoint> points)
+        /// <summary>
+        /// 卡尺投影窗口：<strong>每个卡尺画成一个矩形</strong>（长度 = 投影长度，宽度 = 2×滤波半宽）。
+        /// <para>
+        /// 【为什么从"一条虚线"改成矩形】一根线只能表示"朝这个方向找边"，看不出：
+        /// ① 投影有多长（可能戳到邻边的边）；② 窗口有多宽；③ 一共有几个卡尺。
+        /// 用户在界面上只能看到一条直线，根本判断不了 ROI 划得对不对。
+        /// </para>
+        /// </summary>
+        /// <param name="points">native 返回的卡尺点（P1→P2 是投影方向的两个端点）。</param>
+        /// <param name="halfWidth">滤波半宽（像素）；&lt;=0 时按 2px 兜底。</param>
+        public static List<IGeometryShape> CaliperWindows(IEnumerable<CaliperPoint> points, double halfWidth)
         {
             var list = new List<IGeometryShape>();
             if (points == null) return list;
 
+            float w = (float)Math.Max(1.0, halfWidth * 2.0);
+
             foreach (CaliperPoint p in points)
             {
                 if (p == null) continue;
-                var s = Line(p.Px1, p.Py1, p.Px2, p.Py2,
-                             p.Valid ? ColorWindowHit : ColorWindowMiss,
-                             ThinLine, true);
-                s.Name = AuxContourName;   // 投影窗口属"输入几何"，随「轮廓」开关整组显隐
-                list.Add(s);
+
+                IGeometryShape s = WindowRect(p.Px1, p.Py1, p.Px2, p.Py2, w,
+                                              p.Valid ? ColorWindowHit : ColorWindowMiss);
+                if (s != null) list.Add(s);
             }
             return list;
+        }
+
+        /// <summary>
+        /// 未运行时的卡尺布局预览（直线）：扫描线 + N 个投影矩形。
+        /// <para>
+        /// 选中卡尺节点、还没运行的时候就要能看见"卡尺画在哪、有几个、投影多长"——
+        /// 否则调 X1/Y1/X2/Y2 只能盲调。
+        /// </para>
+        /// </summary>
+        public static List<IGeometryShape> CaliperLayoutLine(double x1, double y1, double x2, double y2,
+                                                             int count, double projLength, double halfWidth)
+        {
+            var list = new List<IGeometryShape>();
+
+            // 扫描线本身（虚线，浅色）：卡尺沿它等分
+            LineSegmentShape axis = Line(x1, y1, x2, y2, ColorCaliperLayout, 2f, true);
+            axis.Name = "CaliperAxis";
+            list.Add(axis);
+
+            float w = (float)Math.Max(1.0, halfWidth * 2.0);
+            float len = (float)Math.Max(1.0, projLength);
+
+            int n = Math.Max(1, count);
+            for (int i = 0; i < n; i++)
+            {
+                double t = (i + 0.5) / n;
+                double cx = x1 + (x2 - x1) * t;
+                double cy = y1 + (y2 - y1) * t;
+
+                // 投影方向 = 扫描线法向（垂直于扫描线，向两侧各 projLength/2）
+                double dx = x2 - x1, dy = y2 - y1;
+                double len0 = Math.Sqrt(dx * dx + dy * dy);
+                if (len0 < 1e-6) { dx = 1; dy = 0; len0 = 1; }
+                double nx = -dy / len0, ny = dx / len0;
+
+                double px1 = cx - nx * len / 2, py1 = cy - ny * len / 2;
+                double px2 = cx + nx * len / 2, py2 = cy + ny * len / 2;
+
+                IGeometryShape s = WindowRect(px1, py1, px2, py2, w, ColorCaliperLayout);
+                if (s != null) list.Add(s);
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 未运行时的卡尺布局预览（圆）：内外径参考圆 + N 个径向投影矩形。
+        /// </summary>
+        public static List<IGeometryShape> CaliperLayoutCircle(double cx, double cy,
+                                                               double innerR, double outerR,
+                                                               double startAngle, double spanAngle,
+                                                               int count, double projLength, double halfWidth)
+        {
+            var list = new List<IGeometryShape>();
+
+            double rMid = (innerR + outerR) / 2.0;
+            foreach (double r in new double[] { innerR, outerR })
+            {
+                if (r <= 0) continue;
+                var c = new CircleShape(new PointF((float)cx, (float)cy), (float)r);
+                c.StrokeColor = ColorCaliperLayout;
+                c.LineWidth = ThinLine;
+                c.IsEditable = false;
+                c.Name = "CaliperRing";
+                list.Add(c);
+            }
+
+            float w = (float)Math.Max(1.0, halfWidth * 2.0);
+            float len = (float)Math.Max(1.0, projLength);
+
+            int n = Math.Max(1, count);
+            double span = (spanAngle <= 0.0 || spanAngle > 360.0) ? 360.0 : spanAngle;
+
+            for (int i = 0; i < n; i++)
+            {
+                double ang = (startAngle + span * (i + 0.5) / n) * Math.PI / 180.0;
+                double ux = Math.Cos(ang), uy = Math.Sin(ang);
+
+                double px1 = cx + ux * (rMid - len / 2), py1 = cy + uy * (rMid - len / 2);
+                double px2 = cx + ux * (rMid + len / 2), py2 = cy + uy * (rMid + len / 2);
+
+                IGeometryShape s = WindowRect(px1, py1, px2, py2, w, ColorCaliperLayout);
+                if (s != null) list.Add(s);
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 由"投影方向两端点 + 窗口宽度"构造一个矩形（长 = P1→P2，宽 = w）。
+        /// 旋转矩形比 AABB 更贴合真实投影窗口：斜扫描时 AABB 会胖一圈。
+        /// </summary>
+        private static IGeometryShape WindowRect(double px1, double py1, double px2, double py2,
+                                                 float w, Color color)
+        {
+            double dx = px2 - px1, dy = py2 - py1;
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 1e-6) return null;
+
+            var center = new PointF((float)((px1 + px2) / 2.0), (float)((py1 + py2) / 2.0));
+            float angle = (float)(Math.Atan2(dy, dx) * 180.0 / Math.PI);
+
+            var r = new RotatedRectShape(center, (float)len, Math.Max(1f, w), angle);
+            r.StrokeColor = color;
+            // 2px：卡尺窗口在整幅图上只有二十来个像素，1px 在缩放后基本看不见
+            r.LineWidth = 2f;
+            r.IsFilled = false;
+            r.IsEditable = false;
+            r.Name = "CaliperWindow";
+            return r;
         }
 
         /// <summary>卡尺命中边缘点（实心小方块，屏幕像素恒定尺寸）。</summary>

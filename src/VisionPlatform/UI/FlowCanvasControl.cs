@@ -31,6 +31,19 @@ namespace VisionPlatform.UI
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
         private const int SummaryH = SummaryRowH * 2 + 2;   // 卡片底部结果区总高（常驻，未运行也占位）
         private const int NodePadBottom = 4;     // 端子区下方留白
+
+        // ---- 视图变换（画布坐标 → 屏幕坐标：screen = canvas * zoom + pan）----
+        private float _viewZoom = 1f;
+        private float _panX;
+        private float _panY;
+        private bool _panning;
+        private PointF _panStart;
+        private float _panStartX, _panStartY;
+
+        /// <summary>最小/最大缩放倍率（太小看不清、太大失去全局感）。</summary>
+        public const float MinViewZoom = 0.25f;
+        /// <summary>最大缩放倍率。</summary>
+        public const float MaxViewZoom = 3.0f;
         private const int NominalNodeH = TitleH + RowH + SummaryH + NodePadBottom;   // 1 行端子的实际高度（拖入落点居中用）
         private const float PortGlyph = 9f;      // 端子方形符号边长
         private const float PortHitRadius = 10f; // 端子命中半径（端子命中优先于节点本体）
@@ -663,14 +676,118 @@ namespace VisionPlatform.UI
 
         #region 鼠标交互
 
+        /// <summary>屏幕坐标 → 画布坐标。</summary>
+        private PointF ToCanvas(Point p)
+        {
+            float z = _viewZoom <= 0f ? 1f : _viewZoom;
+            return new PointF((p.X - _panX) / z, (p.Y - _panY) / z);
+        }
+
+        /// <summary>画布坐标 → 屏幕坐标。</summary>
+        private PointF ToScreen(PointF p)
+        {
+            return new PointF(p.X * _viewZoom + _panX, p.Y * _viewZoom + _panY);
+        }
+
+        /// <summary>屏幕坐标 → 画布坐标（宿主/探针可用）。</summary>
+        public PointF ScreenToCanvas(Point p) { return ToCanvas(p); }
+
+        /// <summary>画布坐标 → 屏幕坐标（宿主/探针可用）。</summary>
+        public PointF CanvasToScreen(PointF p) { return ToScreen(p); }
+
+        /// <summary>当前缩放倍率（探针用）。</summary>
+        public float ViewZoom { get { return _viewZoom; } }
+
+        /// <summary>当前平移量（探针用）。</summary>
+        public PointF ViewPan { get { return new PointF(_panX, _panY); } }
+
+        /// <summary>设置缩放（以控件中心为锚点），并夹到 Min/MaxViewZoom。</summary>
+        public void SetViewZoom(float zoom)
+        {
+            ZoomAt(new PointF(Width / 2f, Height / 2f), zoom);
+        }
+
+        /// <summary>以某个屏幕点为锚点缩放（滚轮缩放的语义：光标下的那个节点不动）。</summary>
+        private void ZoomAt(PointF screenAnchor, float zoom)
+        {
+            if (zoom < MinViewZoom) zoom = MinViewZoom;
+            if (zoom > MaxViewZoom) zoom = MaxViewZoom;
+            if (Math.Abs(zoom - _viewZoom) < 1e-4f) return;
+
+            // 锚点在画布上的位置保持不动：pan' = anchor - (anchor - pan) * (z'/z)
+            float k = zoom / _viewZoom;
+            _panX = screenAnchor.X - (screenAnchor.X - _panX) * k;
+            _panY = screenAnchor.Y - (screenAnchor.Y - _panY) * k;
+            _viewZoom = zoom;
+            Invalidate();
+        }
+
+        /// <summary>自适应：把所有节点放进可视区（留 40px 边距），并复位平移。</summary>
+        public void FitToView()
+        {
+            _viewZoom = 1f;
+            _panX = 0f;
+            _panY = 0f;
+
+            if (_flow == null || _flow.Nodes.Count == 0) { Invalidate(); return; }
+
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+            foreach (FlowNode n in _flow.Nodes)
+            {
+                float h = NodeHeight(n);
+                if (n.X < minX) minX = n.X;
+                if (n.Y < minY) minY = n.Y;
+                if (n.X + NodeW > maxX) maxX = n.X + NodeW;
+                if (n.Y + h > maxY) maxY = n.Y + h;
+            }
+
+            const float margin = 40f;
+            float cw = Width - margin * 2f;
+            float ch = Height - margin * 2f;
+            if (cw <= 10f || ch <= 10f) { Invalidate(); return; }
+
+            float spanX = Math.Max(1f, maxX - minX);
+            float spanY = Math.Max(1f, maxY - minY);
+            float z = Math.Min(cw / spanX, ch / spanY);
+            if (z < MinViewZoom) z = MinViewZoom;
+            if (z > 1.5f) z = 1.5f;      // 只有一两个节点时别放得太大
+
+            _viewZoom = z;
+            _panX = margin - minX * z + (cw - spanX * z) / 2f;
+            _panY = margin - minY * z + (ch - spanY * z) / 2f;
+            Invalidate();
+        }
+
+        /// <summary>滚轮缩放（以光标为锚点）；Ctrl+滚轮同效。</summary>
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (e == null) return;
+
+            float factor = e.Delta > 0 ? 1.12f : 1f / 1.12f;
+            ZoomAt(new PointF(e.X, e.Y), _viewZoom * factor);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             Focus();
 
+            // 中键 / 右键：拖动画布（任何位置都能拖，不用先找空白）
+            if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Right)
+            {
+                _panning = true;
+                _panStart = new PointF(e.X, e.Y);
+                _panStartX = _panX;
+                _panStartY = _panY;
+                Cursor = Cursors.SizeAll;
+                return;
+            }
+
             if (e.Button != MouseButtons.Left || _flow == null) return;
 
-            var pt = new PointF(e.X, e.Y);
+            var pt = ToCanvas(e.Location);
 
             // 1) 端子（输入或输出）→ 开始拉端子级连线（端子命中优先于节点本体）
             PortHit port;
@@ -708,10 +825,16 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            // 4) 空白 → 清空选择
+            // 4) 空白 → 清空选择，并允许"按住左键拖空白"平移画布
             _selectedNodeId = null;
             _selectedLinkIndex = -1;
             RaiseNodeSelected(null);
+
+            _panning = true;
+            _panStart = new PointF(e.X, e.Y);
+            _panStartX = _panX;
+            _panStartY = _panY;
+
             Invalidate();
         }
 
@@ -719,10 +842,21 @@ namespace VisionPlatform.UI
         {
             base.OnMouseMove(e);
 
+            // 画布平移优先
+            if (_panning)
+            {
+                _panX = _panStartX + (e.X - _panStart.X);
+                _panY = _panStartY + (e.Y - _panStart.Y);
+                Invalidate();
+                return;
+            }
+
+            PointF canvas = ToCanvas(e.Location);
+
             if (_dragKind == DragKind.MoveNode && _dragNode != null)
             {
-                float nx = e.X - _dragOffset.X;
-                float ny = e.Y - _dragOffset.Y;
+                float nx = canvas.X - _dragOffset.X;
+                float ny = canvas.Y - _dragOffset.Y;
                 if (nx < 0f) nx = 0f;
                 if (ny < 0f) ny = 0f;
                 _dragNode.X = nx;
@@ -731,13 +865,13 @@ namespace VisionPlatform.UI
             }
             else if (_dragKind == DragKind.DrawLink)
             {
-                _linkPreviewEnd = new PointF(e.X, e.Y);
+                _linkPreviewEnd = canvas;
                 Invalidate();       // 预览曲线 + 目标端子兼容高亮 + 拖拽提示都要刷新
             }
             else
             {
                 // 空闲态：跟踪端子悬停（tooltip），仅在悬停端子变化时重绘
-                var pt = new PointF(e.X, e.Y);
+                PointF pt = canvas;
                 PortHit hit;
                 bool hasPort = HitTestPort(pt, out hit);
 
@@ -763,9 +897,26 @@ namespace VisionPlatform.UI
             }
         }
 
+        /// <summary>双击空白 → 自适应全图（等价于很多工具里的"缩放到合适大小"）。</summary>
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            if (e.Button != MouseButtons.Left || _flow == null) return;
+
+            if (HitTestNode(ToCanvas(e.Location)) == null) FitToView();
+        }
+
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+
+            if (_panning)
+            {
+                _panning = false;
+                Cursor = Cursors.Default;
+                Invalidate();
+                return;
+            }
 
             if (_dragKind == DragKind.MoveNode && _dragNode != null)
             {
@@ -774,7 +925,7 @@ namespace VisionPlatform.UI
             }
             else if (_dragKind == DragKind.DrawLink)
             {
-                FinishLinkDrag(new PointF(e.X, e.Y));
+                FinishLinkDrag(ToCanvas(e.Location));
             }
 
             _dragKind = DragKind.None;
@@ -953,9 +1104,13 @@ namespace VisionPlatform.UI
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
+            // 视图变换：之后所有绘制一律用「画布坐标」，屏幕 = 画布 * zoom + pan
+            g.TranslateTransform(_panX, _panY);
+            g.ScaleTransform(_viewZoom, _viewZoom);
+
             DrawGrid(g);
 
-            if (_flow == null) return;
+            if (_flow == null) { g.ResetTransform(); return; }
 
             // 连线（先画，压在节点下面）
             for (int i = 0; i < _flow.Links.Count; i++)
@@ -977,7 +1132,11 @@ namespace VisionPlatform.UI
             foreach (FlowNode n in _flow.Nodes)
                 DrawNode(g, n, n.Id == _selectedNodeId);
 
+            // 覆盖层用屏幕坐标（提示气泡不该跟着缩放变大变小）
+            g.ResetTransform();
+
             // 覆盖层：拖拽提示 / 端子 tooltip / 临时提示（自下而上依次压顶）
+            DrawViewHint(g);
             DrawDragHint(g);
             DrawPortTooltip(g);
             DrawToast(g);
@@ -985,11 +1144,19 @@ namespace VisionPlatform.UI
 
         private void DrawGrid(Graphics g)
         {
-            using (Pen pen = new Pen(WithAlpha(UiTheme.ColorTextSecondary, 26), 1f))
+            // 网格铺在画布坐标上：缩放时网格跟着放大，平移时跟着移动（否则像"背景贴纸"）
+            float z = _viewZoom <= 0f ? 1f : _viewZoom;
+            float left = -_panX / z, top = -_panY / z;
+            float right = (Width - _panX) / z, bottom = (Height - _panY) / z;
+
+            using (Pen pen = new Pen(WithAlpha(UiTheme.ColorTextSecondary, 26), 1f / z))
             {
                 const int step = 20;
-                for (int x = 0; x < Width; x += step) g.DrawLine(pen, x, 0, x, Height);
-                for (int y = 0; y < Height; y += step) g.DrawLine(pen, 0, y, Width, y);
+                float x0 = (float)Math.Floor(left / step) * step;
+                float y0 = (float)Math.Floor(top / step) * step;
+
+                for (float x = x0; x <= right; x += step) g.DrawLine(pen, x, top, x, bottom);
+                for (float y = y0; y <= bottom; y += step) g.DrawLine(pen, left, y, right, y);
             }
         }
 
@@ -1348,6 +1515,18 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>画布底部居中的临时提示（连线被拒等原因）。</summary>
+        /// <summary>左下角常驻操作提示：滚轮缩放 / 中键拖动平移 / 双击空白自适应。</summary>
+        private void DrawViewHint(Graphics g)
+        {
+            string text = "滚轮缩放 " + (_viewZoom * 100f).ToString("0") + "%　·　中键/右键拖动平移　·　双击空白自适应";
+            using (Font f = new Font(UiTheme.FontSmall.FontFamily, 8.5f))
+            using (var brush = new SolidBrush(WithAlpha(UiTheme.ColorTextSecondary, 150)))
+            {
+                SizeF sz = g.MeasureString(text, f);
+                g.DrawString(text, f, brush, 8f, Height - sz.Height - 6f);
+            }
+        }
+
         private void DrawToast(Graphics g)
         {
             if (string.IsNullOrEmpty(_toast)) return;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -871,6 +872,7 @@ namespace VisionPlatform.UI
             if (_running) { SetStatus("运行中不支持整理布局"); return; }
 
             canvas.AutoLayout();
+            canvas.FitToView();          // 整理完顺手缩放到全图可见
             canvas.RefreshView();
             SaveFlows();                 // 坐标是数据，必须落盘
             SetStatus("已按拓扑序整理布局并保存");
@@ -886,6 +888,9 @@ namespace VisionPlatform.UI
 
             // 改了模板 ROI / 训练参数后，卡片的状态可能从「已就绪」变成「与设置不匹配」
             RefreshTemplateCard();
+
+            // 卡尺参数一改，预览上的布局要跟着动（X1/Y1/投影长度/个数都是调参的输入）
+            RefreshNodeLayoutPreview(nodeParamPanel.CurrentNode);
         }
 
         /// <summary>
@@ -1152,6 +1157,63 @@ namespace VisionPlatform.UI
         {
             nodeParamPanel.SetNode(node);
             RefreshTemplateCard();
+            RefreshNodeLayoutPreview(node);
+        }
+
+        /// <summary>
+        /// 把"参数推导出来的 ROI 布局"画到预览上（卡尺扫描线 + 每个卡尺的投影矩形）。
+        /// <para>
+        /// 【为什么选中节点就画、不等运行】调 X1/Y1/投影长度/卡尺个数时，用户必须看得见
+        /// "卡尺画在哪、有几个、投影多长"，否则只能盲调；运行后的实测窗口会覆盖这一层。
+        /// </para>
+        /// </summary>
+        private void RefreshNodeLayoutPreview(FlowNode node)
+        {
+            if (flowPreview == null) return;
+
+            FlowNodeType type;
+            if (node == null || !node.TryGetType(out type))
+            {
+                flowPreview.ClearNodeLayout();
+                return;
+            }
+
+            if (type == FlowNodeType.LineCaliper)
+            {
+                int count = node.GetInt("CaliperCount", 10);
+                double len = node.GetDouble("ProjectionLength", 20);
+                double hw = node.GetDouble("FilterHalfWidth", 2);
+
+                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutLine(
+                    node.GetDouble("X1", 100), node.GetDouble("Y1", 100),
+                    node.GetDouble("X2", 300), node.GetDouble("Y2", 100),
+                    count, len, hw);
+
+                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
+                    "卡尺 {0} 个 · 投影 {1:0.#}px · 宽度 {2:0.#}px（未运行：示意布局）",
+                    count, len, Math.Max(1.0, hw * 2)));
+                return;
+            }
+
+            if (type == FlowNodeType.CircleCaliper)
+            {
+                int count = node.GetInt("CaliperCount", 20);
+                double len = node.GetDouble("ProjectionLength", 20);
+                double hw = node.GetDouble("FilterHalfWidth", 2);
+
+                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutCircle(
+                    node.GetDouble("Cx", 320), node.GetDouble("Cy", 240),
+                    node.GetDouble("InnerRadius", 80), node.GetDouble("OuterRadius", 120),
+                    node.GetDouble("StartAngle", 0), node.GetDouble("AngleSpan", 360),
+                    count, len, hw);
+
+                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
+                    "环形卡尺 {0} 个 · 投影 {1:0.#}px · 宽度 {2:0.#}px（未运行：示意布局）",
+                    count, len, Math.Max(1.0, hw * 2)));
+                return;
+            }
+
+            flowPreview.ClearNodeLayout();
         }
 
         // =====================================================================
@@ -2004,6 +2066,9 @@ namespace VisionPlatform.UI
         private FlowDefinition PrepareRun(out ICamera camera)
         {
             camera = null;
+
+            // 开始运行：把"参数推导的示意布局"撤掉，避免和实测结果叠在一起分不清
+            if (flowPreview != null) flowPreview.ClearNodeLayout();
 
             FlowDefinition f = CurrentFlow;
             if (f == null) { MessageBox.Show(this, "请先选择或新建一个流程。"); return null; }

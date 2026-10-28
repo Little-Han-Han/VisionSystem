@@ -1955,6 +1955,17 @@ namespace VisionPlatform.Flow
 
             Rectangle search = ApplyRoi(s, node, "SearchX", "SearchY", "SearchW", "SearchH");
 
+            // 诊断：姿态数 = 角度档 × 缩放档。用户抱怨"慢"时，第一个要看的数就是它 ——
+            // ±180°/步长 1° 就是 361 个姿态，比 ±10°/步长 1° 慢近 20 倍。
+            int angleCount = CountSteps(param.AngleStart, param.AngleEnd, param.AngleStep);
+            int scaleCount = (param.ScaleStep > 1e-9)
+                ? CountSteps(param.ScaleMin, param.ScaleMax, param.ScaleStep) : 1;
+            int poseCount = angleCount * scaleCount;
+
+            // 诊断里要区分"搜全图"与"搜 ROI"：W/H 未设置就是全图
+            bool searchAll = node.GetInt("SearchW", 0) <= 0 || node.GetInt("SearchH", 0) <= 0;
+            Rectangle searchRect = searchAll ? Rectangle.Empty : search;
+
             var fr = _algo.FindShapeModel(s.Current, param, search);
             if (!fr.Success)
             {
@@ -1994,8 +2005,22 @@ namespace VisionPlatform.Flow
 
             // 摘要里带重训耗时：多形状匹配节点共用原生单槽位时每帧会重训 N 次，
             // 现场只能靠这一项把"掉帧"归因到"重训"而不是"相机慢"。
-            p.Summary = string.Format(CultureInfo.InvariantCulture, "形状匹配：{0} 个，最高 {1:F3}",
-                                      matches.Count, matches[0].Score) + RetrainSuffix(retrained, retrainMs);
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "形状匹配：{0} 个，最高 {1:F3}",
+                matches.Count, matches[0].Score)
+                + ShapeDiagnostics(poseCount, param, searchRect, cache)
+                + RetrainSuffix(retrained, retrainMs);
+
+            // 模板边缘点太少 → 定位必然抖：这不是"算法不准"，是模板本身没信息量
+            int features = cache != null && cache.Meta != null ? cache.Meta.FeatureCount : 0;
+            if (features > 0 && features < LowFeatureThreshold)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary += string.Format(CultureInfo.InvariantCulture,
+                    "　模板边缘点仅 {0} 个（建议 ≥{1}）：请扩大模板 ROI 或降低「对比度」重新训练，否则分数会抖",
+                    features, LowFeatureThreshold);
+            }
+
             return true;
         }
 
@@ -2407,7 +2432,9 @@ namespace VisionPlatform.Flow
             CaliperLineResult r = lr.Value;
 
             // 可视化：投影窗口（未命中灰）+ 命中点 + 拟合直线
-            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points));
+            // 投影窗口按"长度 × 2×滤波半宽"画成矩形（只给一条线看不出宽度/个数）
+            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points,
+                node.GetDouble("FilterHalfWidth", 2)));
             p.Shapes.AddRange(FlowShapes.CaliperHits(r.Points));
             IGeometryShape fit = FlowShapes.CaliperLine(r.Line);
             if (fit != null) p.Shapes.Add(fit);
@@ -2506,7 +2533,9 @@ namespace VisionPlatform.Flow
 
             CaliperCircleResult r = cr.Value;
 
-            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points));
+            // 投影窗口按"长度 × 2×滤波半宽"画成矩形（只给一条线看不出宽度/个数）
+            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(r.Points,
+                node.GetDouble("FilterHalfWidth", 2)));
             p.Shapes.AddRange(FlowShapes.CaliperHits(r.Points));
             IGeometryShape fit = FlowShapes.CaliperCircle(r.Circle);
             if (fit != null) p.Shapes.Add(fit);
@@ -3234,6 +3263,38 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>重训耗时后缀：只在真的重训过时出现（否则每帧都写"重训 0ms"反而干扰判读）。</summary>
+        /// <summary>模板边缘点少于这个数就该警告：几十个点的模型对噪声/光照毫无鲁棒性。</summary>
+        private const int LowFeatureThreshold = 40;
+
+        /// <summary>闭区间内的档数（步长 &lt;= 0 视为 1 档）。</summary>
+        private static int CountSteps(double start, double end, double step)
+        {
+            if (step <= 1e-9) return 1;
+            double span = Math.Abs(end - start);
+            int n = (int)Math.Floor(span / step + 1e-9) + 1;
+            return n < 1 ? 1 : n;
+        }
+
+        /// <summary>
+        /// 形状匹配的诊断后缀：姿态数 / 搜索区 / 金字塔层数。
+        /// <para>
+        /// 【为什么放进摘要】"慢"和"不稳"在界面上必须能归因：姿态数决定搜索成本，
+        /// 搜索区决定扫描面积，金字塔层数决定粗扫分辨率。只给一个总耗时，用户无从下手。
+        /// </para>
+        /// </summary>
+        private static string ShapeDiagnostics(int poseCount, ShapeParam param,
+                                               Rectangle search, TrainedModel cache)
+        {
+            int features = cache != null && cache.Meta != null ? cache.Meta.FeatureCount : 0;
+
+            StringBuilder sb = new StringBuilder();
+            if (features > 0) sb.Append(" · 边缘 ").Append(features);
+            sb.Append(" · 姿态 ").Append(poseCount);
+            sb.Append(" · ").Append(search.IsEmpty ? "搜索全图" : "搜索 " + search.Width + "×" + search.Height);
+            sb.Append(" · 金字塔 ").Append(param.PyramidLevels);
+            return sb.ToString();
+        }
+
         private static string RetrainSuffix(int retrainMs)
         {
             return retrainMs > 0 ? "（重训 " + retrainMs + " ms）" : "";
