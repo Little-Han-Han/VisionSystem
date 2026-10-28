@@ -986,7 +986,7 @@ namespace VisionPlatform.Flow
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "字符识别：\"{0}\"（{1} 字符，认出 {2}，平均置信度 {3:F2}）{4}",
                     shown, charCount, matched, meanScore, tail)
-                    + s.Transform.PoseNote();
+                    + PoseInputNote(s, node);
 
                 // ⑪ 空库 / 全失败 / 部分失败 / 有模板但一个都没认出来 → 只黄不红
                 //    （Warn 让位点见 StepNext）：
@@ -1675,7 +1675,8 @@ namespace VisionPlatform.Flow
                 p.Shapes.Add(g);
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
-                "位置修正：基准({0:F1},{1:F1},{2:F1}°) 实测({3:F1},{4:F1},{5:F1}°) dX={6:F1} dY={7:F1} dA={8:F2}°",
+                "位置修正：基准({0:F1},{1:F1},{2:F1}°) 实测({3:F1},{4:F1},{5:F1}°) dX={6:F1} dY={7:F1} dA={8:F2}°"
+                + "　· 下游 ROI 按此差值偏移",
                 rx, ry, ra, curX, curY, curA, dx, dy, dAngle);
             if (autoFirstLatch)
                 p.Summary += "（Auto 首帧示教：基准=当前位姿，偏差 0 属预期）";
@@ -1721,7 +1722,16 @@ namespace VisionPlatform.Flow
             if (dAngleNorm > 180.0) dAngleNorm -= 360.0;
             else if (dAngleNorm < -180.0) dAngleNorm += 360.0;
 
-            bool needWarp = Math.Abs(dx) > 0.05 || Math.Abs(dy) > 0.05 || Math.Abs(dAngleNorm) > 0.05;
+            // 【默认路径：只算差值，不碰像素】
+            // 下游每个节点的 ROI 通过 s.Transform.ApplyToRect/ApplyToPoint 偏移，
+            // 画面上看到的就是"框跟着工件跑"——这正是用户要的语义，也没有重采样损失。
+            // 只有显式选择「整图对齐」时才把偏差烘进像素（Warp）：那条路会让图动、框不动，
+            // 用户很容易误判成"位置修正没生效"。
+            string follow = node.GetString("Follow", "Roi");
+            bool warpWhole = string.Equals(follow, "Warp", StringComparison.OrdinalIgnoreCase);
+
+            bool needWarp = warpWhole
+                            && (Math.Abs(dx) > 0.05 || Math.Abs(dy) > 0.05 || Math.Abs(dAngleNorm) > 0.05);
             if (needWarp && s.Current != null)
             {
                 Bitmap warped = WarpToReference(s.Current, curX, curY, rx, ry, dAngleNorm);
@@ -1740,10 +1750,28 @@ namespace VisionPlatform.Flow
                     catch (Exception) { p.Frame = null; }
                 }
 
-                p.Summary += "（已对齐回基准姿态）";
+                p.Summary = p.Summary.Replace("　· 下游 ROI 按此差值偏移", "")
+                            + "（整图已对齐回基准姿态：下游 ROI 保持原坐标）";
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 给"用 ROI 的节点"生成位置修正状态说明。
+        /// <para>
+        /// 【为什么还要查 Pose 连线】Pose 输入端子目前<strong>只表达依赖关系，不参与坐标计算</strong>
+        /// （坐标修正由链级『位置修正』节点统一给出）。若用户连了 Pose 却没放位置修正节点，
+        /// 就会觉得"定位位姿没反应" —— 这里把原因直接写进摘要，而不是让他去猜。
+        /// </para>
+        /// </summary>
+        private static string PoseInputNote(FlowRunSession s, FlowNode node)
+        {
+            if (s.Transform.Warped || s.Transform.IsValid) return s.Transform.PoseNote();
+
+            return FindPoseSourceNode(s, node) != null
+                ? "　· 已接入定位位姿，但链上没有『位置修正』节点 —— 本次 ROI 不偏移"
+                : "";
         }
 
         /// <summary>
@@ -2480,7 +2508,7 @@ namespace VisionPlatform.Flow
                 "直线卡尺：长度 {0:F1} 角度 {1:F2}° RMS {2:F2} 有效点 {3}/{4}",
                 r.Length, r.AngleDeg, r.Rms, r.ValidCount,
                 r.Points != null ? r.Points.Count : 0)
-                + s.Transform.PoseNote();   // 让用户一眼看到 ROI 到底有没有跟着修正
+                + PoseInputNote(s, node);   // 让用户一眼看到 ROI 到底有没有跟着修正
             return true;
         }
 
@@ -2585,7 +2613,7 @@ namespace VisionPlatform.Flow
                 "圆卡尺：直径 {0:F1} 圆心 ({1:F1},{2:F1}) RMS {3:F2} 有效点 {4}/{5}",
                 diameter, r.Circle.Cx, r.Circle.Cy, r.Rms, r.ValidCount,
                 r.Points != null ? r.Points.Count : 0)
-                + s.Transform.PoseNote();
+                + PoseInputNote(s, node);
             return true;
         }
 

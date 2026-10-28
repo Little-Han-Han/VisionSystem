@@ -404,6 +404,15 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Dbl("RefAngle", "基准角(°)", -360, 360, 2, 0.5m, "0", "仅手动示教时生效"));
             t.Fields.Add(Bool("EnableAngle", "启用旋转修正", "1", "关闭则只平移不旋转"));
 
+            t.Fields.Add(Group("下游 ROI 如何跟随"));
+            t.Fields.Add(Enum("Follow", "跟随方式", "Roi",
+                new[] { "ROI 偏移（默认，推荐）", "整图对齐（重采样）" }, new[] { "Roi", "Warp" },
+                "ROI 偏移：下游节点自己的 ROI 按 dX/dY/dA 移动，图像不动 —— 框会跟着工件跑；"
+                + "整图对齐：把偏差烘进像素（图像被拉回基准姿态），下游 ROI 保持原坐标，但会重采样整幅图"));
+            t.Fields.Add(Note("默认「ROI 偏移」：位置修正只算出 (dX, dY, dA)，下游每个节点的 ROI "
+                + "都按这个差值映射后再取图 —— 这样卡尺/OCR 的框在画面上会明显跟着工件移动。"
+                + "「整图对齐」适合必须看「对齐后的图像」的场合（如灰度比对），代价是整幅重采样且有损。"));
+
             t.Fields.Add(Group("超差上限（0 = 不限）"));
             t.Fields.Add(Dbl("MaxShiftX", "X 偏移上限(px)", 0, 100000, 1, 1m, "0"));
             t.Fields.Add(Dbl("MaxShiftY", "Y 偏移上限(px)", 0, 100000, 1, 1m, "0"));

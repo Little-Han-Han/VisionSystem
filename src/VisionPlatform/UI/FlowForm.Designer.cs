@@ -20,7 +20,6 @@ namespace VisionPlatform.UI
             this.treeModules = new System.Windows.Forms.TreeView();
             this.lblModules = new System.Windows.Forms.Label();
             this.panelRight = new System.Windows.Forms.Panel();
-            this.nodeParamPanel = new VisionPlatform.UI.NodeParamPanel();
             this.treePorts = new System.Windows.Forms.TreeView();
             this.lblPorts = new System.Windows.Forms.Label();
             this.lblParams = new System.Windows.Forms.Label();
@@ -28,9 +27,15 @@ namespace VisionPlatform.UI
             this.grpBind = new System.Windows.Forms.GroupBox();
             this.lblCamera = new System.Windows.Forms.Label();
             this.cmbCamera = new System.Windows.Forms.ComboBox();
-            this.btnRefreshBinding = new VisionPlatform.UI.UiButton();
             this.lblView = new System.Windows.Forms.Label();
             this.numViewIndex = new System.Windows.Forms.NumericUpDown();
+            this.lblRunStatus = new System.Windows.Forms.TextBox();
+            this.grpFlows = new System.Windows.Forms.GroupBox();
+            this.lstFlows = new System.Windows.Forms.ListBox();
+            this.splitMain = new System.Windows.Forms.SplitContainer();
+            this.canvas = new VisionPlatform.UI.FlowCanvasControl();
+            this.flowPreview = new VisionPlatform.UI.FlowPreviewPanel();
+            this.btnRefreshBinding = new VisionPlatform.UI.UiButton();
             this.btnValidate = new VisionPlatform.UI.UiButton();
             this.btnRun = new VisionPlatform.UI.UiButton();
             this.btnStep = new VisionPlatform.UI.UiButton();
@@ -38,15 +43,10 @@ namespace VisionPlatform.UI
             this.btnRunNode = new VisionPlatform.UI.UiButton();
             this.btnStop = new VisionPlatform.UI.UiButton();
             this.btnAutoLayout = new VisionPlatform.UI.UiButton();
-            this.lblRunStatus = new System.Windows.Forms.TextBox();
-            this.grpFlows = new System.Windows.Forms.GroupBox();
-            this.lstFlows = new System.Windows.Forms.ListBox();
             this.btnNewFlow = new VisionPlatform.UI.UiButton();
             this.btnRenameFlow = new VisionPlatform.UI.UiButton();
             this.btnDeleteFlow = new VisionPlatform.UI.UiButton();
-            this.splitMain = new System.Windows.Forms.SplitContainer();
-            this.canvas = new VisionPlatform.UI.FlowCanvasControl();
-            this.flowPreview = new VisionPlatform.UI.FlowPreviewPanel();
+            this.nodeParamPanel = new VisionPlatform.UI.NodeParamPanel();
             this.panelLeft.SuspendLayout();
             this.panelRight.SuspendLayout();
             this.panelBottom.SuspendLayout();
@@ -103,21 +103,11 @@ namespace VisionPlatform.UI
             this.panelRight.Controls.Add(this.lblPorts);
             this.panelRight.Controls.Add(this.lblParams);
             this.panelRight.Dock = System.Windows.Forms.DockStyle.Right;
-            this.panelRight.Location = new System.Drawing.Point(855, 0);
+            this.panelRight.Location = new System.Drawing.Point(755, 0);
             this.panelRight.Name = "panelRight";
             this.panelRight.Padding = new System.Windows.Forms.Padding(6);
             this.panelRight.Size = new System.Drawing.Size(400, 637);
             this.panelRight.TabIndex = 1;
-            // 
-            // nodeParamPanel
-            // 
-            this.nodeParamPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(42)))), ((int)(((byte)(42)))), ((int)(((byte)(50)))));
-            this.nodeParamPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.nodeParamPanel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(224)))), ((int)(((byte)(232)))));
-            this.nodeParamPanel.Location = new System.Drawing.Point(6, 226);
-            this.nodeParamPanel.Name = "nodeParamPanel";
-            this.nodeParamPanel.Size = new System.Drawing.Size(288, 405);
-            this.nodeParamPanel.TabIndex = 0;
             // 
             // treePorts
             // 
@@ -128,7 +118,7 @@ namespace VisionPlatform.UI
             this.treePorts.Location = new System.Drawing.Point(6, 58);
             this.treePorts.Name = "treePorts";
             this.treePorts.ShowNodeToolTips = true;
-            this.treePorts.Size = new System.Drawing.Size(288, 168);
+            this.treePorts.Size = new System.Drawing.Size(388, 168);
             this.treePorts.TabIndex = 1;
             // 
             // lblPorts
@@ -137,7 +127,7 @@ namespace VisionPlatform.UI
             this.lblPorts.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.lblPorts.Location = new System.Drawing.Point(6, 32);
             this.lblPorts.Name = "lblPorts";
-            this.lblPorts.Size = new System.Drawing.Size(288, 26);
+            this.lblPorts.Size = new System.Drawing.Size(388, 26);
             this.lblPorts.TabIndex = 2;
             this.lblPorts.Text = "Inputs/Outputs";
             this.lblPorts.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -148,7 +138,7 @@ namespace VisionPlatform.UI
             this.lblParams.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.lblParams.Location = new System.Drawing.Point(6, 6);
             this.lblParams.Name = "lblParams";
-            this.lblParams.Size = new System.Drawing.Size(288, 26);
+            this.lblParams.Size = new System.Drawing.Size(388, 26);
             this.lblParams.TabIndex = 3;
             this.lblParams.Text = "节点参数";
             this.lblParams.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -161,7 +151,7 @@ namespace VisionPlatform.UI
             this.panelBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelBottom.Location = new System.Drawing.Point(200, 487);
             this.panelBottom.Name = "panelBottom";
-            this.panelBottom.Size = new System.Drawing.Size(655, 150);
+            this.panelBottom.Size = new System.Drawing.Size(555, 150);
             this.panelBottom.TabIndex = 2;
             // 
             // grpBind
@@ -208,21 +198,6 @@ namespace VisionPlatform.UI
             this.cmbCamera.Size = new System.Drawing.Size(200, 20);
             this.cmbCamera.TabIndex = 0;
             // 
-            // btnRefreshBinding
-            // 
-            this.btnRefreshBinding.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
-            this.btnRefreshBinding.Cursor = System.Windows.Forms.Cursors.Hand;
-            this.btnRefreshBinding.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnRefreshBinding.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
-            this.btnRefreshBinding.ForeColor = System.Drawing.Color.White;
-            this.btnRefreshBinding.Location = new System.Drawing.Point(270, 26);
-            this.btnRefreshBinding.Name = "btnRefreshBinding";
-            this.btnRefreshBinding.Size = new System.Drawing.Size(60, 27);
-            this.btnRefreshBinding.TabIndex = 1;
-            this.btnRefreshBinding.Text = "刷新";
-            this.btnRefreshBinding.UseVisualStyleBackColor = false;
-            this.btnRefreshBinding.Click += new System.EventHandler(this.OnRefreshCameraList);
-            // 
             // lblView
             // 
             this.lblView.AutoSize = true;
@@ -258,6 +233,101 @@ namespace VisionPlatform.UI
             0,
             0});
             this.numViewIndex.ValueChanged += new System.EventHandler(this.OnViewIndexChanged);
+            // 
+            // lblRunStatus
+            // 
+            this.lblRunStatus.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
+            this.lblRunStatus.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.lblRunStatus.ForeColor = System.Drawing.Color.Silver;
+            this.lblRunStatus.Location = new System.Drawing.Point(12, 104);
+            this.lblRunStatus.Multiline = true;
+            this.lblRunStatus.Name = "lblRunStatus";
+            this.lblRunStatus.ReadOnly = true;
+            this.lblRunStatus.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.lblRunStatus.Size = new System.Drawing.Size(740, 28);
+            this.lblRunStatus.TabIndex = 10;
+            this.lblRunStatus.Text = "就绪";
+            // 
+            // grpFlows
+            // 
+            this.grpFlows.Controls.Add(this.lstFlows);
+            this.grpFlows.Controls.Add(this.btnNewFlow);
+            this.grpFlows.Controls.Add(this.btnRenameFlow);
+            this.grpFlows.Controls.Add(this.btnDeleteFlow);
+            this.grpFlows.ForeColor = System.Drawing.Color.DeepSkyBlue;
+            this.grpFlows.Location = new System.Drawing.Point(8, 8);
+            this.grpFlows.Name = "grpFlows";
+            this.grpFlows.Size = new System.Drawing.Size(362, 134);
+            this.grpFlows.TabIndex = 0;
+            this.grpFlows.TabStop = false;
+            this.grpFlows.Text = "流程管理";
+            // 
+            // lstFlows
+            // 
+            this.lstFlows.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
+            this.lstFlows.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.lstFlows.ForeColor = System.Drawing.Color.Gainsboro;
+            this.lstFlows.IntegralHeight = false;
+            this.lstFlows.ItemHeight = 12;
+            this.lstFlows.Location = new System.Drawing.Point(10, 22);
+            this.lstFlows.Name = "lstFlows";
+            this.lstFlows.Size = new System.Drawing.Size(200, 100);
+            this.lstFlows.TabIndex = 0;
+            // 
+            // splitMain
+            // 
+            this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.splitMain.Location = new System.Drawing.Point(200, 0);
+            this.splitMain.Name = "splitMain";
+            this.splitMain.Orientation = System.Windows.Forms.Orientation.Horizontal;
+            // 
+            // splitMain.Panel1
+            // 
+            this.splitMain.Panel1.Controls.Add(this.canvas);
+            // 
+            // splitMain.Panel2
+            // 
+            this.splitMain.Panel2.Controls.Add(this.flowPreview);
+            this.splitMain.Size = new System.Drawing.Size(555, 487);
+            this.splitMain.SplitterDistance = 345;
+            this.splitMain.TabIndex = 3;
+            // 
+            // canvas
+            // 
+            this.canvas.AllowDrop = true;
+            this.canvas.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(24)))), ((int)(((byte)(24)))), ((int)(((byte)(32)))));
+            this.canvas.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.canvas.Flow = null;
+            this.canvas.Location = new System.Drawing.Point(0, 0);
+            this.canvas.Name = "canvas";
+            this.canvas.Size = new System.Drawing.Size(555, 345);
+            this.canvas.TabIndex = 0;
+            // 
+            // flowPreview
+            // 
+            this.flowPreview.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(42)))), ((int)(((byte)(42)))), ((int)(((byte)(50)))));
+            this.flowPreview.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.flowPreview.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(224)))), ((int)(((byte)(232)))));
+            this.flowPreview.Location = new System.Drawing.Point(0, 0);
+            this.flowPreview.Name = "flowPreview";
+            this.flowPreview.ShowContour = true;
+            this.flowPreview.Size = new System.Drawing.Size(555, 138);
+            this.flowPreview.TabIndex = 0;
+            // 
+            // btnRefreshBinding
+            // 
+            this.btnRefreshBinding.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnRefreshBinding.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnRefreshBinding.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnRefreshBinding.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.btnRefreshBinding.ForeColor = System.Drawing.Color.White;
+            this.btnRefreshBinding.Location = new System.Drawing.Point(270, 26);
+            this.btnRefreshBinding.Name = "btnRefreshBinding";
+            this.btnRefreshBinding.Size = new System.Drawing.Size(60, 27);
+            this.btnRefreshBinding.TabIndex = 1;
+            this.btnRefreshBinding.Text = "刷新";
+            this.btnRefreshBinding.UseVisualStyleBackColor = false;
+            this.btnRefreshBinding.Click += new System.EventHandler(this.OnRefreshCameraList);
             // 
             // btnValidate
             // 
@@ -365,46 +435,6 @@ namespace VisionPlatform.UI
             this.btnAutoLayout.UseVisualStyleBackColor = false;
             this.btnAutoLayout.Click += new System.EventHandler(this.OnAutoLayout);
             // 
-            // lblRunStatus
-            // 
-            this.lblRunStatus.ForeColor = System.Drawing.Color.Silver;
-            this.lblRunStatus.Location = new System.Drawing.Point(12, 104);
-            this.lblRunStatus.Name = "lblRunStatus";
-            this.lblRunStatus.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
-            this.lblRunStatus.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.lblRunStatus.Multiline = true;
-            this.lblRunStatus.ReadOnly = true;
-            this.lblRunStatus.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.lblRunStatus.Size = new System.Drawing.Size(740, 28);
-            this.lblRunStatus.TabIndex = 10;
-            this.lblRunStatus.Text = "就绪";
-            // 
-            // grpFlows
-            // 
-            this.grpFlows.Controls.Add(this.lstFlows);
-            this.grpFlows.Controls.Add(this.btnNewFlow);
-            this.grpFlows.Controls.Add(this.btnRenameFlow);
-            this.grpFlows.Controls.Add(this.btnDeleteFlow);
-            this.grpFlows.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.grpFlows.Location = new System.Drawing.Point(8, 8);
-            this.grpFlows.Name = "grpFlows";
-            this.grpFlows.Size = new System.Drawing.Size(362, 134);
-            this.grpFlows.TabIndex = 0;
-            this.grpFlows.TabStop = false;
-            this.grpFlows.Text = "流程管理";
-            // 
-            // lstFlows
-            // 
-            this.lstFlows.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
-            this.lstFlows.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.lstFlows.ForeColor = System.Drawing.Color.Gainsboro;
-            this.lstFlows.IntegralHeight = false;
-            this.lstFlows.ItemHeight = 12;
-            this.lstFlows.Location = new System.Drawing.Point(10, 22);
-            this.lstFlows.Name = "lstFlows";
-            this.lstFlows.Size = new System.Drawing.Size(200, 100);
-            this.lstFlows.TabIndex = 0;
-            // 
             // btnNewFlow
             // 
             this.btnNewFlow.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
@@ -450,44 +480,15 @@ namespace VisionPlatform.UI
             this.btnDeleteFlow.UseVisualStyleBackColor = false;
             this.btnDeleteFlow.Click += new System.EventHandler(this.OnDeleteFlow);
             // 
-            // splitMain
+            // nodeParamPanel
             // 
-            this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitMain.Location = new System.Drawing.Point(200, 0);
-            this.splitMain.Name = "splitMain";
-            this.splitMain.Orientation = System.Windows.Forms.Orientation.Horizontal;
-            // 
-            // splitMain.Panel1
-            // 
-            this.splitMain.Panel1.Controls.Add(this.canvas);
-            // 
-            // splitMain.Panel2
-            // 
-            this.splitMain.Panel2.Controls.Add(this.flowPreview);
-            this.splitMain.Size = new System.Drawing.Size(655, 487);
-            this.splitMain.SplitterDistance = 345;
-            this.splitMain.TabIndex = 3;
-            // 
-            // canvas
-            // 
-            this.canvas.AllowDrop = true;
-            this.canvas.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(24)))), ((int)(((byte)(24)))), ((int)(((byte)(32)))));
-            this.canvas.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.canvas.Flow = null;
-            this.canvas.Location = new System.Drawing.Point(0, 0);
-            this.canvas.Name = "canvas";
-            this.canvas.Size = new System.Drawing.Size(655, 345);
-            this.canvas.TabIndex = 0;
-            // 
-            // flowPreview
-            // 
-            this.flowPreview.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(42)))), ((int)(((byte)(42)))), ((int)(((byte)(50)))));
-            this.flowPreview.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.flowPreview.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(224)))), ((int)(((byte)(232)))));
-            this.flowPreview.Location = new System.Drawing.Point(0, 0);
-            this.flowPreview.Name = "flowPreview";
-            this.flowPreview.Size = new System.Drawing.Size(655, 138);
-            this.flowPreview.TabIndex = 0;
+            this.nodeParamPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(42)))), ((int)(((byte)(42)))), ((int)(((byte)(50)))));
+            this.nodeParamPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.nodeParamPanel.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(224)))), ((int)(((byte)(232)))));
+            this.nodeParamPanel.Location = new System.Drawing.Point(6, 226);
+            this.nodeParamPanel.Name = "nodeParamPanel";
+            this.nodeParamPanel.Size = new System.Drawing.Size(388, 405);
+            this.nodeParamPanel.TabIndex = 0;
             // 
             // FlowForm
             // 
@@ -501,13 +502,10 @@ namespace VisionPlatform.UI
             this.Controls.Add(this.panelLeft);
             this.Font = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.ForeColor = System.Drawing.Color.Gainsboro;
-            // 【无边框后必须与 ClientSize 对齐】自绘标题栏要求 FormBorderStyle=None，
-            // 此时「整窗尺寸 == 客户区尺寸」，而 MinimumSize 约束的是整窗；
-            // 原值 1157 > ClientSize 1155 会被系统强行拉宽 2 px，故下调到 1155×637。
             this.MinimumSize = new System.Drawing.Size(1155, 637);
             this.Name = "FlowForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "流程编排";
+            this.Text = " ";
             this.panelLeft.ResumeLayout(false);
             this.panelRight.ResumeLayout(false);
             this.panelBottom.ResumeLayout(false);
