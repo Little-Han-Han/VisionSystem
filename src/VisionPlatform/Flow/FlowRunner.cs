@@ -826,18 +826,20 @@ namespace VisionPlatform.Flow
             }
 
             Bitmap frame = s.Current;
-            Rectangle roi = ResolveRoi(s, node, frame.Width, frame.Height);
 
+            // ① 取图：ROI 非空时只处理 ROI 内的一块；
+            //    位置修正带旋转时走**仿射裁剪**（拿到的图跟着工件一起转），否则原样整数裁剪。
+            Rectangle roi = Rectangle.Empty;
+            bool roiAffine = false;
             Bitmap crop = null;
             Bitmap gray = null;
             bool grayOwned = false;
 
             try
             {
-                // ① 取图：OCR 走灰度链路，ROI 非空时只处理 ROI 内的一块
-                if (!roi.IsEmpty)
+                if (RawRoi(s, node) != Rectangle.Empty)
                 {
-                    crop = CropTemplate(frame, roi);
+                    crop = CropRoi(frame, s, node, out roi, out roiAffine);
                     if (crop == null) { p.Summary = "字符识别：ROI 裁剪失败"; return false; }
                 }
                 Bitmap input = crop ?? frame;
@@ -930,12 +932,29 @@ namespace VisionPlatform.Flow
                 //    走 AuxShapes —— 它是输入几何，不是检测目标，不能占结果区明细行。
                 if (showRegionBox)
                 {
-                    Rectangle region = roi.IsEmpty
-                        ? new Rectangle(0, 0, frame.Width, frame.Height)
-                        : roi;
-                    var regionBox = FlowShapes.OcrRegionBox(region,
-                        "OCR 区域 " + region.Width + "×" + region.Height);
-                    if (regionBox != null) p.AuxShapes.Add(regionBox);
+                    if (roiAffine)
+                    {
+                        // 仿射：区域框本身也要跟着转，否则看起来像"框没跟随"
+                        PointF c = s.Transform.ApplyToPoint(roi.X + roi.Width / 2.0,
+                                                            roi.Y + roi.Height / 2.0);
+                        var regionRot = new RotatedRectShape(c, roi.Width, roi.Height, (float)s.Transform.DAngle);
+                        regionRot.StrokeColor = FlowShapes.ColorOcrRegion;
+                        regionRot.LineWidth = 1.5f;
+                        regionRot.IsEditable = false;
+                        regionRot.Name = "OcrRegion";
+                        regionRot.Label = "OCR 区域 " + roi.Width + "×" + roi.Height
+                                          + "（旋转 " + s.Transform.DAngle.ToString("F1") + "°）";
+                        p.AuxShapes.Add(regionRot);
+                    }
+                    else
+                    {
+                        Rectangle region = roi.IsEmpty
+                            ? new Rectangle(0, 0, frame.Width, frame.Height)
+                            : roi;
+                        var regionBox = FlowShapes.OcrRegionBox(region,
+                            "OCR 区域 " + region.Width + "×" + region.Height);
+                        if (regionBox != null) p.AuxShapes.Add(regionBox);
+                    }
                 }
 
                 // ⑦ 合并字符串框（默认开）：按行归并，一行一个框，标签就是该行的识别文本。
@@ -944,8 +963,11 @@ namespace VisionPlatform.Flow
                 {
                     foreach (OcrLine line in GroupOcrLines(chars))
                     {
+                        PointF lineC = MapRoiPoint(s, roi, roiAffine,
+                            line.X + line.W / 2.0, line.Y + line.H / 2.0);
                         var lineBox = FlowShapes.OcrStringBox(
-                            new Rectangle((int)Math.Round(line.X + roi.X), (int)Math.Round(line.Y + roi.Y),
+                            new Rectangle((int)Math.Round(lineC.X - line.W / 2.0),
+                                          (int)Math.Round(lineC.Y - line.H / 2.0),
                                           Math.Max(1, (int)Math.Round(line.W)), Math.Max(1, (int)Math.Round(line.H))),
                             string.IsNullOrEmpty(line.Text) ? "?" : line.Text);
                         if (lineBox != null) p.AuxShapes.Add(lineBox);
@@ -961,7 +983,9 @@ namespace VisionPlatform.Flow
                     {
                         string label = (string.IsNullOrEmpty(c.Label) ? "?" : c.Label)
                                      + " " + c.Score.ToString("F2", CultureInfo.InvariantCulture);
-                        var box = FlowShapes.OcrBox(c.X + roi.X, c.Y + roi.Y, c.W, c.H, label);
+                        PointF cc = MapRoiPoint(s, roi, roiAffine,
+                            c.X + c.W / 2.0, c.Y + c.H / 2.0);
+                        var box = FlowShapes.OcrBox(cc.X - c.W / 2.0, cc.Y - c.H / 2.0, c.W, c.H, label);
                         if (box != null) box.Name = "OcrChar";
                         p.Shapes.Add(box);
                     }
@@ -2310,7 +2334,20 @@ namespace VisionPlatform.Flow
                 int roiW = node.GetInt("RoiW", 0);
                 int roiH = node.GetInt("RoiH", 0);
 
-                if (roiW > 0 && roiH > 0)
+                // 位置修正带旋转时走仿射裁剪（拿到的图跟着工件一起转），否则维持整数裁剪
+                bool blobAffine = HasRoiRotation(s);
+
+                if (roiW > 0 && roiH > 0 && blobAffine)
+                {
+                    Rectangle raw = RawRoi(s, node);
+                    cropped = CropAffine(input, raw, s.Transform);
+                    if (cropped != null)
+                    {
+                        analyzeOn = cropped;
+                        usedRoi = raw;
+                    }
+                }
+                else if (roiW > 0 && roiH > 0)
                 {
                     // 用户坐标 → 工作帧坐标（减裁剪偏移）→ 位置修正变换（与 ApplyRoi 一致）；
                     // 无上游定位时 Transform 未写入，ApplyToRect 原样返回，行为与改造前完全一致。
@@ -2359,8 +2396,9 @@ namespace VisionPlatform.Flow
                 for (int i = 0; i < kept.Count; i++)
                 {
                     BlobResult b = kept[i];
-                    double cx = b.Cx + usedRoi.X;
-                    double cy = b.Cy + usedRoi.Y;
+                    PointF bc = MapRoiPoint(s, usedRoi, blobAffine, b.Cx, b.Cy);
+                    double cx = bc.X;
+                    double cy = bc.Y;
                     string label = string.Format(CultureInfo.InvariantCulture,
                         "#{0} {1:0}px² · {2:0.00}", i + 1, b.Area, Circularity(b));
                     p.Shapes.Add(FlowShapes.BlobRect(cx, cy, b.Width, b.Height, label));
@@ -2378,7 +2416,24 @@ namespace VisionPlatform.Flow
                 // ROI 轮廓是「输入几何」而不是「检测目标」：走 AuxShapes，
                 // 否则结果区会多出 4 条"边线"行，与"12 个 Blob"永久对不上（UI-R05）。
                 if (!usedRoi.IsEmpty)
-                    p.AuxShapes.AddRange(FlowShapes.RoiOutline(usedRoi));
+                {
+                    if (blobAffine)
+                    {
+                        PointF rc = s.Transform.ApplyToPoint(usedRoi.X + usedRoi.Width / 2.0,
+                                                             usedRoi.Y + usedRoi.Height / 2.0);
+                        var roiRot = new RotatedRectShape(rc, usedRoi.Width, usedRoi.Height,
+                                                          (float)s.Transform.DAngle);
+                        roiRot.StrokeColor = FlowShapes.ColorRoi;
+                        roiRot.LineWidth = 1.5f;
+                        roiRot.IsEditable = false;
+                        roiRot.Name = FlowShapes.AuxContourName;
+                        p.AuxShapes.Add(roiRot);
+                    }
+                    else
+                    {
+                        p.AuxShapes.AddRange(FlowShapes.RoiOutline(usedRoi));
+                    }
+                }
 
                 // 判定：期望个数范围 + 单个面积范围（0 = 不限）
                 double expectMin = node.GetDouble("ExpectMin", 0);
@@ -2887,6 +2942,96 @@ namespace VisionPlatform.Flow
         /// 宽高为 0 或完全落在图外时返回 <see cref="Rectangle.Empty"/>（= 整帧处理）。
         /// 换算顺序与 Blob 节点一致：减裁剪偏移 → 位置修正变换 → 夹取。
         /// </summary>
+        /// <summary>本帧位置修正是否带旋转（带旋转时矩形 ROI 必须走仿射裁剪，否则只是外接框）。</summary>
+        private static bool HasRoiRotation(FlowRunSession s)
+        {
+            return s.Transform.IsValid && Math.Abs(s.Transform.DAngle) > 0.01;
+        }
+
+        /// <summary>
+        /// 节点里配置的 ROI（<strong>用户坐标</strong>，未做位置修正、未减裁剪偏移）。
+        /// 仿射裁剪需要用它 —— 变换由裁剪函数自己施加一次，不能先用 ApplyToRect（那是外接框）。
+        /// </summary>
+        private static Rectangle RawRoi(FlowRunSession s, FlowNode node)
+        {
+            int w = node.GetInt("RoiW", 0);
+            int h = node.GetInt("RoiH", 0);
+            if (w <= 0 || h <= 0) return Rectangle.Empty;
+
+            return new Rectangle((int)Math.Round(node.GetInt("RoiX", 0) - s.OffsetX),
+                                 (int)Math.Round(node.GetInt("RoiY", 0) - s.OffsetY), w, h);
+        }
+
+        /// <summary>
+        /// <strong>仿射裁剪</strong>：把"用户坐标 ROI"按位置修正（绕基准旋转 + 平移）采成轴对齐小块。
+        /// <para>
+        /// 映射关系：目标像素 (u,v) ← 整帧上的点 <c>T(roi.TL + (u,v))</c>。
+        /// 实现上用 Graphics 的反变换（dst → src）采样：
+        /// <c>dst(u,v) = R(-dA)·(src − c) + (w/2, h/2)</c>，其中 <c>c = T(ROI 中心)</c>。
+        /// </para>
+        /// <para>
+        /// 【为什么必须这么做】`ApplyToRect` 给的是旋转后的<strong>外接矩形</strong>：
+        /// 工件转 10° 时 ROI 会变胖一圈，OCR 会把邻域的杂边也框进来，卡尺/测量也会读错位置。
+        /// 真仿射裁剪拿到的是一块"跟着工件一起转"的图，识别结果与不旋转时完全等价。
+        /// </para>
+        /// </summary>
+        private static Bitmap CropAffine(Bitmap frame, Rectangle roi, FlowRunTransform t)
+        {
+            if (frame == null || roi.Width <= 0 || roi.Height <= 0) return null;
+
+            int w = roi.Width;
+            int h = roi.Height;
+
+            var dst = new Bitmap(w, h, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(dst))
+            {
+                g.Clear(Color.Black);   // 旋转露出的边角填黑：与整图对齐（Warp）时的口径一致
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+
+                PointF c = t.ApplyToPoint(roi.X + w / 2.0, roi.Y + h / 2.0);
+
+                g.TranslateTransform(w / 2f, h / 2f);
+                g.RotateTransform(-(float)t.DAngle);
+                g.TranslateTransform(-c.X, -c.Y);
+                g.DrawImage(frame, new Rectangle(0, 0, frame.Width, frame.Height));
+            }
+            return dst;
+        }
+
+        /// <summary>
+        /// 裁剪 ROI 取图：<strong>无旋转走原来的整数裁剪</strong>（快、像素完全一致），
+        /// 有旋转走 <see cref="CropAffine"/>。
+        /// </summary>
+        /// <param name="roiUsed">实际用于"局部坐标 → 整帧坐标"换算的矩形（无旋转时=修正后的 AABB；
+        /// 有旋转时=用户坐标 ROI，坐标由 <see cref="MapRoiPoint"/> 走仿射）。</param>
+        private static Bitmap CropRoi(Bitmap frame, FlowRunSession s, FlowNode node,
+                                      out Rectangle roiUsed, out bool affine)
+        {
+            Rectangle raw = RawRoi(s, node);
+            affine = HasRoiRotation(s);
+
+            if (!affine)
+            {
+                roiUsed = ResolveRoi(s, node, frame.Width, frame.Height);
+                return roiUsed.IsEmpty ? null : CropTemplate(frame, roiUsed);
+            }
+
+            roiUsed = raw;
+            return CropAffine(frame, raw, s.Transform);
+        }
+
+        /// <summary>
+        /// ROI 局部坐标 (u,v) → 整帧坐标。仿射裁剪时走 <c>T(roi.TL + (u,v))</c>，
+        /// 否则直接加 AABB 偏移（老路径，行为不变）。
+        /// </summary>
+        private static PointF MapRoiPoint(FlowRunSession s, Rectangle roiUsed, bool affine, double u, double v)
+        {
+            return affine
+                ? s.Transform.ApplyToPoint(roiUsed.X + u, roiUsed.Y + v)
+                : new PointF((float)(u + roiUsed.X), (float)(v + roiUsed.Y));
+        }
+
         private static Rectangle ResolveRoi(FlowRunSession s, FlowNode node, int width, int height)
         {
             int roiX = node.GetInt("RoiX", 0);
