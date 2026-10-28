@@ -67,6 +67,9 @@ namespace VisionPlatform.Flow
         /// </summary>
         public bool BaselineTaught;
 
+        /// <summary>示教了基准的节点 Id（宿主据此刷新参数面板里的基准值）。</summary>
+        public string BaselineNodeId = "";
+
         /// <summary>整链结论（仅链尾快照有效）。</summary>
         public bool Passed;
 
@@ -694,6 +697,7 @@ namespace VisionPlatform.Flow
                 snap.ChainSummary = res.Summary ?? "";
                 snap.CycleMs = res.ElapsedMs;
                 snap.BaselineTaught = res.BaselineTaught;
+                snap.BaselineNodeId = res.BaselineNodeId ?? "";
                 if (res.Shapes != null) snap.AllShapes = new List<IGeometryShape>(res.Shapes);
             }
 

@@ -46,6 +46,9 @@ namespace VisionPlatform.Flow
         /// </summary>
         public bool BaselineTaught { get; set; }
 
+        /// <summary>示教了基准的节点 Id（空 = 没有）。宿主可据此刷新参数面板。</summary>
+        public string BaselineNodeId { get; set; }
+
         public FlowRunResult()
         {
             Message = "";
@@ -71,6 +74,9 @@ namespace VisionPlatform.Flow
 
         /// <summary>本轮是否示教了位置修正基准（宿主据此落盘，避免下次又示教成 0 偏差）。</summary>
         private bool _baselineTaught;
+
+        /// <summary>本轮刚示教过基准的节点 Id（空 = 没有）。宿主据此刷新参数面板里的基准值。</summary>
+        private string _baselineNodeId = "";
         private bool _disposed;
 
         // 匹配模型训练缓存（P0-1 / P0-2）：
@@ -129,6 +135,7 @@ namespace VisionPlatform.Flow
             // 「首次示教」基准不被每帧清空（见 FlowRunController.LoopCore）。
             if (clearAutoRefs) ClearAutoReferences();
             _baselineTaught = false;
+            _baselineNodeId = "";
 
             var s = new FlowRunSession();
             s.Flow = flow;
@@ -266,6 +273,7 @@ namespace VisionPlatform.Flow
             result.Passed = session.Passed;
             result.Summary = string.Join("；", session.Summaries);
             result.BaselineTaught = _baselineTaught;
+            result.BaselineNodeId = _baselineNodeId ?? "";
             return result;
         }
 
@@ -1630,88 +1638,63 @@ namespace VisionPlatform.Flow
             string refSource = node.GetString("RefSource", "Auto");
             bool autoFirstLatch = false;
 
+            // ---- 基准：自动填入 + 落盘（VisionMaster/HALCON 语义）----
+            //   · 从没示教过（RefSet=0 且三个基准值都是 0）→ 用当前位姿示教，写回 RefX/RefY/RefAngle；
+            //   · 示教过（RefSet=1）或用户手填过（任一非 0）→ 直接用这几个值比较。
+            // 这样"点一次跑一次"也能算出真实偏差，而且参数面板上能看到基准到底是多少 ——
+            // 之前把基准藏在 AutoRef* 三个隐藏字段里，用户既看不见也就没法确认。
+            bool refSet = node.GetBool("RefSet", false);
+            double refXParam = node.GetDouble("RefX", 0);
+            double refYParam = node.GetDouble("RefY", 0);
+            double refAParam = node.GetDouble("RefAngle", 0);
+            bool manualLooksSet = Math.Abs(refXParam) > 1e-9
+                                  || Math.Abs(refYParam) > 1e-9
+                                  || Math.Abs(refAParam) > 1e-9;
+
             double rx, ry, ra;
-            if (string.Equals(refSource, "Manual", StringComparison.OrdinalIgnoreCase))
+            if (refSet || manualLooksSet)
             {
-                // 手动基准由用户按【原始图坐标】填写，换算到工作帧坐标
-                rx = node.GetDouble("RefX", 0) - s.OffsetX;
-                ry = node.GetDouble("RefY", 0) - s.OffsetY;
-                ra = node.GetDouble("RefAngle", 0);
+                // 基准按【原始图坐标】存，换算到工作帧坐标
+                rx = refXParam - s.OffsetX;
+                ry = refYParam - s.OffsetY;
+                ra = refAParam;
             }
-            else
+            else if (!hasPose)
             {
-                if (!hasPose)
-                {
-                    // 【P0-3 修复】Auto 且上游无定位结果：Warning + 跳过修正，不再判 NG。
-                    //
-                    // 为什么改：位置修正不读 s.Current，端口化 + 拓扑排序上线后，
-                    // 它的执行顺序完全由 (X, Y, Id) 决定 —— 排在匹配节点【前面】是合法且常见的布局，
-                    // 此时 s.HasPose 必然为 false。旧逻辑直接判 NG，等于「用户摆放顺序不同就 NG」，
-                    // 这是本次改造引入的回归风险。
-                    //
-                    // 为什么不是「给 Image 加必填输入端子」来强制它排在后面：
-                    // 那会让所有没连该端子的旧配置集体报 E001 级错误 ——
-                    // 和 PositionCorrect 的 Pose 那次是完全同一个坑，不重蹈覆辙。
-                    //
-                    // 于是分工是：校验期由 FlowValidator 的 W005 提前提示用户（不是拦他），
-                    // 运行期这里跳过本次修正、不判 NG，让流程继续跑。
-                    p.Status = FlowNodeStatus.Skipped;
+                // 既没示教过、上游也没位姿：跳过修正（不判 NG），并说清原因。
+                // （校验期由 FlowValidator 的 W005 提前提示，运行期不拦。）
+                p.Status = FlowNodeStatus.Skipped;
 
-                    // 归因提示：若链上存在匹配类节点却排在本节点【之后】执行，则点名该节点并
-                    // 建议把本节点移到其下游；否则维持原始「上游无可用定位结果」文案。
-                    // （SmokeAlgo T11 断言「上游无可用定位结果」子串，其链路无匹配节点，走 else 分支；
-                    //   两个分支都 return true、都置 Skipped，遵循 P0-3「不判 NG」的裁决。）
-                    FlowNode lateMatch = FindMatchNodeAfter(s, node);
-                    if (lateMatch != null)
-                    {
-                        string mn = string.IsNullOrEmpty(lateMatch.Name) ? lateMatch.Id : lateMatch.Name;
-                        p.Summary = "位置修正：匹配节点「" + mn
-                            + "」排在本节点之后执行，取不到位姿；请将本节点移到其下游（画布右侧）";
-                    }
-                    else
-                    {
-                        p.Summary = "位置修正：上游无可用定位结果，本次跳过修正（未判 NG）";
-                    }
-                    return true;
-                }
-
-                // Auto 基准：**必须落盘**，否则"点一次跑一次"的用法里每次运行都被当成首帧，
-                // dX/dY 恒为 0 —— 现场看到的就是"位置修正完全没反应"（VisionMaster/HALCON 也是
-                // "示教一次、之后一直比"）。三层优先级：节点参数（已示教）→ 本进程缓存 → 示教当前帧。
-                bool refSet = node.GetBool("AutoRefSet", false);
-                if (refSet)
+                FlowNode lateMatch = FindMatchNodeAfter(s, node);
+                if (lateMatch != null)
                 {
-                    rx = node.GetDouble("AutoRefX", 0);
-                    ry = node.GetDouble("AutoRefY", 0);
-                    ra = node.GetDouble("AutoRefA", 0);
+                    string mn = string.IsNullOrEmpty(lateMatch.Name) ? lateMatch.Id : lateMatch.Name;
+                    p.Summary = "位置修正：匹配节点「" + mn
+                        + "」排在本节点之后执行，取不到位姿；请将本节点移到其下游（画布右侧）";
                 }
                 else
                 {
-                    double[] latched;
-                    if (_autoRefs.TryGetValue(node.Id, out latched))
-                    {
-                        rx = latched[0];
-                        ry = latched[1];
-                        ra = latched[2];
-                    }
-                    else
-                    {
-                        // 首次示教：写回节点参数（内存里的 FlowDefinition 已变），
-                        // 由宿主在运行结束后落盘；同时缓存一份，供本轮后续帧使用。
-                        rx = curX;
-                        ry = curY;
-                        ra = curA;
-
-                        node.Set("AutoRefX", rx.ToString("F3", CultureInfo.InvariantCulture));
-                        node.Set("AutoRefY", ry.ToString("F3", CultureInfo.InvariantCulture));
-                        node.Set("AutoRefA", ra.ToString("F3", CultureInfo.InvariantCulture));
-                        node.Set("AutoRefSet", "1");
-
-                        _autoRefs[node.Id] = new[] { rx, ry, ra };
-                        autoFirstLatch = true;
-                        _baselineTaught = true;
-                    }
+                    p.Summary = "位置修正：上游无可用定位结果，本次跳过修正（未判 NG）";
                 }
+                return true;
+            }
+            else
+            {
+                // 首次示教：把当前位姿写回节点（Auto 与"Manual 但值为 0"都走这里，
+                // 避免用户手填 0 得到"偏移量 = 绝对坐标"这种荒谬结果）。
+                rx = curX;
+                ry = curY;
+                ra = curA;
+
+                node.Set("RefX", (rx + s.OffsetX).ToString("F3", CultureInfo.InvariantCulture));
+                node.Set("RefY", (ry + s.OffsetY).ToString("F3", CultureInfo.InvariantCulture));
+                node.Set("RefAngle", ra.ToString("F3", CultureInfo.InvariantCulture));
+                node.Set("RefSet", "1");
+
+                _autoRefs[node.Id] = new[] { rx, ry, ra };
+                autoFirstLatch = true;
+                _baselineTaught = true;
+                _baselineNodeId = node.Id;
             }
 
             double dx = hasPose ? (curX - rx) : 0.0;
@@ -1721,6 +1704,11 @@ namespace VisionPlatform.Flow
 
             // EnableAngle = 0：只平移不旋转
             if (!node.GetBool("EnableAngle", true)) dAngle = 0.0;
+
+            // 偏移量"大到不可能"时给出明确提示：最常见的原因是基准填成了 0（或填了别的坐标），
+            // 于是 dX 直接等于绝对坐标 —— 下游 ROI 会被推到画面外，看起来像"显示错了"。
+            bool shiftSuspicious = s.Current != null
+                && (Math.Abs(dx) > s.Current.Width * 0.5 || Math.Abs(dy) > s.Current.Height * 0.5);
 
             // 覆盖式写入（链内多个位置修正节点以最后一个为准，不累加）
             s.Transform.Set(rx, ry, ra, dx, dy, dAngle, dScale);
@@ -1735,6 +1723,14 @@ namespace VisionPlatform.Flow
                 rx, ry, ra, curX, curY, curA, dx, dy, dAngle);
             if (autoFirstLatch)
                 p.Summary += "（Auto 首帧示教：基准=当前位姿，偏差 0 属预期）";
+
+            if (shiftSuspicious)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary += string.Format(CultureInfo.InvariantCulture,
+                    "　⚠ 偏移异常大（dX={0:F1} dY={1:F1}），请检查「基准」是否填错（0 会被当作未示教自动示教）",
+                    dx, dy);
+            }
 
             // 超差判定（0 = 不限）
             double maxShiftX = node.GetDouble("MaxShiftX", 0);

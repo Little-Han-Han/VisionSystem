@@ -1426,6 +1426,18 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            if (string.Equals(key, "RetractBaseline", StringComparison.Ordinal))
+            {
+                FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+                if (node == null) return;
+
+                node.Set("RefSet", "0");
+                SaveFlows();
+                nodeParamPanel.SetNode(node);      // 刷新面板（隐藏标记已变）
+                SetStatus("已清除基准：下一次运行会以当前位姿重新示教");
+                return;
+            }
+
             if (string.Equals(key, "OcrRescanTemplates", StringComparison.Ordinal))
             {
                 FlowNode node = _selectedNode ?? nodeParamPanel.Node;
@@ -2251,7 +2263,15 @@ namespace VisionPlatform.UI
                     if (snap.BaselineTaught)
                     {
                         SaveFlows();
-                        SetStatus("已示教位置修正基准并保存（之后每次运行都按它比较）");
+                        SetStatus("已自动示教位置修正基准（基准 X/Y/角 已填入本节点）");
+
+                        // 面板正显示这个节点 → 立刻刷新，让用户看到新填入的基准值
+                        FlowNode showNode = nodeParamPanel.CurrentNode;
+                        if (showNode != null && string.Equals(showNode.Id, snap.BaselineNodeId,
+                                                              StringComparison.Ordinal))
+                        {
+                            nodeParamPanel.SetNode(showNode);
+                        }
                     }
 
                     // 【文案唯一出口】画布卡片摘要、状态栏、预览顶条、预览覆盖层、结果区

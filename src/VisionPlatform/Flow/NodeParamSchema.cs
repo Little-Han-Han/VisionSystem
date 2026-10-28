@@ -399,18 +399,17 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Group("基准来源"));
             t.Fields.Add(Enum("RefSource", "基准", "Auto",
                 new[] { "自动（上游匹配结果）", "手动示教" }, new[] { "Auto", "Manual" }));
-            t.Fields.Add(Int("RefX", "基准 X", -100000, 100000, "0", "仅手动示教时生效"));
-            t.Fields.Add(Int("RefY", "基准 Y", -100000, 100000, "0", "仅手动示教时生效"));
-            t.Fields.Add(Dbl("RefAngle", "基准角(°)", -360, 360, 2, 0.5m, "0", "仅手动示教时生效"));
+            t.Fields.Add(Dbl("RefX", "基准 X", -100000, 100000, 1, 1m, "0",
+                "自动：首次运行自动填入；也可手改（改完即视为手动基准）"));
+            t.Fields.Add(Dbl("RefY", "基准 Y", -100000, 100000, 1, 1m, "0", "同上"));
+            t.Fields.Add(Dbl("RefAngle", "基准角(°)", -360, 360, 2, 0.5m, "0", "同上"));
             t.Fields.Add(Bool("EnableAngle", "启用旋转修正", "1", "关闭则只平移不旋转"));
 
-            // 【自动示教的基准必须落盘】否则"点一次跑一次"的用法里，每次运行都会被当成首帧
-            // 重新示教 → dX/dY 恒为 0 → 现场看到的就是"位置修正完全没反应"。
-            t.Fields.Add(Dbl("AutoRefX", "已示教基准 X", -100000, 100000, 1, 1m, "0",
-                "自动基准：首次运行示教后写回，此后一直用它做比较", true));
-            t.Fields.Add(Dbl("AutoRefY", "已示教基准 Y", -100000, 100000, 1, 1m, "0", "", true));
-            t.Fields.Add(Dbl("AutoRefA", "已示教基准角(°)", -360, 360, 2, 0.5m, "0", "", true));
-            t.Fields.Add(Bool("AutoRefSet", "基准已示教", "0", "", true));
+            // 【基准自动填入】Auto 模式下首次运行把当前位姿写回下面三个字段（RefX/RefY/RefAngle），
+            // 面板上就能看到"基准到底是多少"，也可以事后手改。RefSet=1 表示已示教。
+            t.Fields.Add(Action("RetractBaseline", "重新示教基准",
+                "清掉已示教基准，下一次运行会重新以当前位姿为准"));
+            t.Fields.Add(Bool("RefSet", "基准已示教", "0", "自动维护：首次运行写入基准后置 1", true));
 
             t.Fields.Add(Group("下游 ROI 如何跟随"));
             t.Fields.Add(Enum("Follow", "跟随方式", "Roi",
