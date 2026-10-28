@@ -77,6 +77,17 @@ namespace VisionPlatform.Flow
         /// <summary>是否已经写入过有效的位置修正（未写入时下游 ROI 保持不变）。</summary>
         public bool IsValid { get; private set; }
 
+        /// <summary>
+        /// 本帧的修正是否**已经烘进像素**（位置修正节点把图 warp 回基准姿态后 <see cref="Reset"/>，
+        /// 下游 ROI 用原坐标即可）。
+        /// <para>
+        /// 【为什么需要单独一个标记】Reset 之后 <see cref="IsValid"/> 为 false，
+        /// 下游无法区分"修正过（图已对齐）"与"压根没修正" —— 现场就变成
+        /// "看起来 ROI 没动，到底生效没有？"。这个标记让摘要能给出明确答案。
+        /// </para>
+        /// </summary>
+        public bool Warped { get; private set; }
+
         /// <summary>清空为「无修正」状态。</summary>
         public void Reset()
         {
@@ -88,6 +99,29 @@ namespace VisionPlatform.Flow
             DAngle = 0.0;
             DScale = 1.0;
             IsValid = false;
+            Warped = false;
+        }
+
+        /// <summary>标记"本帧已把修正烘进像素"（由位置修正节点在 warp 后调用）。</summary>
+        public void MarkWarped()
+        {
+            Warped = true;
+            IsValid = false;      // 图已对齐，下游不再做二次坐标映射
+        }
+
+        /// <summary>
+        /// 给下游节点的摘要用的一句话：ROI 到底有没有被修正、以哪种方式。
+        /// 空串 = 本帧没有位置修正（用户就该去查为什么没生效）。
+        /// </summary>
+        public string PoseNote()
+        {
+            if (Warped) return "　· 图像已按位置修正对齐";
+            if (IsValid)
+            {
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "　· ROI 已按位置修正映射(dX={0:F1},dY={1:F1},dA={2:F2}°)", DX, DY, DAngle);
+            }
+            return "";
         }
 
         /// <summary>写入一次修正结果（覆盖式）。</summary>

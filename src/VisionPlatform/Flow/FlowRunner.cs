@@ -985,7 +985,8 @@ namespace VisionPlatform.Flow
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "字符识别：\"{0}\"（{1} 字符，认出 {2}，平均置信度 {3:F2}）{4}",
-                    shown, charCount, matched, meanScore, tail);
+                    shown, charCount, matched, meanScore, tail)
+                    + s.Transform.PoseNote();
 
                 // ⑪ 空库 / 全失败 / 部分失败 / 有模板但一个都没认出来 → 只黄不红
                 //    （Warn 让位点见 StepNext）：
@@ -1727,8 +1728,9 @@ namespace VisionPlatform.Flow
                 s.Current.Dispose();
                 s.Current = warped;
 
-                // 修正已烘进像素：复位坐标重映射，下游 ROI 不做二次变换
-                s.Transform.Reset();
+                // 修正已烘进像素：复位坐标重映射，下游 ROI 不做二次变换；
+                // 但要留下"本帧已对齐"的标记，下游摘要才能说清 ROI 到底改没改。
+                s.Transform.MarkWarped();
 
                 // 预览帧刷新为修正后的图像。连续运行（CaptureFrames=false）下跳过克隆，避免每周期 LOH 压力导致卡顿
                 if (s.CaptureFrames && s.Current != null)
@@ -2477,7 +2479,8 @@ namespace VisionPlatform.Flow
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "直线卡尺：长度 {0:F1} 角度 {1:F2}° RMS {2:F2} 有效点 {3}/{4}",
                 r.Length, r.AngleDeg, r.Rms, r.ValidCount,
-                r.Points != null ? r.Points.Count : 0);
+                r.Points != null ? r.Points.Count : 0)
+                + s.Transform.PoseNote();   // 让用户一眼看到 ROI 到底有没有跟着修正
             return true;
         }
 
@@ -2581,7 +2584,8 @@ namespace VisionPlatform.Flow
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "圆卡尺：直径 {0:F1} 圆心 ({1:F1},{2:F1}) RMS {3:F2} 有效点 {4}/{5}",
                 diameter, r.Circle.Cx, r.Circle.Cy, r.Rms, r.ValidCount,
-                r.Points != null ? r.Points.Count : 0);
+                r.Points != null ? r.Points.Count : 0)
+                + s.Transform.PoseNote();
             return true;
         }
 

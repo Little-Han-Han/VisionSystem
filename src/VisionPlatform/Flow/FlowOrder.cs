@@ -162,6 +162,14 @@ namespace VisionPlatform.Flow
                 }
             }
 
+            // ---- 位置修正的「全局先行」虚拟边 ----
+            // 位置修正是**链级全局状态**（写 session.Transform / 把图 warp 回基准），
+            // 不是"连了线才生效"的局部量。可是执行顺序只由连线 (X,Y,Id) 决定，
+            // 卡尺/OCR 的 Image 若直接连自图像源，就会排在位置修正**之前**执行 ——
+            // 现场表现正是"位置修正没启用、ROI 没修正"。
+            // 这里给「要用 ROI 的节点」补一条虚拟依赖：位置修正 → 该节点。
+            ApplyPositionCorrectFirst(byId, upstream, downstream);
+
             Dictionary<string, int> indegree = new Dictionary<string, int>(StringComparer.Ordinal);
             HashSet<string> inGraph = new HashSet<string>(StringComparer.Ordinal);
             HashSet<string> remaining = new HashSet<string>(StringComparer.Ordinal);
@@ -235,6 +243,107 @@ namespace VisionPlatform.Flow
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 该类型的节点是否"按 ROI 取图"（即依赖位置修正的结果）。
+        /// <para>
+        /// 定位类（ShapeMatch / TemplateMatch）与 PositionCorrect 本身不在列表里：
+        /// 它们提供位姿，若也被强行排到位置修正之后就会成环。
+        /// </para>
+        /// </summary>
+        private static bool NeedsPoseCorrection(FlowNodeType t)
+        {
+            switch (t)
+            {
+                case FlowNodeType.Blob:
+                case FlowNodeType.LineCaliper:
+                case FlowNodeType.CircleCaliper:
+                case FlowNodeType.Ocr:
+                case FlowNodeType.Sharpness:
+                case FlowNodeType.ColorExtractor:
+                case FlowNodeType.ImageFilter:
+                case FlowNodeType.FitLine:
+                case FlowNodeType.FitCircle:
+                case FlowNodeType.ObjectDetect:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 沿<strong>下游</strong>方向从 <paramref name="from"/> 能否走到 <paramref name="target"/>。
+        /// <para>
+        /// 【方向别搞反】要判断"加一条 pid → cid 的边会不会成环"，等价于问
+        /// "从 cid 顺着数据流能不能走到 pid"。若写成"找 cid 的祖先"，反例（cid → pid 已存在）
+        /// 会漏判，于是自己造出一个环。
+        /// </para>
+        /// </summary>
+        private static bool ReachesDownstream(Dictionary<string, List<string>> downstream,
+                                              string from, string target)
+        {
+            if (string.Equals(from, target, StringComparison.Ordinal)) return true;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal) { from };
+            var stack = new Stack<string>();
+            stack.Push(from);
+
+            while (stack.Count > 0)
+            {
+                string cur = stack.Pop();
+                List<string> ds;
+                if (!downstream.TryGetValue(cur, out ds) || ds == null) continue;
+
+                foreach (string d in ds)
+                {
+                    if (string.Equals(d, target, StringComparison.Ordinal)) return true;
+                    if (seen.Add(d)) stack.Push(d);
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 给"要用 ROI 的节点"补上「位置修正节点必须先执行」的虚拟边。
+        /// <para>
+        /// 三条约束：① 只对本节点已有连线的图内节点生效（孤立节点保持孤立，W001 警告照旧）；
+        /// ② 已有直接连线的不重复加；③ 若本节点是位置修正的祖先（会成环）则跳过。
+        /// </para>
+        /// </summary>
+        private static void ApplyPositionCorrectFirst(
+            Dictionary<string, FlowNode> byId,
+            Dictionary<string, HashSet<string>> upstream,
+            Dictionary<string, List<string>> downstream)
+        {
+            var pcs = new List<string>();
+            foreach (KeyValuePair<string, FlowNode> kv in byId)
+            {
+                FlowNodeType t;
+                if (kv.Value.TryGetType(out t) && t == FlowNodeType.PositionCorrect) pcs.Add(kv.Key);
+            }
+            if (pcs.Count == 0) return;
+
+            foreach (KeyValuePair<string, FlowNode> kv in byId)
+            {
+                string cid = kv.Key;
+
+                FlowNodeType ct;
+                if (!kv.Value.TryGetType(out ct) || !NeedsPoseCorrection(ct)) continue;
+
+                bool linked = (downstream[cid].Count > 0) || (upstream[cid].Count > 0);
+                if (!linked) continue;
+
+                foreach (string pid in pcs)
+                {
+                    if (string.Equals(pid, cid, StringComparison.Ordinal)) continue;
+                    if (upstream[cid].Contains(pid)) continue;
+                    if (ReachesDownstream(downstream, cid, pid)) continue;   // 加了就成环
+
+                    upstream[cid].Add(pid);
+                    downstream[pid].Add(cid);
+                }
+            }
         }
 
         /// <summary>
