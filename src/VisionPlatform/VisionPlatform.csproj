@@ -79,6 +79,7 @@
     <Compile Include="Flow\FlowRunController.cs" />
     <Compile Include="Flow\FlowRunManager.cs" />
     <Compile Include="Flow\FlowRunner.cs" />
+    <Compile Include="Flow\ImageFolderSource.cs" />
     <Compile Include="Flow\FlowRunSlot.cs" />
     <Compile Include="Flow\FlowShapes.cs" />
     <Compile Include="Flow\OcrCharStore.cs" />

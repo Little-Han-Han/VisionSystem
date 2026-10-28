@@ -894,29 +894,86 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
-        /// 当前编辑节点是「图像源」且取图方式为「本地图片文件」、路径有效时，
+        /// 当前编辑节点是「图像源」且取图方式为「本地图片文件 / 本地图片文件夹」时，
         /// 立即把该图显示在预览区（不运行流程）。
+        /// <para>
+        /// 文件夹模式取的是<strong>当前这一张</strong>（<see cref="ImageFolderCursor.Peek"/>，不推进），
+        /// 状态栏同时写出「第 i/N 张」—— 用户不必先跑一遍才知道跑到哪儿了。
+        /// </para>
         /// </summary>
         private void PreviewImageSourceFile()
         {
             FlowNode node = nodeParamPanel.Node;
             if (!IsFileImageSource(node)) return;
 
-            string path = node.GetString("FilePath", "");
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            string path, note, whyNot;
+            if (!TryResolveImageSourceFile(node, out path, out note, out whyNot))
+            {
+                if (!string.IsNullOrEmpty(whyNot)) SetStatus("图像源：" + whyNot);
+                return;
+            }
 
             string error;
             Bitmap bmp = FlowPreviewPanel.LoadImageFromFile(path, out error);
             if (bmp == null) return;
 
             // 交给视图后不得再 Dispose（OwnsImage=true）
-            flowPreview.ShowStaticImage(bmp, "图像源：" + Path.GetFileName(path));
+            flowPreview.ShowStaticImage(bmp, "图像源：" + note);
             SetStatus("已载入图像源图片：" + path);
         }
 
         /// <summary>
-        /// 从流程里第一个「本地图片」图像源节点载图到预览区（当前编辑节点不是图像源时的兜底）。
-        /// 载图成功返回 true。
+        /// 解析「图像源」节点当前应显示/应取的图片路径。
+        /// <para>
+        /// 文件模式 = <c>FilePath</c>；文件夹模式 = 游标<strong>当前</strong>指向的那一张
+        /// （<see cref="ImageFolderCursor.Peek"/>，只读不推进 —— 预览不该消耗播放位置）。
+        /// </para>
+        /// </summary>
+        /// <param name="note">给预览顶条/状态栏用的短文案（文件名，或「第 i/N 张 · 文件名」）。</param>
+        /// <param name="whyNot">解析失败的原因；成功时为空。</param>
+        private bool TryResolveImageSourceFile(FlowNode node, out string path, out string note, out string whyNot)
+        {
+            path = "";
+            note = "";
+            whyNot = "";
+
+            if (!IsFileImageSource(node)) return false;
+
+            if (IsFolderImageSource(node))
+            {
+                string folder = node.GetString("FolderPath", "");
+                if (string.IsNullOrWhiteSpace(folder))
+                {
+                    whyNot = "未选择图片文件夹";
+                    return false;
+                }
+
+                string listError;
+                string[] files = ImageFolderSource.List(folder, out listError);
+                if (files.Length == 0)
+                {
+                    whyNot = string.IsNullOrEmpty(listError) ? "文件夹内没有图片" : listError;
+                    return false;
+                }
+
+                int idx = ImageFolderCursor.Peek(ImageFolderCursor.Key(CurrentFlow, node, folder), files.Length);
+                path = files[idx];
+                note = string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 张 · {2}",
+                                     idx + 1, files.Length, Path.GetFileName(path));
+                return true;
+            }
+
+            path = node.GetString("FilePath", "");
+            if (string.IsNullOrWhiteSpace(path)) { whyNot = "未选择本地图片文件"; return false; }
+            if (!File.Exists(path)) { whyNot = "文件不存在（" + path + "）"; return false; }
+
+            note = Path.GetFileName(path);
+            return true;
+        }
+
+        /// <summary>
+        /// 从流程里第一个「本地图片 / 本地图片文件夹」图像源节点载图到预览区
+        /// （当前编辑节点不是图像源时的兜底）。载图成功返回 true。
         /// </summary>
         private bool LoadFirstFileImageSource()
         {
@@ -927,14 +984,14 @@ namespace VisionPlatform.UI
             {
                 if (n == null || !IsFileImageSource(n)) continue;
 
-                string path = n.GetString("FilePath", "");
-                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+                string path, note, whyNot;
+                if (!TryResolveImageSourceFile(n, out path, out note, out whyNot)) continue;
 
                 string error;
                 Bitmap bmp = FlowPreviewPanel.LoadImageFromFile(path, out error);
                 if (bmp == null) continue;
 
-                flowPreview.ShowStaticImage(bmp, "图像源：" + Path.GetFileName(path));
+                flowPreview.ShowStaticImage(bmp, "图像源：" + note);
                 SetStatus("已载入图像源图片：" + path);
                 return true;
             }
@@ -1878,13 +1935,21 @@ namespace VisionPlatform.UI
             return node.TryGetType(out type) && type == FlowNodeType.ImageSource;
         }
 
-        /// <summary>节点是「图像源」且取图方式为「本地图片文件」时返回 true。</summary>
+        /// <summary>节点是「图像源」且取图方式为「本地图片文件 / 本地图片文件夹」时返回 true。</summary>
         private static bool IsFileImageSource(FlowNode node)
         {
             if (!IsImageSource(node)) return false;
 
-            return string.Equals(node.GetString("Source", "Camera"), "File",
-                                 StringComparison.OrdinalIgnoreCase);
+            string s = node.GetString("Source", "Camera");
+            return string.Equals(s, "File", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s, "Folder", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>节点是「图像源」且取图方式为「本地图片文件夹」时返回 true。</summary>
+        private static bool IsFolderImageSource(FlowNode node)
+        {
+            if (!IsImageSource(node)) return false;
+            return string.Equals(node.GetString("Source", "Camera"), "Folder", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>在流程中查找第一个「图像源」节点；没有则返回 null。</summary>

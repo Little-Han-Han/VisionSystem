@@ -12,7 +12,7 @@
 //           最后按得分排序 + 非极大值抑制输出多目标。
 //    评分 —— 把模板点旋转到候选姿态后，与该处图像梯度求余弦相似度取平均。
 //
-//  性能设计（四项叠加）：
+//  性能设计（五项叠加）：
 //    1) 姿态预计算：角度/缩放的旋转只按「姿态」算一次，位置循环里只做加法与采样，
 //       避免在 (位置 × 角度 × 缩放) 三重循环里反复做三角函数与旋转。
 //    2) 提前终止：①理论上界 —— 剩余点即使全满分也达不到阈值即放弃；
@@ -20,7 +20,16 @@
 //    3) 位置级剪枝 + 单并行域：粗层把「本位置当前最优得分」当作理论上界阈值，
 //       已找到高分姿态的位置在后续姿态上几十个点内就能退出；姿态预计算按块组织，
 //       一个块只做一次 fork/join（原实现每个姿态 fork 一次，360+ 姿态时开销可观）。
-//    4) 并行 + SIMD：粗扫按位置、精化按候选做 OpenMP 并行；评分的累积段用 SSE2 四路。
+//    4) 粗层「梯度方向响应图」查表（LINEMOD / Line2D 的经典做法，参考 meiqua/shape_based_matching）：
+//       把每个像素的梯度方向量化成 kDirBins 档存成一张 uint8 图，模板点的方向档位随姿态
+//       整体平移（旋转 = 档位加偏移），于是每个点的相似度只剩「读 1 字节 → 查 1 次 cos 表」。
+//       原实现每个点要做双线性（8 次浮点读 + 加权）+ 开方 + 除法 + 钳位，粗层是它的主耗时。
+//       ⚠️ 只有最粗层走查表（那里位置本身就是整数格点），精化层与最终重评仍走精确双线性，
+//          所以亚像素精度与对外得分口径完全不变。
+//    5) 粗层「边缘支持度」整型图剪枝：模板外接圆内的梯度像素数为 0 时，该位置所有姿态的
+//       分子必然为 0（分数 0，必然低于粗层阈值），一次查表就能跳过整个位置的全部姿态。
+//       这是**严格上界**（不是启发式），不会漏掉真目标；工业图大片平坦背景时收益最大。
+//    6) 并行 + SIMD：粗扫按位置、精化按候选做 OpenMP 并行；精化层评分的累积段用 SSE2 四路。
 //
 //  稳健性设计（针对「定位准确率不足」）：
 //    · 评分分母只统计「落在图像内」的模板点。目标贴边/部分出画时，出画的点根本无从
@@ -31,6 +40,10 @@
 //      真实相邻目标当成同一个。
 //    · 粗层候选保留前做一次空间稀疏化，避免同一目标的分数平台占满候选名额而挤掉邻居。
 //    · 输出分数在最细层用「不剪枝」的口径重算一次，下游拿它判 OK/NG 才不会偏悲观。
+//
+//  诊断开关（默认关闭，不影响算法行为）：
+//    VA_SHAPE_DEBUG=1    粗扫统计打到 stderr（层数/位置数/姿态数/建表与粗扫耗时/前几名候选）
+//    VA_SHAPE_PRECISE=1  强制关掉方向响应图、退回精确双线性，用于两条路径的 A/B 对比
 // ============================================================================
 
 #include "va_internal.h"
@@ -41,6 +54,9 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <chrono>
 
 #ifdef _OPENMP
 #  include <omp.h>
@@ -75,19 +91,64 @@ const size_t kCoarsePoseStride = 2;
 // 每处理一个位置都要把整块姿态表重新流一遍，反而变慢。
 const size_t kCoarsePoseChunkBytes = 8u << 20;
 
+// 启用「方向响应图查表」的最小粗扫规模（位置数 × 姿态数）。
+// 查表路径要先建方向图与边缘支持度图（一次性 1~2 ms），小规模搜索摊不回来。
+// 门槛取自实测：21 万组走查表反而慢 2.7 ms，60 万组起开始有收益。
+const size_t kFastPathMinWork = 400000;
+
 // 粗层候选保留时的空间分散半径（原图像素，按「最粗层像素 × 2」取）。
 const double kCandidateSepLevelFactor = 2.0;
 
 // 某一层金字塔的梯度场
-struct GradLevel {
-    cv::Mat gx;
+struct GradLevel {    cv::Mat gx;
     cv::Mat gy;
+};
+
+// ---------------------------------------------------------------------------
+// 梯度方向量化查表（粗层专用）
+//
+//   kDirBins 档把 360° 均分，档位误差 ≤ 360/2N 度。N=32 时最坏 5.6°，
+//   cos 误差 ≤ 0.005 —— 远小于粗层阈值（0.10~0.45）与姿态步长带来的差异，
+//   而且只影响「粗层挑候选」，最终得分由最细层的精确双线性重算。
+//   32 档的 cos 表 = 1024 float = 4KB，可常驻 L1。
+// ---------------------------------------------------------------------------
+const int kDirBins = 32;
+const unsigned char kDirNone = 255;   // 该像素梯度≈0（平坦区），贡献 0 分但计入分母
+
+struct DirCosTable {
+    float v[kDirBins * kDirBins];
+    DirCosTable()
+    {
+        for (int t = 0; t < kDirBins; ++t)
+            for (int i = 0; i < kDirBins; ++i)
+            {
+                const double d = (double)(t - i) * (2.0 * kPi / (double)kDirBins);
+                v[t * kDirBins + i] = (float)std::cos(d);
+            }
+    }
+};
+const DirCosTable g_dirCos;
+
+// 某一层的梯度方向图（CV_8U：档位 0..kDirBins-1，kDirNone 表示平坦）
+struct DirLevel {
+    cv::Mat bins;
+    bool valid;
+    DirLevel() : valid(false) {}
+};
+
+// 某一层的「边缘支持度」整型图：(rows+1)×(cols+1) 的前缀和，用于 O(1) 数出
+// 任意矩形内的梯度像素个数。只用来做「一个都没有 → 全姿态必然 0 分」的严格剪枝。
+struct EdgeSupport {
+    cv::Mat sum;
+    bool valid;
+    EdgeSupport() : valid(false) {}
 };
 
 // 某一层的模型点：坐标已按该层缩放，方向为单位向量
 struct ModelLevel {
     std::vector<cv::Point2f> pts;
     std::vector<cv::Point2f> dir;
+    std::vector<unsigned char> bin;   // dir 量化后的档位（供粗层查表）
 };
 
 // 某个姿态（角度 + 缩放）预计算好的模板点，供所有位置复用
@@ -96,6 +157,7 @@ struct Pose {
     std::vector<float> oy;   // 旋转 + 缩放后的 Y 偏移
     std::vector<float> rx;   // 旋转后的单位方向 X
     std::vector<float> ry;   // 旋转后的单位方向 Y
+    std::vector<unsigned char> bin;   // 旋转后的方向档位（查表用；旋转 = 档位整体平移）
 };
 
 // 候选位姿。位置一律使用「原图坐标系」，角度与缩放本身与层无关
@@ -121,10 +183,63 @@ void BuildGradients(const cv::Mat& gray, cv::Mat& gx, cv::Mat& gy)
     cv::Sobel(f, gy, CV_32F, 0, 1, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
 }
 
+// 建立某层的梯度方向图（档位表）与边缘支持度整型图。
+// 两件事共用一趟扫描：平坦像素（梯度≈0）同时是 kDirNone 与支持度 0。
+void BuildDirMap(const cv::Mat& gx, const cv::Mat& gy, DirLevel& dir, EdgeSupport& sup)
+{
+    const int w = gx.cols;
+    const int h = gx.rows;
+
+    dir.bins.create(h, w, CV_8U);
+    cv::Mat mask(h, w, CV_8U);
+
+    // cv::phase 用快速 atan2（向量化），比逐像素 std::atan2 快一个量级。
+    // ⚠️ 第 4 参 = angleInDegrees，必须为 true：下面按「度 → 档位」换算，
+    //    传 false 会拿到弧度，全部像素都会落到档位 0（曾经踩过）。
+    cv::Mat ang;
+    cv::phase(gx, gy, ang, true);       // 度，[0, 360)
+
+    const float kBinPerDeg = (float)kDirBins / 360.0f;
+
+    for (int y = 0; y < h; ++y)
+    {
+        const float* px = gx.ptr<float>(y);
+        const float* py = gy.ptr<float>(y);
+        const float* pa = ang.ptr<float>(y);
+        unsigned char* pd = dir.bins.ptr<unsigned char>(y);
+        unsigned char* pm = mask.ptr<unsigned char>(y);
+
+        for (int x = 0; x < w; ++x)
+        {
+            const float vx = px[x];
+            const float vy = py[x];
+
+            // 与 ScorePose 的「平坦判据」必须一致（mag <= 1e-6 记 0 分），
+            // 否则查表路径与精确路径对同一点的认定会不同。
+            if (vx * vx + vy * vy < 1e-12f)
+            {
+                pd[x] = kDirNone;
+                pm[x] = 0;
+                continue;
+            }
+
+            int b = (int)(pa[x] * kBinPerDeg);
+            if (b < 0) b = 0;
+            if (b >= kDirBins) b = kDirBins - 1;
+
+            pd[x] = (unsigned char)b;
+            pm[x] = 1;
+        }
+    }
+
+    cv::integral(mask, sup.sum, CV_32S);
+    dir.valid = true;
+    sup.valid = true;
+}
+
 // 双线性采样梯度（float 版）；越界返回 false，调用方不计入分母
 bool SampleGrad(const cv::Mat& gx, const cv::Mat& gy,
-                float x, float y, float& outGx, float& outGy)
-{
+                float x, float y, float& outGx, float& outGy){
     const int w = gx.cols;
     const int h = gy.rows;
     if (x < 0.0f || y < 0.0f || x > (float)w - 1.0f || y > (float)h - 1.0f) return false;
@@ -186,6 +301,22 @@ void BuildPose(const ModelLevel& ml, float angleDeg, float scale, Pose& out)
         const float uy = ml.dir[i].y;
         out.rx[i] = ux * ca - uy * sa;
         out.ry[i] = ux * sa + uy * ca;
+    }
+
+    // 方向档位：旋转一个角度 = 档位整体平移，不必重新求 atan2。
+    // 注意 bin 是按 kDirBins 取模的整数偏移，与 BuildDirMap 的量化口径一致。
+    if (!ml.bin.empty())
+    {
+        out.bin.resize(n);
+        const int shift = (int)std::lround((double)angleDeg * (double)kDirBins / 360.0);
+        const int base = ((shift % kDirBins) + kDirBins) % kDirBins;
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            int b = (int)ml.bin[i] + base;
+            if (b >= kDirBins) b -= kDirBins;
+            out.bin[i] = (unsigned char)b;
+        }
     }
 }
 
@@ -322,6 +453,122 @@ bool ScorePose(const GradLevel& lv, const Pose& pose,
 }
 
 bool ScoreBetter(const Candidate& a, const Candidate& b) { return a.score > b.score; }
+
+// ---------------------------------------------------------------------------
+// 诊断开关（只在排查现场问题时用，默认全关，不影响任何算法行为 / 测试口径）
+//   VA_SHAPE_DEBUG=1  粗扫统计打到 stderr：金字塔层数、位置数（预筛前后）、姿态数、
+//                     建表 / 粗扫耗时、前几名候选。用来回答"为什么慢 / 为什么没命中"。
+//   VA_SHAPE_PRECISE=1 强制关掉方向响应图，退回精确双线性路径。
+//                     用来做 A/B：把「同一张图、同一组参数」的两条路径耗时与命中直接对比。
+// ---------------------------------------------------------------------------
+// getenv 只读环境变量、不写缓冲区，C4996 是命名安全检查的误报（此处不接受 _dupenv_s 的堆分配）
+#pragma warning(push)
+#pragma warning(disable: 4996)
+bool EnvFlag(const char* name)
+{
+    const char* e = std::getenv(name);
+    return e != 0 && e[0] == '1';
+}
+#pragma warning(pop)
+
+bool DebugTrace()
+{
+    static const bool on = EnvFlag("VA_SHAPE_DEBUG");
+    return on;
+}
+
+bool ForcePrecise()
+{
+    static const bool on = EnvFlag("VA_SHAPE_PRECISE");
+    return on;
+}
+
+// ---------------------------------------------------------------------------
+// 粗层评分：梯度方向响应图查表版（与 ScorePose 同一套剪枝 / 分母 / 覆盖率语义）
+//
+//   每个点只做三件事：算整数像素坐标 → 读 1 字节方向档位 → 查 1 次 cos 表。
+//   相比 ScorePose 的双线性（8 次浮点读 + 加权）+ 开方 + 除法 + 钳位，
+//   Debug（未开优化、不内联）下差距最明显 —— 粗层正是这条路径的主耗时。
+//
+//   ⚠️ 口径必须与 ScorePose 逐条对齐，否则粗层挑出的候选与最终得分脱节：
+//     · 越界点不计入分母（return false 效果相同：不加分也不计数）
+//     · 图内平坦点计入分母但贡献 0
+//     · 理论上界 / 贪婪下限 / 覆盖率下限三处判据公式完全一致
+//   ⚠️ 采样用最近像素（位置本身是整数格点，模板点偏移才带小数）；这是粗层专用的近似，
+//      最细层的亚像素与最终重评仍走精确双线性，故不影响对外精度。
+// ---------------------------------------------------------------------------
+bool ScorePoseFast(const DirLevel& lv, const Pose& pose,
+                   float cx, float cy, float threshold, float abandonAvg,
+                   float& outScore)
+{
+    const size_t n = pose.bin.size();
+    if (n == 0) { outScore = 0.0f; return false; }
+
+    const int w = lv.bins.cols;
+    const int h = lv.bins.rows;
+
+    // 原始指针 + 下标：Debug 下 std::vector::operator[] 带迭代器检查（每次都是函数调用）
+    const float* pOx = &pose.ox[0];
+    const float* pOy = &pose.oy[0];
+    const unsigned char* pBin = &pose.bin[0];
+    const unsigned char* pMap = lv.bins.ptr<unsigned char>(0);
+    const float* pCos = g_dirCos.v;
+
+    const float total = (float)n;
+
+    size_t mEval = n / 8;
+    if (mEval < 4) mEval = 4;
+    if (mEval > 8) mEval = 8;
+    if (mEval > n) mEval = n;
+    const size_t minEval = mEval;
+
+    float sum = 0.0f;
+    size_t inFrame = 0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        // 最近像素：先向下取整再加 0.5 判定（不能用 (int) 截断 —— 负数会朝 0 取整）
+        const float fx = cx + pOx[i];
+        const float fy = cy + pOy[i];
+        int ix = (int)fx;
+        if (fx < 0.0f) --ix;
+        if (fx - (float)ix >= 0.5f) ++ix;
+        int iy = (int)fy;
+        if (fy < 0.0f) --iy;
+        if (fy - (float)iy >= 0.5f) ++iy;
+
+        if (ix >= 0 && iy >= 0 && ix < w && iy < h)
+        {
+            ++inFrame;      // 图内点一律计入分母（平坦点贡献 0，与 ScorePose 一致）
+
+            const unsigned char b = pMap[(size_t)iy * (size_t)w + ix];
+            if (b != kDirNone)
+                sum += pCos[(int)pBin[i] * kDirBins + (int)b];
+        }
+
+        // 每 4 点一次剪枝，与 SSE 版同频（粗层点数少，太稀会失去剪枝效果）
+        if ((i & 3) == 3)
+        {
+            const float done = (float)(i + 1);
+            const float rest = total - done;
+            const float denomMax = (float)inFrame + rest;
+            if (denomMax > 0.0f && (sum + rest) / denomMax < threshold)
+            { outScore = 0.0f; return false; }
+            if (abandonAvg > 0.0f && (i + 1) >= minEval && inFrame >= minEval
+                && sum / (float)inFrame < abandonAvg)
+            { outScore = 0.0f; return false; }
+        }
+    }
+
+    const float denom = (float)inFrame;
+    if (denom < total * kMinCoverage) { outScore = 0.0f; return false; }
+
+    float s = sum / denom;
+    if (s < 0.0f) s = 0.0f;
+    if (s > 1.0f) s = 1.0f;
+    outScore = s;
+    return true;
+}
 
 } // anonymous namespace
 
@@ -645,6 +892,23 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             }
         }
 
+        // 各点的方向档位：只算一次，姿态阶段按角度整体平移（旋转不改变相对档位）
+        for (int L = 0; L < levels; ++L)
+        {
+            const size_t n = mls[L].dir.size();
+            mls[L].bin.resize(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const cv::Point2f d = mls[L].dir[i];
+                double ang = std::atan2((double)d.y, (double)d.x);
+                if (ang < 0.0) ang += 2.0 * kPi;
+                int b = (int)(ang * (double)kDirBins / (2.0 * kPi));
+                if (b < 0) b = 0;
+                if (b >= kDirBins) b = kDirBins - 1;
+                mls[L].bin[i] = (unsigned char)b;
+            }
+        }
+
         // ---------- 4. 角度 / 缩放序列 ----------
         double aStart = param->angle_start;
         double aEnd = param->angle_end;
@@ -765,12 +1029,69 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 
         const size_t nPoses = aiList.size() * siList.size();
 
+        // ---------- 6b. 粗层查表加速的两张前置表 ----------
+        // 只有金字塔 ≥ 2 层时才启用：此时最粗层只是「挑候选」，近似采样不会传到最终得分上
+        //（最细层的亚像素精化与最终重评仍走精确双线性）。单层金字塔即最终层，一律走精确路径。
+        DirLevel dirLv;
+        EdgeSupport edgeSup;
+        const bool trace = DebugTrace();
+
+        // 建方向图 + 位置预筛是一次性固定开销（本机约 1~2 ms）。只有当「位置数 × 姿态数」
+        // 足够大时才摊得回来：小规模搜索（如 ±10° 共 21 个姿态）走精确路径反而更快。
+        // 阈值来自实测：BENCH-A（19200 位置 × 11 姿态 = 21 万）走查表反而慢 2.7 ms，
+        // BENCH-B（× 31 姿态 = 60 万）开始转正。
+        const size_t coarseWork = (size_t)nPos * nPoses;
+        const bool useFast = (L0 >= 1) && (coarseWork >= kFastPathMinWork) && !ForcePrecise();
+        std::chrono::steady_clock::time_point tBuild = std::chrono::steady_clock::now();
+        if (useFast)
+            BuildDirMap(grads[L0].gx, grads[L0].gy, dirLv, edgeSup);
+        const double msBuild = trace
+            ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tBuild).count()
+            : 0.0;
+
+        // 位置预筛：模板外接圆覆盖的矩形里一个梯度像素都没有 → 该位置所有姿态的分子都是 0，
+        // 分数 0 必然低于粗层阈值，整位置可跳过。这是**严格上界**（不是启发式）：只要一个像素
+        // 带梯度落在了这个矩形外，就意味着模板点也落不进去（矩形是按半对角线取的，必然包住全部点）。
+        // 工业图大片平坦背景时，这一步能把参与扫描的位置数砍掉一个量级。
+        std::vector<unsigned char> posKeep((size_t)nPos, 1);
+        if (useFast && edgeSup.valid)
+        {
+            double maxScale = scales[0];
+            for (size_t i = 1; i < scales.size(); ++i)
+                if (scales[i] > maxScale) maxScale = scales[i];
+
+            const double rad = 0.5 * std::sqrt(tw * tw + th * th) * maxScale * f0;
+            const cv::Mat& S = edgeSup.sum;
+
+            for (int p = 0; p < nPos; ++p)
+            {
+                int bx0 = (int)std::floor((double)posX[(size_t)p] - rad);
+                int by0 = (int)std::floor((double)posY[(size_t)p] - rad);
+                int bx1 = (int)std::ceil((double)posX[(size_t)p] + rad);
+                int by1 = (int)std::ceil((double)posY[(size_t)p] + rad);
+
+                if (bx1 < 0 || by1 < 0 || bx0 > lw - 1 || by0 > lh - 1)
+                { posKeep[(size_t)p] = 0; continue; }
+
+                if (bx0 < 0) bx0 = 0;
+                if (by0 < 0) by0 = 0;
+                if (bx1 > lw - 1) bx1 = lw - 1;
+                if (by1 > lh - 1) by1 = lh - 1;
+
+                const int* r0 = S.ptr<int>(by0);
+                const int* r1 = S.ptr<int>(by1 + 1);
+                const int cnt = r1[bx1 + 1] - r1[bx0] - r0[bx1 + 1] + r0[bx0];
+                if (cnt <= 0) posKeep[(size_t)p] = 0;
+            }
+        }
+
         // 单块姿态表的内存上限 → 每块最多装多少个姿态
         const size_t perPoseBytes = mls[L0].pts.size() * sizeof(float) * 4;
         size_t chunkMax = kCoarsePoseChunkBytes / (perPoseBytes > 0 ? perPoseBytes : 1);
         if (chunkMax < 1) chunkMax = 1;
         if (chunkMax > nPoses) chunkMax = nPoses;
 
+        std::chrono::steady_clock::time_point tCoarse = std::chrono::steady_clock::now();
         for (size_t p0 = 0; p0 < nPoses; p0 += chunkMax)
         {
             // 本块参与比较的姿态表（预计算一次，块内所有位置复用）
@@ -805,6 +1126,8 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 #endif
             for (int p = 0; p < nPos; ++p)
             {
+                if (!posKeep[(size_t)p]) continue;   // 6b 的严格位置预筛：必然 0 分
+
                 const float px = (float)posX[(size_t)p];
                 const float py = (float)posY[(size_t)p];
 
@@ -817,19 +1140,24 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                     const float thr = (best > thrCoarse) ? best : thrCoarse;
 
                     float s = 0.0f;
-                    if (ScorePose(grads[L0], pPoses[k], px, py, thr, avgCoarse, s))
+                    const bool ok = useFast
+                        ? ScorePoseFast(dirLv, pPoses[k], px, py, thr, avgCoarse, s)
+                        : ScorePose(grads[L0], pPoses[k], px, py, thr, avgCoarse, s);
+
+                    if (ok && s > best)
                     {
-                        if (s > best)
-                        {
-                            best = s;
-                            bestAngle[(size_t)p] = pPoseA[k];
-                            bestScale[(size_t)p] = pPoseS[k];
-                        }
+                        best = s;
+                        bestAngle[(size_t)p] = pPoseA[k];
+                        bestScale[(size_t)p] = pPoseS[k];
                     }
                 }
                 bestScore[(size_t)p] = best;
             }
         }
+
+        const double msCoarse = trace
+            ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tCoarse).count()
+            : 0.0;
 
         std::vector<Candidate> cands;
         cands.reserve(1024);
@@ -844,6 +1172,23 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             c.scale = bestScale[(size_t)p];
             c.score = bestScore[(size_t)p];
             cands.push_back(c);
+        }
+
+        if (DebugTrace())
+        {
+            std::sort(cands.begin(), cands.end(), ScoreBetter);
+            int keptPos = 0;
+            for (int p = 0; p < nPos; ++p) if (posKeep[(size_t)p]) ++keptPos;
+            int edgeTotal = 0;
+            if (edgeSup.valid) edgeTotal = edgeSup.sum.at<int>(lh, lw);
+            std::fprintf(stderr, "[shape] levels=%d L0=%d nPos=%d keep=%d nPoses=%zu fast=%d cands=%zu "
+                         "build=%.1fms coarse=%.1fms edgePx=%d  best: ",
+                         levels, L0, nPos, keptPos, nPoses, (int)useFast, cands.size(), msBuild, msCoarse,
+                         edgeTotal);
+            for (size_t i = 0; i < cands.size() && i < 6; ++i)
+                std::fprintf(stderr, "(%.1f,%.1f a=%.0f s=%.3f) ",
+                             cands[i].cx, cands[i].cy, cands[i].angle, cands[i].score);
+            std::fprintf(stderr, "\n");
         }
 
         if (cands.empty())

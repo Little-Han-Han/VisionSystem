@@ -385,6 +385,10 @@ namespace VisionPlatform.Flow
         private bool RunImageSource(FlowRunSession s, FlowNode node, FlowNodeProgress p)
         {
             string source = node.GetString("Source", "Camera");
+
+            // 文件夹模式要写进摘要的「第 i/N 张 · 文件名」；其它模式为空
+            string frameNote = "";
+
             Bitmap raw = null;
 
             Bitmap work = null;
@@ -392,29 +396,51 @@ namespace VisionPlatform.Flow
 
             try
             {
-                if (string.Equals(source, "File", StringComparison.OrdinalIgnoreCase))
+                if (IsFileImageSource(source))
                 {
-                    string path = node.GetString("FilePath", "");
-                    if (string.IsNullOrWhiteSpace(path))
+                    string path;
+
+                    if (string.Equals(source, "Folder", StringComparison.OrdinalIgnoreCase))
                     {
-                        p.Summary = "图像源：未选择本地图片文件";
-                        return false;
+                        string folder = node.GetString("FolderPath", "");
+                        string listError;
+                        string[] files = ImageFolderSource.List(folder, out listError);
+                        if (files.Length == 0)
+                        {
+                            p.Summary = "图像源：" + (listError ?? "文件夹内没有图片");
+                            return false;
+                        }
+
+                        // 键带上「流程 / 节点 / 文件夹」：同链两个图像源各自计数，换目录自动从第一张开始
+                        string cursorKey = ImageFolderCursor.Key(s.Flow, node, folder);
+
+                        int idx = ImageFolderCursor.Next(cursorKey, files.Length,
+                                                        node.GetBool("FolderPersist", false));
+                        path = files[idx];
+
+                        frameNote = string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 张 · {2}",
+                                                  idx + 1, files.Length, System.IO.Path.GetFileName(path));
                     }
-                    if (!System.IO.File.Exists(path))
+                    else
                     {
-                        p.Summary = "图像源：文件不存在（" + path + "）";
-                        return false;
+                        path = node.GetString("FilePath", "");
+                        if (string.IsNullOrWhiteSpace(path))
+                        {
+                            p.Summary = "图像源：未选择本地图片文件";
+                            return false;
+                        }
+                        if (!System.IO.File.Exists(path))
+                        {
+                            p.Summary = "图像源：文件不存在（" + path + "）";
+                            return false;
+                        }
                     }
 
-                    try
+                    string loadError;
+                    raw = LoadImageFile(path, out loadError);
+                    if (raw == null)
                     {
-                        // 先读后拷：避免 Bitmap 长期持有文件句柄导致文件被占用
-                        using (var probe = Image.FromFile(path))
-                            raw = new Bitmap(probe);
-                    }
-                    catch (Exception ex)
-                    {
-                        p.Summary = "图像源：读取图片失败（" + ex.Message + "）";
+                        p.Summary = "图像源：读取图片失败（" + loadError + "）";
                         return false;
                     }
                 }
@@ -499,8 +525,10 @@ namespace VisionPlatform.Flow
                     catch (Exception) { p.Frame = null; }
                 }
 
-                p.Summary = string.Format(CultureInfo.InvariantCulture, "取图 {0}x{1}",
-                                          work.Width, work.Height);
+                p.Summary = string.IsNullOrEmpty(frameNote)
+                    ? string.Format(CultureInfo.InvariantCulture, "取图 {0}x{1}", work.Width, work.Height)
+                    : string.Format(CultureInfo.InvariantCulture, "{0} · 取图 {1}x{2}",
+                                    frameNote, work.Width, work.Height);
                 return true;
             }
             catch
@@ -514,6 +542,35 @@ namespace VisionPlatform.Flow
                 // 未裁剪时 raw 就是交给会话的工作帧，绝不能释放；
                 // 裁剪过则 raw 已完成使命，必须释放，否则每帧泄漏一张原图。
                 if (raw != null && !object.ReferenceEquals(raw, work)) raw.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 该「取图方式」是否走本地文件（单文件 / 文件夹）。两者都不需要相机，
+        /// 也共用同一套解码与 ROI/旋转/镜像处理，区别只在「路径从哪来」。
+        /// </summary>
+        private static bool IsFileImageSource(string source)
+        {
+            return string.Equals(source, "File", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(source, "Folder", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 读图片到内存位图；失败返回 null 并给出原因。
+        /// <para>先 <c>Image.FromFile</c> 再拷贝：避免 Bitmap 长期持有文件句柄（否则用户想删/换图会被占住）。</para>
+        /// </summary>
+        private static Bitmap LoadImageFile(string path, out string error)
+        {
+            error = "";
+            try
+            {
+                using (var probe = Image.FromFile(path))
+                    return new Bitmap(probe);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return null;
             }
         }
 
@@ -3337,8 +3394,8 @@ namespace VisionPlatform.Flow
                 if (!n.TryGetType(out t)) continue;
                 if (t != FlowNodeType.ImageSource) continue;
 
-                // 只要有一个图像源节点选了「本地图片」，整链就不需要相机
-                if (string.Equals(n.GetString("Source", "Camera"), "File", StringComparison.OrdinalIgnoreCase))
+                // 只要有一个图像源节点选了「本地图片 / 本地图片文件夹」，整链就不需要相机
+                if (IsFileImageSource(n.GetString("Source", "Camera")))
                     return false;
             }
 

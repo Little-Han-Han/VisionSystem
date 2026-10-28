@@ -114,9 +114,11 @@ namespace VisionPlatform.Flow
             switch (Type)
             {
                 case FlowNodeType.ImageSource:
-                    // 数据源：Camera = 流程绑定相机；File = 本地图片文件（无相机也能跑通整链）
+                    // 数据源：Camera = 流程绑定相机；File = 本地图片文件；Folder = 本地图片文件夹（轮播）
                     Add(list, "Source", "Camera");
                     Add(list, "FilePath", "");
+                    Add(list, "FolderPath", "");
+                    Add(list, "FolderPersist", "0");   // 0 = 只在本次运行内递增，1 = 落盘记住位置
                     Add(list, "TimeoutMs", "3000");
                     // ROI 裁剪：宽或高为 0 = 全图
                     Add(list, "RoiX", "0");
