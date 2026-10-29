@@ -25,7 +25,7 @@ namespace VisionPlatform.UI
     public sealed class FlowCanvasControl : Control
     {
         // 画布几何常量（屏幕像素）
-        private const int NodeW = 176;           // 节点宽度（上下边缘要排 3~4 个端子名）
+        private const int NodeW = 200;           // 节点宽度（上下边缘要排 3~4 个中文端子名）
         private const int TitleH = 26;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
@@ -1305,6 +1305,12 @@ namespace VisionPlatform.UI
                 g.DrawPath(pen, path);
             }
 
+            // 标题左侧的类型色条：一眼分清"采集 / 定位 / 测量 / 输出"
+            using (Brush stripe = new SolidBrush(TypeStripeColor(n)))
+            {
+                g.FillRectangle(stripe, r.X + 2f, r.Y + 6f, 3.5f, Math.Min(16f, TitleH - 8f));
+            }
+
             // 标题行（节点名）
             string title = string.IsNullOrEmpty(n.Name) ? n.Type : n.Name;
             var titleRect = new RectangleF(r.X, r.Y, r.Width, TitleH);
@@ -1329,7 +1335,7 @@ namespace VisionPlatform.UI
 
                 // 端子名画在标题下方一行，以端口 x 为中心（用户要求"名称不要是空的"）
                 DrawPortLabel(g, ins[k].DisplayName, c.X, r.Y + TitleH, r,
-                              PortTextColor(n, ins[k], FlowPortDir.In, k, hovered),
+                              hovered ? UiTheme.ColorTextPrimary : KindColor(ins[k].Kind),
                               NodeW / (ins.Count + 1f) - 2f);
             }
 
@@ -1342,7 +1348,7 @@ namespace VisionPlatform.UI
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
 
                 DrawPortLabel(g, outs[k].DisplayName, c.X, r.Bottom - NodePadBottom - PortLabelH, r,
-                              PortTextColor(n, outs[k], FlowPortDir.Out, k, hovered),
+                              hovered ? UiTheme.ColorTextPrimary : KindColor(outs[k].Kind),
                               NodeW / (outs.Count + 1f) - 2f);
             }
 
@@ -1373,6 +1379,57 @@ namespace VisionPlatform.UI
             using (Font f = new Font(UiTheme.FontSmall.FontFamily, 7.5f))
             {
                 g.DrawString(text, f, b, rect, sf);
+            }
+        }
+
+        /// <summary>
+        /// 端子**数据类型**颜色（与连线状态色分开）：
+        /// 图像=青、位姿=紫、坐标=蓝、角度=橙、数值=绿、判定=红、文本=灰。
+        /// 一眼能看出"这根线传的是图还是数"。
+        /// </summary>
+        private static Color KindColor(FlowPortKind kind)
+        {
+            switch (kind)
+            {
+                case FlowPortKind.Image: return Color.FromArgb(110, 210, 235);
+                case FlowPortKind.Pose: return Color.FromArgb(190, 150, 245);
+                case FlowPortKind.Point: return Color.FromArgb(130, 180, 255);
+                case FlowPortKind.Angle: return Color.FromArgb(255, 185, 95);
+                case FlowPortKind.Number: return Color.FromArgb(140, 220, 150);
+                case FlowPortKind.Bool: return Color.FromArgb(245, 130, 130);
+                case FlowPortKind.Rect: return Color.FromArgb(150, 205, 255);
+                case FlowPortKind.Geometry: return Color.FromArgb(200, 220, 120);
+                case FlowPortKind.BlobList: return Color.FromArgb(255, 210, 120);
+                case FlowPortKind.Text: return Color.FromArgb(190, 195, 205);
+                default: return UiTheme.ColorTextSecondary;
+            }
+        }
+
+        /// <summary>节点头部左侧的类型色条（区分"采集/定位/测量/输出"）。</summary>
+        private static Color TypeStripeColor(FlowNode n)
+        {
+            FlowNodeType t;
+            if (n == null || !n.TryGetType(out t)) return UiTheme.ColorTextSecondary;
+
+            switch (t)
+            {
+                case FlowNodeType.ImageSource: return Color.FromArgb(110, 210, 235);
+                case FlowNodeType.Preprocess:
+                case FlowNodeType.ImageFilter: return Color.FromArgb(140, 200, 170);
+                case FlowNodeType.ShapeMatch:
+                case FlowNodeType.TemplateMatch:
+                case FlowNodeType.PositionCorrect: return Color.FromArgb(190, 150, 245);
+                case FlowNodeType.Blob:
+                case FlowNodeType.ColorExtractor:
+                case FlowNodeType.ObjectDetect:
+                case FlowNodeType.Ocr: return Color.FromArgb(255, 185, 95);
+                case FlowNodeType.LineCaliper:
+                case FlowNodeType.CircleCaliper:
+                case FlowNodeType.FitLine:
+                case FlowNodeType.FitCircle:
+                case FlowNodeType.Sharpness: return Color.FromArgb(140, 220, 150);
+                case FlowNodeType.Script: return Color.FromArgb(220, 180, 255);
+                default: return Color.FromArgb(160, 170, 190);
             }
         }
 

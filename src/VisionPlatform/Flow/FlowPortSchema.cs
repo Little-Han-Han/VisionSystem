@@ -35,7 +35,19 @@ namespace VisionPlatform.Flow
         /// 追加在末尾，不改既有成员的序号；两个按 Kind 分支的 switch
         /// （<c>FlowValidator.KindName</c> / <c>FlowForm.PortKindColor</c>）都有 default 分支兜底。
         /// </summary>
-        Text
+        Text,
+
+        /// <summary>像素坐标点 (x, y)。</summary>
+        Point,
+
+        /// <summary>角度（度）。</summary>
+        Angle,
+
+        /// <summary>布尔判定（OK / NG）。</summary>
+        Bool,
+
+        /// <summary>矩形（x, y, w, h）。</summary>
+        Rect
     }
 
     /// <summary>端子方向。</summary>

@@ -435,6 +435,9 @@ namespace VisionPlatform.Flow
             // 文本：OCR / 收发数据把文本塞在 Metrics.Text 或摘要里
             if (m != null && !string.IsNullOrEmpty(m.Text)) o.Text = m.Text;
 
+            // 类型化输出：判定 / 数值 / 角度 / 坐标 / 文本（结果显示与脚本共用这一份）
+            o.Values = NodeOutputSchema.Build(type, m, o.Ok);
+
             s.Outputs.Add(o);
         }
 

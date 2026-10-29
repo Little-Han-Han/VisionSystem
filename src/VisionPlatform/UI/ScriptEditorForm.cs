@@ -28,6 +28,9 @@ namespace VisionPlatform.UI
         private Label lblStatus;
         private SplitContainer splitMain;
         private SplitContainer splitLeft;
+        private SplitContainer splitRight;
+        private TextBox txtResult;
+        private ListView lstResultVals;
 
         private static readonly string[] OutTypes = { "double", "int", "string", "bool" };
 
@@ -177,15 +180,54 @@ namespace VisionPlatform.UI
                 "    public bool Run(ScriptApi api)   // ← 下面只写这个方法体\r\n" +
                 "    {";
 
-            var lblTail = new Label();
-            lblTail.Dock = DockStyle.Bottom;
-            lblTail.Height = 26;
-            lblTail.AutoSize = false;
-            lblTail.Font = new Font("Consolas", 9.5f);
-            lblTail.ForeColor = UiTheme.ColorTextSecondary;
-            lblTail.BackColor = UiTheme.ColorHeaderBg;
-            lblTail.Padding = new Padding(10, 2, 10, 2);
-            lblTail.Text = "    }\r\n}";
+            // 「结果」区：运行后在编辑器里直接看输出（不用切回流程页）
+            var panelResult = new Panel();
+            panelResult.Dock = DockStyle.Fill;
+            panelResult.BackColor = UiTheme.ColorPanelBg;
+
+            var lblResult = new Label();
+            lblResult.Dock = DockStyle.Top;
+            lblResult.Height = 24;
+            lblResult.Text = "运行结果";
+            lblResult.ForeColor = UiTheme.ColorTextSecondary;
+            lblResult.BackColor = UiTheme.ColorHeaderBg;
+            lblResult.Padding = new Padding(8, 4, 8, 0);
+
+            lstResultVals = new ListView();
+            lstResultVals.Dock = DockStyle.Bottom;
+            lstResultVals.Height = 120;
+            lstResultVals.View = View.Details;
+            lstResultVals.FullRowSelect = true;
+            lstResultVals.BorderStyle = BorderStyle.None;
+            lstResultVals.BackColor = UiTheme.ColorPanelBg;
+            lstResultVals.ForeColor = UiTheme.ColorTextPrimary;
+            lstResultVals.Font = UiTheme.FontSmall;
+            lstResultVals.Columns.Add("输出名", 150);
+            lstResultVals.Columns.Add("值", 260);
+
+            txtResult = new TextBox();
+            txtResult.Dock = DockStyle.Fill;
+            txtResult.Multiline = true;
+            txtResult.ReadOnly = true;
+            txtResult.ScrollBars = ScrollBars.Vertical;
+            txtResult.BorderStyle = BorderStyle.None;
+            txtResult.Font = new Font("Consolas", 9.5f);
+            txtResult.BackColor = UiTheme.ColorViewBg;
+            txtResult.ForeColor = UiTheme.ColorTextPrimary;
+
+            panelResult.Controls.Add(txtResult);
+            panelResult.Controls.Add(lstResultVals);
+            panelResult.Controls.Add(lblResult);
+
+            splitRight = new SplitContainer();
+            splitRight.Dock = DockStyle.Fill;
+            splitRight.Orientation = Orientation.Horizontal;
+            splitRight.Panel1MinSize = 25;
+            splitRight.Panel2MinSize = 25;
+            splitRight.BackColor = UiTheme.ColorDivider;
+            splitRight.Panel1.Controls.Add(txtBody);
+            splitRight.Panel1.Controls.Add(lblHead);
+            splitRight.Panel2.Controls.Add(panelResult);
 
             txtBody = new TextBox();
             txtBody.Dock = DockStyle.Fill;
@@ -199,9 +241,7 @@ namespace VisionPlatform.UI
             txtBody.ForeColor = UiTheme.ColorTextPrimary;
             txtBody.BorderStyle = BorderStyle.None;
 
-            panelRight.Controls.Add(txtBody);
-            panelRight.Controls.Add(lblHead);
-            panelRight.Controls.Add(lblTail);
+            panelRight.Controls.Add(splitRight);
 
             splitMain.Panel1.Controls.Add(splitLeft);
             splitMain.Panel2.Controls.Add(panelRight);
@@ -218,6 +258,12 @@ namespace VisionPlatform.UI
             lblStatus.Padding = new Padding(8, 0, 0, 0);
             lblStatus.Text = "api.Nodes / api.Get(名称) / api.First(类型) · 输出用 api.Set(\"名字\", 值) · 返回 false 表示 NG";
 
+            var btnRun = new Button();
+            btnRun.Text = "运行";
+            btnRun.Dock = DockStyle.Right;
+            btnRun.Width = 96;
+            btnRun.Click += OnRunScript;
+
             var btnOk = new Button();
             btnOk.Text = "保存";
             btnOk.Dock = DockStyle.Right;
@@ -231,6 +277,7 @@ namespace VisionPlatform.UI
             btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
             panelBottom.Controls.Add(lblStatus);
+            panelBottom.Controls.Add(btnRun);
             panelBottom.Controls.Add(btnOk);
             panelBottom.Controls.Add(btnCancel);
 
@@ -260,6 +307,14 @@ namespace VisionPlatform.UI
                 splitLeft.Panel1MinSize = 120;
                 splitLeft.Panel2MinSize = 120;
                 splitLeft.SplitterDistance = Math.Max(180, splitLeft.Height / 2);
+            }
+            catch (Exception) { }
+
+            try
+            {
+                splitRight.Panel1MinSize = 160;
+                splitRight.Panel2MinSize = 120;
+                splitRight.SplitterDistance = Math.Max(200, (int)(splitRight.Height * 0.62));
             }
             catch (Exception) { }
         }
@@ -304,19 +359,18 @@ namespace VisionPlatform.UI
             foreach (NodeOutput o in _upstream)
             {
                 var root = new TreeNode(o.Name + "  [" + o.Type + "]  " + o.Status);
-                root.Nodes.Add("Ok = " + o.Ok);
-                if (o.TargetCount >= 0) root.Nodes.Add("TargetCount = " + o.TargetCount);
-                if (!double.IsNaN(o.TopScore)) root.Nodes.Add("TopScore = " + o.TopScore.ToString("F3", CultureInfo.InvariantCulture));
-                if (!double.IsNaN(o.MaxArea)) root.Nodes.Add("MaxArea = " + o.MaxArea.ToString("F0", CultureInfo.InvariantCulture));
-                if (!double.IsNaN(o.MaxCircularity)) root.Nodes.Add("MaxCircularity = " + o.MaxCircularity.ToString("F3", CultureInfo.InvariantCulture));
-                if (o.HasPose)
+
+                // 按"类型 + 键名 + 格式化值"展示：角度带 °、坐标带括号、判定 OK/NG
+                foreach (PortValue v in o.Values)
                 {
-                    root.Nodes.Add("Cx = " + o.Cx.ToString("F1", CultureInfo.InvariantCulture));
-                    root.Nodes.Add("Cy = " + o.Cy.ToString("F1", CultureInfo.InvariantCulture));
-                    root.Nodes.Add("Angle = " + o.Angle.ToString("F2", CultureInfo.InvariantCulture));
+                    if (v == null) continue;
+                    root.Nodes.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}（{1}） = {2}　→ api.{3}(\"{4}\", \"{5}\")",
+                        v.DisplayName, v.KindName, v.Format(),
+                        v.Kind == FlowPortKind.Bool ? "Flag" : "Num", o.Name, v.Key));
                 }
-                if (!string.IsNullOrEmpty(o.Text)) root.Nodes.Add("Text = " + o.Text);
-                if (!string.IsNullOrEmpty(o.Summary)) root.Nodes.Add("Summary = " + o.Summary);
+
+                if (!string.IsNullOrEmpty(o.Summary)) root.Nodes.Add("摘要 = " + o.Summary);
 
                 treeUpstream.Nodes.Add(root);
             }
@@ -384,6 +438,49 @@ namespace VisionPlatform.UI
         {
             if (lstOutputs.SelectedItems.Count == 0) return;
             lstOutputs.Items.Remove(lstOutputs.SelectedItems[0]);
+        }
+
+        /// <summary>
+        /// 在编辑器里直接跑当前脚本：用"最近一次运行的上游输出"构造 api，
+        /// 结果写进下方结果区（文本 + 命名输出表），不用切回流程页。
+        /// </summary>
+        private void OnRunScript(object sender, EventArgs e)
+        {
+            lstResultVals.Items.Clear();
+            txtResult.Text = "";
+
+            var api = new ScriptApi(new List<NodeOutput>(_upstream), new Dictionary<string, object>(StringComparer.Ordinal),
+                                    0, 0);
+
+            string error;
+            bool ok = ScriptEngine.Run(txtBody.Text ?? "", api, out error);
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                txtResult.Text = "运行失败：\r\n" + error;
+                txtResult.ForeColor = UiTheme.ColorNg;
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("返回值：" + (ok ? "true（OK）" : "false（NG）"));
+            if (!string.IsNullOrEmpty(api.Text)) sb.AppendLine("结果文本：" + api.Text);
+            if (Math.Abs(api.Number) > 1e-12)
+                sb.AppendLine("数值：" + api.Number.ToString("0.####", CultureInfo.InvariantCulture));
+            sb.AppendLine("上游节点：" + api.Nodes.Count + " 个");
+            sb.AppendLine();
+            sb.AppendLine("提示：这里用的是最近一次运行的上游数据；真要刷新数据请先回流程页运行一次。");
+
+            txtResult.Text = sb.ToString();
+            txtResult.ForeColor = UiTheme.ColorTextPrimary;
+
+            foreach (string name in api.SetNames)
+            {
+                object v = api.GetValue(name);
+                var item = new ListViewItem(name);
+                item.SubItems.Add(v == null ? "" : Convert.ToString(v, CultureInfo.InvariantCulture));
+                lstResultVals.Items.Add(item);
+            }
         }
 
         private void OnSave(object sender, EventArgs e)

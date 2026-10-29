@@ -77,6 +77,7 @@
     <Compile Include="Flow\FlowOutputChannel.cs" />
     <Compile Include="Flow\FlowRunContext.cs" />
     <Compile Include="Flow\ScriptEngine.cs" />
+    <Compile Include="Flow\NodeOutputSchema.cs" />
     <Compile Include="UI\ScriptEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>

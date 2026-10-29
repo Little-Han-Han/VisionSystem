@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -68,6 +69,43 @@ namespace VisionPlatform.Flow
         public bool Ok
         {
             get { return Status == FlowNodeStatus.Ok || Status == FlowNodeStatus.Warn; }
+        }
+
+        /// <summary>
+        /// 本节点的<strong>类型化输出</strong>（判定/数值/角度/坐标/文本…）。
+        /// 结果显示与脚本都读这一份，保证"界面显示 12.34°"和"脚本读到 12.34"同源。
+        /// </summary>
+        public List<PortValue> Values = new List<PortValue>();
+
+        /// <summary>按 Key 取类型化值；不存在返回 null。</summary>
+        public PortValue Port(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return null;
+            foreach (PortValue v in Values)
+                if (v != null && string.Equals(v.Key, key, StringComparison.OrdinalIgnoreCase)) return v;
+            return null;
+        }
+
+        /// <summary>按 Key 取数值（角度/坐标也返回原始数字）；不存在返回默认值。</summary>
+        public double Number(string key, double fallback)
+        {
+            PortValue v = Port(key);
+            return v == null ? fallback : v.AsNumber(fallback);
+        }
+
+        /// <summary>按 Key 取布尔（"Ok" 就是本节点判定）。</summary>
+        public bool Flag(string key, bool fallback)
+        {
+            PortValue v = Port(key);
+            return v == null ? fallback : v.AsBool(fallback);
+        }
+
+        /// <summary>按 Key 取文本。</summary>
+        public string TextOf(string key, string fallback)
+        {
+            PortValue v = Port(key);
+            if (v == null) return fallback;
+            return v.Kind == FlowPortKind.Text ? Convert.ToString(v.Raw, CultureInfo.InvariantCulture) : v.Format();
         }
     }
 
@@ -188,6 +226,51 @@ namespace VisionPlatform.Flow
         {
             NodeOutput o = Get(idOrName);
             return o == null ? fallback : o.Value;
+        }
+
+        // ---- 类型化读取：按"节点 + 端口键"取，角度/坐标不会再被当成普通数字 ----
+
+        /// <summary>取某个节点的类型化输出（如 Get("形状匹配1","Angle")）。</summary>
+        public PortValue Get(string idOrName, string key)
+        {
+            NodeOutput o = Get(idOrName);
+            return o == null ? null : o.Port(key);
+        }
+
+        /// <summary>取数值型输出（角度/坐标也返回原始数字）。</summary>
+        public double Num(string idOrName, string key, double fallback)
+        {
+            NodeOutput o = Get(idOrName);
+            return o == null ? fallback : o.Number(key, fallback);
+        }
+
+        /// <summary>取角度（度）。</summary>
+        public double Angle(string idOrName, string key, double fallback)
+        {
+            return Num(idOrName, key, fallback);
+        }
+
+        /// <summary>取判定（OK/NG）。</summary>
+        public bool Flag(string idOrName, string key, bool fallback)
+        {
+            NodeOutput o = Get(idOrName);
+            return o == null ? fallback : o.Flag(key, fallback);
+        }
+
+        /// <summary>取坐标 X / Y。</summary>
+        public double X(string idOrName, string key, double fallback)
+        {
+            PortValue v = Get(idOrName, key);
+            if (v == null || !(v.Raw is PointF)) return fallback;
+            return ((PointF)v.Raw).X;
+        }
+
+        /// <summary>取坐标 Y。</summary>
+        public double Y(string idOrName, string key, double fallback)
+        {
+            PortValue v = Get(idOrName, key);
+            if (v == null || !(v.Raw is PointF)) return fallback;
+            return ((PointF)v.Raw).Y;
         }
     }
 
