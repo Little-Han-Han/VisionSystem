@@ -62,8 +62,14 @@ namespace VisionPlatform.Flow
         SendData,
 
         /// <summary>接收数据：按名称绑定「通讯」界面里已配置的一条通讯，读取最近一条文本或读 Modbus 保持寄存器。</summary>
-        ReceiveData
-    }
+        ReceiveData,
+
+        /// <summary>
+        /// 脚本节点：用 C# 方法体读取<strong>所有上游节点的输出</strong>（图像尺寸 / 位姿 / 数量 / 分数 / 文本 / 几何数），
+        /// 计算结果写回结果区。<c>api</c> 是 <see cref="ScriptApi"/> 实例，<c>return</c> 的字符串即结果摘要。
+        /// </summary>
+        Script,
+}
 
     /// <summary>
     /// 单个参数项：以键值对列表保存，避免 Dictionary 的 JSON 形态不确定（见架构 3.3）。
@@ -482,6 +488,48 @@ namespace VisionPlatform.Flow
             {
                 foreach (FlowLink l in Links) if (l != null) copy.Links.Add(l.Clone());
             }
+            return copy;
+        }
+
+        /// <summary>
+        /// 复制成一条<strong>可独立运行</strong>的新流程：新流程 Id、所有节点 Id 换新、连线端点按映射改写。
+        /// <para>
+        /// 【为什么节点 Id 也要换】模板资产按 <c>{flowId}\{nodeId}</c> 落盘，沿用旧 Id 会让两条流程
+        /// 共用同一份模板 —— 改一个，另一个跟着变；日志/结果缓存/并行槽也都会串。
+        /// </para>
+        /// </summary>
+        /// <param name="idMap">源节点 Id → 新节点 Id（复制模板资产时用）。</param>
+        public FlowDefinition Duplicate(out Dictionary<string, string> idMap)
+        {
+            FlowDefinition copy = Clone();
+            copy.Id = Guid.NewGuid().ToString("N");
+            copy.Name = Name + " 副本";
+
+            idMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (copy.Nodes != null)
+            {
+                foreach (FlowNode n in copy.Nodes)
+                {
+                    if (n == null) continue;
+                    string oldId = n.Id;
+                    n.Id = Guid.NewGuid().ToString("N");
+                    if (!string.IsNullOrEmpty(oldId)) idMap[oldId] = n.Id;
+                }
+            }
+
+            if (copy.Links != null)
+            {
+                foreach (FlowLink l in copy.Links)
+                {
+                    if (l == null) continue;
+                    string v;
+                    if (!string.IsNullOrEmpty(l.FromNodeId) && idMap.TryGetValue(l.FromNodeId, out v))
+                        l.FromNodeId = v;
+                    if (!string.IsNullOrEmpty(l.ToNodeId) && idMap.TryGetValue(l.ToNodeId, out v))
+                        l.ToNodeId = v;
+                }
+            }
+
             return copy;
         }
 

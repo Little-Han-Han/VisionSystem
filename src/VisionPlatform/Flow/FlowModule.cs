@@ -454,6 +454,7 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("FitLine",          "直线拟合",        FlowNodeType.FitLine,          CatSegmentation),
             new FlowModuleInfo("ResultOutput",     "结果输出",        FlowNodeType.ResultOutput,     CatOutput),
             new FlowModuleInfo("SendData",         "发送数据",        FlowNodeType.SendData,         CatOutput),
+            new FlowModuleInfo("Script",           "脚本",            FlowNodeType.Script,           CatOutput),
             new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput)
         };
 

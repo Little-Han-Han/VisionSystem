@@ -19,6 +19,9 @@ namespace VisionPlatform.Flow
         /// <summary>自由文本（TextBox）。</summary>
         Text,
 
+        /// <summary>代码/多行文本（等宽字体多行 TextBox，高度较大）。</summary>
+        Code,
+
         /// <summary>枚举（ComboBox 下拉，存选项的 Value）。</summary>
         Enum,
 
@@ -90,6 +93,9 @@ namespace VisionPlatform.Flow
 
         /// <summary>步进。</summary>
         public decimal Increment { get; set; }
+
+        /// <summary>控件高度（仅 Code 这类多行控件用；0 = 默认单行高）。</summary>
+        public int Height { get; set; }
 
         /// <summary>枚举选项（Kind=Enum 时有效）。</summary>
         public List<NodeParamOption> Options { get; set; }
@@ -256,6 +262,16 @@ namespace VisionPlatform.Flow
         /// 目录选择行：与 <see cref="NodeParamKind.File"/> 的区别只在语义与浏览方式
         /// （文件用 <c>OpenFileDialog</c> 且过滤器写死图片格式，目录场景会被误导）。
         /// </summary>
+        /// <summary>多行代码框（等宽字体）。</summary>
+        private static NodeParamField Code(string key, string label, string def, int height = 160)
+        {
+            return new NodeParamField
+            {
+                Key = key, Label = label, Kind = NodeParamKind.Code, Default = def, Height = height,
+                Hint = ""
+            };
+        }
+
         private static NodeParamField Folder(string key, string label, string def, string hint = "")
         {
             return new NodeParamField
@@ -325,6 +341,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.Ocr:             return Ocr();
                 case FlowNodeType.SendData:        return SendData();
                 case FlowNodeType.ReceiveData:     return ReceiveData();
+                case FlowNodeType.Script:          return Script();
                 default:                           return null;
             }
         }
@@ -397,6 +414,26 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Enum("MorphOp", "运算", "0",
                 new[] { "无", "开运算", "闭运算" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Int("MorphKsize", "核边长", 0, 31, "3", "奇数"));
+            return t;
+        }
+
+        /// <summary>脚本节点的参数表。</summary>
+        private static NodeParamTable Script()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.Script, Title = "脚本" };
+
+            t.Fields.Add(Group("脚本（C# 方法体）"));
+            t.Fields.Add(Code("Source", "代码", "", 200));
+            t.Fields.Add(Note("可直接写 C# 语句，用 return 返回结果文本。可用变量 api（ScriptApi）：\n"
+                + "  api.Nodes            本轮所有已执行节点的输出（按执行顺序）\n"
+                + "  api.Get(\"Id或名称\")  取某个节点；First(\"Ocr\") 按类型取第一个\n"
+                + "  字段：Ok / Status / Summary / TargetCount / TopScore / MaxArea / "
+                + "MaxCircularity / Text / Cx / Cy / Angle / Scale / ShapeCount / ElapsedMs\n"
+                + "  api.ImageWidth / api.ImageHeight  当前帧尺寸\n"
+                + "  写回：api.Text（结果文本）、api.Number（数值）、api.Ok=false（判不通过）"));
+
+            t.FooterNote = "脚本以当前用户权限在进程内执行（不是沙箱），只放自己写的代码；"
+                         + "首次运行会编译（几十~几百毫秒），之后按内容缓存。";
             return t;
         }
 

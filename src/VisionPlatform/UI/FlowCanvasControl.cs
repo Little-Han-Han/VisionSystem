@@ -330,13 +330,22 @@ namespace VisionPlatform.UI
                 list.Add(n);
             }
 
+            // ---- 列内排序：重心法（barycenter）----
+            // 原来按"旧 Y"排序，重排一次线就乱一次（旧 Y 是上一次的结果，越排越斜）。
+            // 改成：每个节点按**上游节点的平均中心 Y** 排序 —— 父在上、子在下的相对顺序稳定下来，
+            // 连线交叉显著减少；没有上游的（源节点）仍按旧 Y 排，保持用户手工摆放的意向。
+            var centerY = new Dictionary<string, float>(StringComparer.Ordinal);
+
             int colIndex = 0;
             foreach (KeyValuePair<int, List<FlowNode>> kv in columns)
             {
                 List<FlowNode> column = kv.Value;
+
                 column.Sort(delegate(FlowNode a, FlowNode b)
                 {
-                    int c = a.Y.CompareTo(b.Y);
+                    float wa = Barycenter(a, upstream, centerY);
+                    float wb = Barycenter(b, upstream, centerY);
+                    int c = wa.CompareTo(wb);
                     return c != 0 ? c : FlowOrder.CompareNodes(a, b);
                 });
 
@@ -346,6 +355,7 @@ namespace VisionPlatform.UI
                 {
                     n.X = x;
                     n.Y = y;
+                    centerY[n.Id] = y + NodeHeight(n) / 2f;
                     y += NodeHeight(n) + AutoLayoutRowGap;
                 }
                 colIndex++;
@@ -353,6 +363,33 @@ namespace VisionPlatform.UI
 
             RaiseChanged();     // 坐标变了，通知外部保存
             Invalidate();
+        }
+
+        /// <summary>
+        /// 节点的"重心 Y"：上游节点中心 Y 的平均值（无上游时用自身 Y）。
+        /// 列内按它排序能把父子关系摆正，避免连线交叉。
+        /// </summary>
+        private static float Barycenter(FlowNode node,
+                                        Dictionary<string, List<string>> upstream,
+                                        Dictionary<string, float> centerY)
+        {
+            if (node == null) return 0f;
+
+            List<string> ups;
+            if (upstream == null || centerY == null
+                || !upstream.TryGetValue(node.Id, out ups) || ups == null || ups.Count == 0)
+            {
+                return node.Y;
+            }
+
+            float sum = 0f;
+            int n = 0;
+            foreach (string up in ups)
+            {
+                float v;
+                if (centerY.TryGetValue(up, out v)) { sum += v; n++; }
+            }
+            return n > 0 ? sum / n : node.Y;
         }
 
         // ---------------------- 运行状态（FR-ALG-23）----------------------

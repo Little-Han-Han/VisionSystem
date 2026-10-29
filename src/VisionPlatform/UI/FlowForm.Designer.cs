@@ -44,6 +44,7 @@ namespace VisionPlatform.UI
             this.btnStop = new VisionPlatform.UI.UiButton();
             this.btnAutoLayout = new VisionPlatform.UI.UiButton();
             this.btnNewFlow = new VisionPlatform.UI.UiButton();
+            this.btnCopyFlow = new VisionPlatform.UI.UiButton();
             this.btnRenameFlow = new VisionPlatform.UI.UiButton();
             this.btnDeleteFlow = new VisionPlatform.UI.UiButton();
             this.nodeParamPanel = new VisionPlatform.UI.NodeParamPanel();
@@ -252,6 +253,7 @@ namespace VisionPlatform.UI
             // 
             this.grpFlows.Controls.Add(this.lstFlows);
             this.grpFlows.Controls.Add(this.btnNewFlow);
+            this.grpFlows.Controls.Add(this.btnCopyFlow);
             this.grpFlows.Controls.Add(this.btnRenameFlow);
             this.grpFlows.Controls.Add(this.btnDeleteFlow);
             this.grpFlows.ForeColor = System.Drawing.Color.DeepSkyBlue;
@@ -442,13 +444,28 @@ namespace VisionPlatform.UI
             this.btnNewFlow.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnNewFlow.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
             this.btnNewFlow.ForeColor = System.Drawing.Color.White;
-            this.btnNewFlow.Location = new System.Drawing.Point(220, 22);
+            this.btnNewFlow.Location = new System.Drawing.Point(220, 16);
             this.btnNewFlow.Name = "btnNewFlow";
-            this.btnNewFlow.Size = new System.Drawing.Size(130, 28);
+            this.btnNewFlow.Size = new System.Drawing.Size(130, 26);
             this.btnNewFlow.TabIndex = 1;
             this.btnNewFlow.Text = "新建流程";
             this.btnNewFlow.UseVisualStyleBackColor = false;
             this.btnNewFlow.Click += new System.EventHandler(this.OnNewFlow);
+            // 
+            // btnCopyFlow
+            // 
+            this.btnCopyFlow.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnCopyFlow.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnCopyFlow.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnCopyFlow.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
+            this.btnCopyFlow.ForeColor = System.Drawing.Color.White;
+            this.btnCopyFlow.Location = new System.Drawing.Point(220, 46);
+            this.btnCopyFlow.Name = "btnCopyFlow";
+            this.btnCopyFlow.Size = new System.Drawing.Size(130, 26);
+            this.btnCopyFlow.TabIndex = 9;
+            this.btnCopyFlow.Text = "复制流程";
+            this.btnCopyFlow.UseVisualStyleBackColor = false;
+            this.btnCopyFlow.Click += new System.EventHandler(this.OnCopyFlow);
             // 
             // btnRenameFlow
             // 
@@ -457,9 +474,9 @@ namespace VisionPlatform.UI
             this.btnRenameFlow.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnRenameFlow.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
             this.btnRenameFlow.ForeColor = System.Drawing.Color.White;
-            this.btnRenameFlow.Location = new System.Drawing.Point(220, 56);
+            this.btnRenameFlow.Location = new System.Drawing.Point(220, 76);
             this.btnRenameFlow.Name = "btnRenameFlow";
-            this.btnRenameFlow.Size = new System.Drawing.Size(130, 28);
+            this.btnRenameFlow.Size = new System.Drawing.Size(130, 26);
             this.btnRenameFlow.TabIndex = 2;
             this.btnRenameFlow.Text = "重命名";
             this.btnRenameFlow.UseVisualStyleBackColor = false;
@@ -472,9 +489,9 @@ namespace VisionPlatform.UI
             this.btnDeleteFlow.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnDeleteFlow.Font = new System.Drawing.Font("微软雅黑", 11F, System.Drawing.FontStyle.Bold);
             this.btnDeleteFlow.ForeColor = System.Drawing.Color.White;
-            this.btnDeleteFlow.Location = new System.Drawing.Point(220, 90);
+            this.btnDeleteFlow.Location = new System.Drawing.Point(220, 106);
             this.btnDeleteFlow.Name = "btnDeleteFlow";
-            this.btnDeleteFlow.Size = new System.Drawing.Size(130, 28);
+            this.btnDeleteFlow.Size = new System.Drawing.Size(130, 26);
             this.btnDeleteFlow.TabIndex = 3;
             this.btnDeleteFlow.Text = "删除流程";
             this.btnDeleteFlow.UseVisualStyleBackColor = false;
@@ -537,6 +554,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.GroupBox grpFlows;
         private System.Windows.Forms.ListBox lstFlows;
         private VisionPlatform.UI.UiButton btnNewFlow;
+        private VisionPlatform.UI.UiButton btnCopyFlow;
         private VisionPlatform.UI.UiButton btnRenameFlow;
         private VisionPlatform.UI.UiButton btnDeleteFlow;
 

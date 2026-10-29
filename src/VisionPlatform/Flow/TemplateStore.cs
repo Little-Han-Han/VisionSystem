@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
@@ -838,5 +839,50 @@ namespace VisionPlatform.Flow
                 return "0.0.0.0";
             }
         }
+
+        /// <summary>
+        /// 复制整条流程的模板资产（复制流程时用）。
+        /// <para>
+        /// 【为什么必须复制】模板按 <c>{flowId}\{nodeId}</c> 落盘：只复制 FlowDefinition 而不复制目录，
+        /// 新流程里的匹配/OCR 节点会全都报"模板资产不存在"。
+        /// </para>
+        /// </summary>
+        /// <param name="srcFlowId">源流程 Id。</param>
+        /// <param name="dstFlowId">目标流程 Id。</param>
+        /// <param name="idMap">源节点 Id → 目标节点 Id。</param>
+        /// <returns>复制成功的节点数。</returns>
+        public static int CopyFlowAssets(string srcFlowId, string dstFlowId,
+                                         IDictionary<string, string> idMap)
+        {
+            int copied = 0;
+            if (string.IsNullOrEmpty(srcFlowId) || string.IsNullOrEmpty(dstFlowId)) return 0;
+            if (idMap == null || idMap.Count == 0) return 0;
+
+            foreach (KeyValuePair<string, string> kv in idMap)
+            {
+                string srcDir = DirOf(srcFlowId, kv.Key);
+                string dstDir = DirOf(dstFlowId, kv.Value);
+
+                try
+                {
+                    if (!Directory.Exists(srcDir)) continue;
+                    if (Directory.Exists(dstDir)) continue;   // 目标已存在：不覆盖（宁留不丢）
+
+                    Directory.CreateDirectory(dstDir);
+                    foreach (string file in Directory.GetFiles(srcDir))
+                    {
+                        string name = Path.GetFileName(file);
+                        File.Copy(file, Path.Combine(dstDir, name), false);
+                    }
+                    copied++;
+                }
+                catch (Exception)
+                {
+                    // 单个节点复制失败不影响整条流程复制；调用方按返回值提示
+                }
+            }
+            return copied;
+        }
+
     }
 }

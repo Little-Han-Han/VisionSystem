@@ -279,6 +279,11 @@ namespace VisionPlatform.Flow
         /// </summary>
         public readonly HashSet<string> BaselineTaughtNodes = new HashSet<string>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// 本轮"每个节点产出了什么"的统一台账（按执行顺序）。脚本节点 / 结果输出 / 数据联动都从这里取。
+        /// </summary>
+        public readonly List<NodeOutput> Outputs = new List<NodeOutput>();
+
         /// <summary>被执行的流程。</summary>
         public FlowDefinition Flow { get; set; }
 

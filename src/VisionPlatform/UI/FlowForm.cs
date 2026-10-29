@@ -694,6 +694,39 @@ namespace VisionPlatform.UI
             SetStatus("已新建流程：" + f.Name);
         }
 
+        /// <summary>
+        /// 复制当前流程（含节点/连线/模板资产）。
+        /// <para>
+        /// 三个必须做对的地方，否则复制出来的流程"看着像、跑不了"：
+        /// ① 流程 Id 与**所有节点 Id** 都要换新 —— 模板资产按 <c>flowId\nodeId</c> 存，
+        ///    沿用旧 Id 会让两条流程共用同一份模板，改一个另一个跟着变；
+        /// ② 连线里的 From/To 必须按 Id 映射改写，否则全部指向旧节点 → 校验报"引用了不存在的节点"；
+        /// ③ 模板目录要整份拷过去，否则新流程里所有匹配节点报"模板资产不存在"。
+        /// </para>
+        /// </summary>
+        private void OnCopyFlow(object sender, EventArgs e)
+        {
+            FlowSettings fs = ConfigStore.Current.Flows;
+            FlowDefinition src = CurrentFlow;
+            if (src == null) { SetStatus("请先选择一个流程"); return; }
+
+            Dictionary<string, string> idMap;
+            FlowDefinition copy = src.Duplicate(out idMap);
+            copy.Name = UniqueName(copy.Name);
+
+            int assets = TemplateStore.CopyFlowAssets(src.Id, copy.Id, idMap);
+
+            fs.Flows.Add(copy);
+            fs.ActiveFlowId = copy.Id;
+
+            SaveFlows();
+            ReloadFlowList();
+            LoadFlowToCanvas();
+
+            SetStatus("已复制流程：" + copy.Name
+                      + (assets > 0 ? "（含 " + assets + " 个模板资产）" : ""));
+        }
+
         private void OnRenameFlow(object sender, EventArgs e)
         {
             FlowDefinition f = CurrentFlow;

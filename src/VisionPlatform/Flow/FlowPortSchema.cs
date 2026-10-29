@@ -226,6 +226,19 @@ namespace VisionPlatform.Flow
                     P("Geometry", "拟合直线", FlowPortKind.Geometry, false)
                 });
 
+            // 脚本节点：图像可选（有些脚本只做数据计算），另可接任意数据表达"我依赖它"
+            Register(FlowNodeType.Script,
+                new List<FlowPortDef>
+                {
+                    P("Image", "输入图像", FlowPortKind.Image, false),
+                    P("Any", "任意输入", FlowPortKind.Any, false)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Text", "脚本结果", FlowPortKind.Text, false)
+                });
+
             Register(FlowNodeType.ResultOutput,
                 new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true) },
                 new List<FlowPortDef>());

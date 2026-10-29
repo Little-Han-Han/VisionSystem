@@ -76,6 +76,7 @@
     <Compile Include="Flow\FlowValidator.cs" />
     <Compile Include="Flow\FlowOutputChannel.cs" />
     <Compile Include="Flow\FlowRunContext.cs" />
+    <Compile Include="Flow\ScriptEngine.cs" />
     <Compile Include="Flow\FlowRunController.cs" />
     <Compile Include="Flow\FlowRunManager.cs" />
     <Compile Include="Flow\FlowRunner.cs" />

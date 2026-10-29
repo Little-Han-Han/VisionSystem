@@ -235,6 +235,9 @@ namespace VisionPlatform.Flow
 
             if (!ok) session.Passed = false;
 
+            // 记录本次节点产出（脚本节点与后续数据联动从这里读）
+            RecordOutput(session, node, type, p);
+
             // 节点内（改动1）已克隆预览帧时不再重复克隆，避免重复分配与泄漏
             if (session.CaptureFrames && session.Current != null && p.Frame == null)
             {
@@ -373,11 +376,109 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.Ocr:           return RunOcr(s, node, p);
                 case FlowNodeType.SendData:      return RunSendData(s, node, p);
                 case FlowNodeType.ReceiveData:   return RunReceiveData(s, node, p);
+                case FlowNodeType.Script:        return RunScript(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
                     return true;
             }
+        }
+
+        /// <summary>
+        /// 把一个节点的执行结果收进 <see cref="FlowRunSession.Outputs"/>，
+        /// 供脚本节点 / 结果输出 / 后续数据联动读取。
+        /// </summary>
+        private static void RecordOutput(FlowRunSession s, FlowNode node, FlowNodeType type, FlowNodeProgress p)
+        {
+            if (s == null || node == null || p == null) return;
+
+            var o = new NodeOutput();
+            o.Id = node.Id ?? "";
+            o.Name = string.IsNullOrEmpty(node.Name) ? o.Id : node.Name;
+            o.Type = type.ToString();
+            o.Status = p.Status;
+            o.Summary = p.Summary ?? "";
+            o.ElapsedMs = p.ElapsedMs;
+            o.ShapeCount = p.Shapes != null ? p.Shapes.Count : 0;
+
+            FlowNodeMetrics m = p.Metrics;
+            if (m != null)
+            {
+                o.TargetCount = m.TargetCount;
+                o.TopScore = m.TopScore;
+                o.MaxArea = m.MaxArea;
+                o.MaxCircularity = m.MaxCircularity;
+                if (!double.IsNaN(m.TopCx)) o.Cx = m.TopCx;
+                if (!double.IsNaN(m.TopCy)) o.Cy = m.TopCy;
+                if (!double.IsNaN(m.AngleDeg)) o.Angle = m.AngleDeg;
+            }
+
+            // 位姿：优先节点自己的位姿表（匹配/卡尺会写），否则用 Metrics 里的坐标
+            double[] pose;
+            if (s.TryGetNodePose(node.Id, out pose) && pose != null && pose.Length >= 4)
+            {
+                o.HasPose = true;
+                o.Cx = pose[0];
+                o.Cy = pose[1];
+                o.Angle = pose[2];
+                o.Scale = pose[3];
+            }
+
+            // 文本：OCR / 收发数据把文本塞在 Metrics.Text 或摘要里
+            if (m != null && !string.IsNullOrEmpty(m.Text)) o.Text = m.Text;
+
+            s.Outputs.Add(o);
+        }
+
+        // ---------------------- 脚本节点 ----------------------
+
+        /// <summary>
+        /// 脚本节点：把<strong>所有已执行节点</strong>的输出交给用户脚本，脚本返回字符串作结果摘要。
+        /// <para>
+        /// 脚本失败（编译错误 / 运行异常）→ 节点 NG，摘要里带前几条错误，方便现场直接改。
+        /// </para>
+        /// </summary>
+        private bool RunScript(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            string script = node.GetString("Source", "");
+
+            var api = new ScriptApi(
+                new List<NodeOutput>(s.Outputs),
+                s.Current != null ? s.Current.Width : 0,
+                s.Current != null ? s.Current.Height : 0);
+
+            string error;
+            string result = ScriptEngine.Run(script, api, out error);
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                // 编译/运行错误原样带出：里面有「第 N 行：xxx」，Tail 截断会把行号吃掉
+                p.Summary = "脚本：" + error;
+                return false;
+            }
+
+            string text = string.IsNullOrEmpty(result) ? api.Text : result;
+            if (string.IsNullOrEmpty(text)) text = "(无输出)";
+
+            p.Summary = "脚本：" + OneLineText(text);
+            if (Math.Abs(api.Number) > 1e-12)
+                p.Summary += string.Format(CultureInfo.InvariantCulture, "（数值 {0:0.####}）", api.Number);
+
+            // 脚本可以把结果判为不通过
+            if (!api.Ok)
+            {
+                p.Summary += "（脚本判定不通过）";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string OneLineText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            string v = text.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return v.Length > 200 ? v.Substring(0, 200) + "…" : v;
         }
 
         // ---------------------- 图像源（FR-ALG-01）----------------------

@@ -522,6 +522,23 @@ namespace VisionPlatform.UI
                     return txt;
                 }
 
+                case NodeParamKind.Code:
+                {
+                    var code = new TextBox();
+                    StyleTextBox(code);
+                    code.Multiline = true;
+                    code.AcceptsReturn = true;
+                    code.AcceptsTab = true;
+                    code.ScrollBars = ScrollBars.Vertical;
+                    code.WordWrap = false;
+                    code.Font = new Font("Consolas", 9.5f);
+                    code.Height = f.Height > 0 ? f.Height : 160;
+                    code.Tag = f;
+                    code.TextChanged += OnTextChanged;
+                    _inputs.Add(code);
+                    return code;
+                }
+
                 case NodeParamKind.File:
                 {
                     // 文本框 + 纯文字「浏览」按钮（禁止图标素材）
@@ -684,6 +701,7 @@ namespace VisionPlatform.UI
                         }
 
                         case NodeParamKind.Text:
+                        case NodeParamKind.Code:        // 多行代码框也是一个 TextBox
                         case NodeParamKind.File:
                         case NodeParamKind.Folder:      // 目录行也是一个 TextBox（另配两个按钮）
                             ((TextBox)c).Text = raw ?? "";
