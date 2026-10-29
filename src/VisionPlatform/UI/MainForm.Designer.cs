@@ -41,8 +41,6 @@ namespace VisionPlatform.UI
             this.tsComboFlow = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnCameraMgr = new System.Windows.Forms.ToolStripButton();
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnRunFlow = new System.Windows.Forms.ToolStripButton();
-            this.tsBtnStepFlow = new System.Windows.Forms.ToolStripButton();
             this.tsBtnFlow = new System.Windows.Forms.ToolStripButton();
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
@@ -141,8 +139,6 @@ namespace VisionPlatform.UI
                 this.tsSep2,
                 this.tsLabelFlow,
                 this.tsComboFlow,
-                this.tsBtnRunFlow,
-                this.tsBtnStepFlow,
                 this.tsBtnCameraMgr,
                 this.tsBtnAlgo,
                 this.tsBtnFlow,
@@ -173,9 +169,9 @@ namespace VisionPlatform.UI
 
             this.tsBtnGrabOnce.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnGrabOnce.Name = "tsBtnGrabOnce";
-            this.tsBtnGrabOnce.Text = "单帧采集";
-            this.tsBtnGrabOnce.ToolTipText = "对当前相机采集一帧并检测";
-            this.tsBtnGrabOnce.Click += new System.EventHandler(this.OnGrabOnce);
+            this.tsBtnGrabOnce.Text = "单步执行";
+            this.tsBtnGrabOnce.ToolTipText = "按上方「流程」下拉框选中的流程执行一次（含取图）；未选流程会提示";
+            this.tsBtnGrabOnce.Click += new System.EventHandler(this.OnStepRunSelectedFlow);
 
             this.tsBtnLive.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnLive.Name = "tsBtnLive";
@@ -234,22 +230,6 @@ namespace VisionPlatform.UI
             this.tsBtnFlow.Text = "流程编排";
             this.tsBtnFlow.ToolTipText = "算法流程编排：拖拽节点、连线、绑定相机与视图、运行";
             this.tsBtnFlow.Click += new System.EventHandler(this.OnOpenFlowForm);
-            // 
-            // tsBtnRunFlow
-            // 
-            this.tsBtnRunFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnRunFlow.Name = "tsBtnRunFlow";
-            this.tsBtnRunFlow.Text = "运行";
-            this.tsBtnRunFlow.ToolTipText = "按当前配置运行选中流程（图像源为文件/文件夹时不再弹选图框）";
-            this.tsBtnRunFlow.Click += new System.EventHandler(this.OnRunSelectedFlow);
-            // 
-            // tsBtnStepFlow
-            // 
-            this.tsBtnStepFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tsBtnStepFlow.Name = "tsBtnStepFlow";
-            this.tsBtnStepFlow.Text = "单步";
-            this.tsBtnStepFlow.ToolTipText = "单步执行选中流程：每点一次往下走一个节点，直到链尾";
-            this.tsBtnStepFlow.Click += new System.EventHandler(this.OnStepSelectedFlow);
 
             this.tsBtnComm.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnComm.Name = "tsBtnComm";
@@ -534,8 +514,8 @@ namespace VisionPlatform.UI
             this.btnGrabOnce.Name = "btnGrabOnce";
             this.btnGrabOnce.Size = new System.Drawing.Size(284, 48);
             this.btnGrabOnce.TabIndex = 3;
-            this.btnGrabOnce.Text = "单帧采集";
-            this.btnGrabOnce.Click += new System.EventHandler(this.OnGrabOnce);
+            this.btnGrabOnce.Text = "单步执行";
+            this.btnGrabOnce.Click += new System.EventHandler(this.OnStepRunSelectedFlow);
 
             this.btnResetStats.Dock = System.Windows.Forms.DockStyle.Top;
             this.btnResetStats.Location = new System.Drawing.Point(0, 240);
@@ -722,8 +702,6 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripComboBox tsComboLayout;
         private System.Windows.Forms.ToolStripLabel tsLabelFlow;
         private System.Windows.Forms.ToolStripComboBox tsComboFlow;
-        private System.Windows.Forms.ToolStripButton tsBtnRunFlow;
-        private System.Windows.Forms.ToolStripButton tsBtnStepFlow;
         private System.Windows.Forms.ToolStripButton tsBtnRightPanel;
         private System.Windows.Forms.ToolStripSeparator tsSep2;
         private System.Windows.Forms.ToolStripButton tsBtnCameraMgr;

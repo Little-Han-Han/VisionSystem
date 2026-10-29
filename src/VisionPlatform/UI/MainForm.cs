@@ -665,7 +665,11 @@ namespace VisionPlatform.UI
 
         #region 采集与检测
 
-        private void OnGrabOnce(object sender, EventArgs e)
+        /// <summary>
+        /// 相机单帧采集（<strong>当前没有按钮挂它</strong>：主界面的「单帧采集」已改为「单步执行」）。
+        /// 保留实现是因为相机链路排查时还要用；要在界面上恢复，把某个按钮的 Click 接回这里即可。
+        /// </summary>
+        private void GrabOnceFromCamera(object sender, EventArgs e)
         {
             CameraInfo info = SelectedCameraInfo;
             if (info == null) { MessageBox.Show(this, "请先选择相机。"); return; }
@@ -2232,7 +2236,7 @@ namespace VisionPlatform.UI
         /// 下拉框选中流程：<strong>只做准备，不再自动运行</strong>。
         /// <para>
         /// 原实现"一选中就弹选图对话框并运行"，用「本地图片文件夹」做调试时每次换流程都被拦一次；
-        /// 现在由工具条的「运行 / 单步」按钮触发（见 <see cref="OnRunSelectedFlow"/>）。
+        /// 现在由「单步执行」按钮触发（见 <see cref="OnStepRunSelectedFlow"/>）。
         /// </para>
         /// </summary>
         private void OnFlowComboSelected(object sender, EventArgs e)
@@ -2241,19 +2245,30 @@ namespace VisionPlatform.UI
 
             FlowDefinition selected = tsComboFlow.SelectedItem as FlowDefinition;
             if (selected != null)
-                tsLabelStatus.Text = "已选中流程：" + (selected.Name ?? "") + "（点「运行」或「单步」执行）";
+                tsLabelStatus.Text = "已选中流程：" + (selected.Name ?? "") + "（点「单步执行」运行一次）";
         }
 
-        /// <summary>工具条「运行」：按当前配置跑一次选中流程。</summary>
-        private void OnRunSelectedFlow(object sender, EventArgs e)
+        /// <summary>
+        /// 「单步执行」：按上方「流程」下拉框选中的流程执行<strong>一次</strong>（取图 + 跑完整链）。
+        /// <para>
+        /// 取代原来的「单帧采集」：以前只能对相机抓一帧再跑，现在直接按流程配置取图 ——
+        /// 图像源是「本地图片文件夹」时，每点一次自动换下一张，天然就是逐张调试。
+        /// </para>
+        /// <para>未选流程必须明确提示，不能静默什么都不做。</para>
+        /// </summary>
+        private void OnStepRunSelectedFlow(object sender, EventArgs e)
         {
+            FlowDefinition selected = tsComboFlow.SelectedItem as FlowDefinition;
+            if (selected == null)
+            {
+                MessageBox.Show(this,
+                    "请先在上方「流程」下拉框选择要执行的流程，再点「单步执行」。",
+                    "未选择流程", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                tsComboFlow.Focus();
+                return;
+            }
+
             RunSelectedFlow(false);
-        }
-
-        /// <summary>工具条「单步」：每点一次往下走一个节点，直到链尾。</summary>
-        private void OnStepSelectedFlow(object sender, EventArgs e)
-        {
-            RunSelectedFlow(true);
         }
 
         /// <summary>
