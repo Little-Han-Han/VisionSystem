@@ -284,6 +284,12 @@ namespace VisionPlatform.Flow
         /// </summary>
         public readonly List<NodeOutput> Outputs = new List<NodeOutput>();
 
+        /// <summary>
+        /// 脚本节点写的**命名输出**（名 → 值）。下游脚本节点按名字读取，实现跨节点传值。
+        /// </summary>
+        public readonly Dictionary<string, object> NamedValues =
+            new Dictionary<string, object>(StringComparer.Ordinal);
+
         /// <summary>被执行的流程。</summary>
         public FlowDefinition Flow { get; set; }
 

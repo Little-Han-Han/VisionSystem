@@ -423,7 +423,10 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.Script, Title = "脚本" };
 
             t.Fields.Add(Group("脚本（C# 方法体）"));
-            t.Fields.Add(Code("Source", "代码", ScriptEngine.SampleScript, 320));
+            t.Fields.Add(Action("EditScript", "打开脚本编辑器…",
+                "三栏编辑器：左上=上游节点输出，左下=本脚本的输出变量，右侧=方法体"));
+            t.Fields.Add(Code("Source", "方法体（bool Run(ScriptApi api)）", ScriptEngine.SampleScript, 300));
+            t.Fields.Add(Text("OutDefs", "输出变量定义", "", "内部维护：由编辑器写入，格式 名称:类型;…", true));
             t.Fields.Add(Note("写法：三段式（取数 → 计算 → return 结果文本）。脚本节点固定排在链尾，"
                 + "所以能读到前面**所有**节点的输出。可用变量 api（ScriptApi）：\n"
                 + "  api.Nodes            本轮所有已执行节点的输出（按执行顺序）\n"

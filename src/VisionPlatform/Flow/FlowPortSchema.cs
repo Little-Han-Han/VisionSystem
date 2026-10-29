@@ -124,13 +124,13 @@ namespace VisionPlatform.Flow
                 new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) });
 
             Register(FlowNodeType.Preprocess,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
-                new List<FlowPortDef> { P("Image", "输出图像", FlowPortKind.Image, false) });
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) });
 
             Register(FlowNodeType.PositionCorrect,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
+                    P("Image", "图像", FlowPortKind.Image, true),
                     // 【可选，不要改成必填】历史语义：位置修正在 RefSource=Auto 模式下会自动取
                     // 上游最近的匹配位姿作为基准，用户只连一条 Image 线就能跑。
                     // 若标成必填，所有现存含位置修正的流程都会报 E003「输入端子未连接」——
@@ -140,18 +140,18 @@ namespace VisionPlatform.Flow
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Pose", "修正位姿", FlowPortKind.Pose, false)
                 });
 
             List<FlowPortDef> matchIn = new List<FlowPortDef>
             {
-                P("Image", "输入图像", FlowPortKind.Image, true),
+                P("Image", "图像", FlowPortKind.Image, true),
                 P("Pose", "搜索基准", FlowPortKind.Pose, false)
             };
             List<FlowPortDef> matchOut = new List<FlowPortDef>
             {
-                P("Image", "输出图像", FlowPortKind.Image, false),
+                P("Image", "图像", FlowPortKind.Image, false),
                 P("Pose", "匹配位姿", FlowPortKind.Pose, false),
                 P("Score", "匹配分数", FlowPortKind.Number, false)
             };
@@ -160,82 +160,82 @@ namespace VisionPlatform.Flow
                 Clone(matchIn), Clone(matchOut));
 
             Register(FlowNodeType.Blob,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Blobs", "Blob 列表", FlowPortKind.BlobList, false),
-                    P("Count", "Blob 数量", FlowPortKind.Number, false)
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Blobs", "列表", FlowPortKind.BlobList, false),
+                    P("Count", "数量", FlowPortKind.Number, false)
                 });
 
             Register(FlowNodeType.LineCaliper,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
-                    P("Pose", "定位位姿", FlowPortKind.Pose, false)
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Pose", "位姿", FlowPortKind.Pose, false)
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Geometry", "直线几何", FlowPortKind.Geometry, false),
-                    P("Value", "直线度 RMS", FlowPortKind.Number, false)
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Geometry", "直线", FlowPortKind.Geometry, false),
+                    P("Value", "RMS", FlowPortKind.Number, false)
                 });
 
             Register(FlowNodeType.CircleCaliper,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
-                    P("Pose", "定位位姿", FlowPortKind.Pose, false)
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Pose", "位姿", FlowPortKind.Pose, false)
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Geometry", "圆几何", FlowPortKind.Geometry, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Geometry", "圆", FlowPortKind.Geometry, false),
                     P("Value", "直径", FlowPortKind.Number, false)
                 });
 
             Register(FlowNodeType.Sharpness,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Value", "清晰度评分", FlowPortKind.Number, false)
                 });
 
             Register(FlowNodeType.FitCircle,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
-                    P("Blobs", "Blob 列表", FlowPortKind.BlobList, false)
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Blobs", "列表", FlowPortKind.BlobList, false)
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Geometry", "拟合圆", FlowPortKind.Geometry, false)
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Geometry", "圆", FlowPortKind.Geometry, false)
                 });
 
             Register(FlowNodeType.FitLine,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
-                    P("Blobs", "Blob 列表", FlowPortKind.BlobList, false)
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Blobs", "列表", FlowPortKind.BlobList, false)
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Geometry", "拟合直线", FlowPortKind.Geometry, false)
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Geometry", "直线", FlowPortKind.Geometry, false)
                 });
 
             // 脚本节点：图像可选（有些脚本只做数据计算），另可接任意数据表达"我依赖它"
             Register(FlowNodeType.Script,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Any", "任意输入", FlowPortKind.Any, false)
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Text", "脚本结果", FlowPortKind.Text, false)
                 });
 
@@ -248,21 +248,21 @@ namespace VisionPlatform.Flow
             // 这里的端子表只用于画布绘制、连线兼容性判定与校验器。
 
             Register(FlowNodeType.ImageFilter,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Text", "处理摘要", FlowPortKind.Text, false)
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Text", "摘要", FlowPortKind.Text, false)
                 });
 
             Register(FlowNodeType.ColorExtractor,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "掩膜图像", FlowPortKind.Image, false),
+                    P("Image", "掩膜", FlowPortKind.Image, false),
                     P("Blobs", "命中区域", FlowPortKind.BlobList, false),
                     P("Ratio", "面积占比", FlowPortKind.Number, false),
-                    P("Text", "处理摘要", FlowPortKind.Text, false)
+                    P("Text", "摘要", FlowPortKind.Text, false)
                 });
 
             // ---- 本期新增：目标识别（OpenVINO YOLO）----
@@ -271,12 +271,12 @@ namespace VisionPlatform.Flow
             // 复杂结构用叠加层 + 全局状态表达，端子只承载标量 / 图像 / 文本）。
 
             Register(FlowNodeType.ObjectDetect,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Count", "检测数量", FlowPortKind.Number, false),
-                    P("Text", "检测摘要", FlowPortKind.Text, false)
+                    P("Text", "摘要", FlowPortKind.Text, false)
                 });
 
             // ---- 本期新增：字符识别（传统算法 OCR）----
@@ -289,14 +289,14 @@ namespace VisionPlatform.Flow
             Register(FlowNodeType.Ocr,
                 new List<FlowPortDef>
                 {
-                    P("Image", "输入图像", FlowPortKind.Image, true),
-                    P("Pose", "定位位姿", FlowPortKind.Pose, false,
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Pose", "位姿", FlowPortKind.Pose, false,
                       "可选：位置修正由链内全局变换统一应用；此处连线用于显式表达依赖关系")
                 },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
-                    P("Count", "字符数量", FlowPortKind.Number, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Count", "字符数", FlowPortKind.Number, false),
                     P("Text",  "识别文本", FlowPortKind.Text,  false)
                 });
 
@@ -305,20 +305,20 @@ namespace VisionPlatform.Flow
             // 连了就原样向下透传。输出靠 Text 端子承载收发的文本内容。
 
             Register(FlowNodeType.SendData,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, false) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) },
                 new List<FlowPortDef>
                 {
-                    P("Image", "输出图像", FlowPortKind.Image, false),
+                    P("Image", "图像", FlowPortKind.Image, false),
                     P("Text",  "发送内容", FlowPortKind.Text,  false)
                 });
 
             Register(FlowNodeType.ReceiveData,
-                new List<FlowPortDef> { P("Image", "输入图像", FlowPortKind.Image, false) },
+                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) },
                 new List<FlowPortDef>
                 {
                     P("Image",  "输出图像", FlowPortKind.Image, false),
                     P("Text",   "接收内容", FlowPortKind.Text,  false),
-                    P("Number", "数据长度", FlowPortKind.Number, false)
+                    P("Number", "长度", FlowPortKind.Number, false)
                 });
         }
 

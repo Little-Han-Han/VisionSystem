@@ -25,7 +25,7 @@ namespace VisionPlatform.UI
     public sealed class FlowCanvasControl : Control
     {
         // 画布几何常量（屏幕像素）
-        private const int NodeW = 150;           // 节点宽度
+        private const int NodeW = 176;           // 节点宽度（上下边缘要排 3~4 个端子名）
         private const int TitleH = 26;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
@@ -534,10 +534,13 @@ namespace VisionPlatform.UI
             return Math.Max(NodeInputs(n).Count, NodeOutputs(n).Count);
         }
 
+        /// <summary>端子名行高（上下边缘各一行）。</summary>
+        private const int PortLabelH = 14;
+
         private static float NodeHeight(FlowNode n)
         {
-            // 端口已移到上下边缘（VisionPro 风格），节点高度不再随端口数变化
-            return TitleH + SummaryH + NodePadBottom + 6;
+            // 端口在上下边缘；节点内仍要留两行放端子名（用户要求"输入输出名称不能是空的"）
+            return TitleH + PortLabelH + SummaryH + PortLabelH + NodePadBottom;
         }
 
         /// <summary>
@@ -1261,15 +1264,14 @@ namespace VisionPlatform.UI
 
             Color color = selected ? UiTheme.ColorWarn : WithAlpha(UiTheme.ColorAccent, 215);
 
-            PointF c1, c2;
-            BezierControls(a, b, out c1, out c2);
+            // 直线连线（用户要求：不要曲线，直接用直线）—— 上下布局下直线最清楚
             using (Pen pen = new Pen(color, selected ? 2.6f : 2f))
             {
-                g.DrawBezier(pen, a, c1, c2, b);
+                g.DrawLine(pen, a, b);
             }
 
-            // 箭头画在目标输入端子处，方向沿曲线终点切线（c2 → b）
-            float dx = b.X - c2.X, dy = b.Y - c2.Y;
+            // 箭头画在目标端子处，方向沿 a → b
+            float dx = b.X - a.X, dy = b.Y - a.Y;
             float len = (float)Math.Sqrt(dx * dx + dy * dy);
             if (len > 1e-3f)
             {
@@ -1324,7 +1326,11 @@ namespace VisionPlatform.UI
                 bool hovered = _hoverValid && _hoverPort.Node == n
                     && _hoverPort.Dir == FlowPortDir.In && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, ins[k], FlowPortDir.In, k, hovered));
-                // 端子在上下边缘：节点内不再排端子文字（放不下），名称由 hover tooltip 给出
+
+                // 端子名画在标题下方一行，以端口 x 为中心（用户要求"名称不要是空的"）
+                DrawPortLabel(g, ins[k].DisplayName, c.X, r.Y + TitleH, r,
+                              PortTextColor(n, ins[k], FlowPortDir.In, k, hovered),
+                              NodeW / (ins.Count + 1f) - 2f);
             }
 
             for (int k = 0; k < outs.Count; k++)
@@ -1334,11 +1340,40 @@ namespace VisionPlatform.UI
                 bool hovered = _hoverValid && _hoverPort.Node == n
                     && _hoverPort.Dir == FlowPortDir.Out && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
-                // 同上：输出端子的名称走 tooltip
+
+                DrawPortLabel(g, outs[k].DisplayName, c.X, r.Bottom - NodePadBottom - PortLabelH, r,
+                              PortTextColor(n, outs[k], FlowPortDir.Out, k, hovered),
+                              NodeW / (outs.Count + 1f) - 2f);
             }
 
             // 运行状态附加信息：节点下方「xx ms」+ 失败标记（纯文本，FR-ALG-23）
             DrawRunOverlay(g, r, state, run);
+        }
+
+        /// <summary>
+        /// 画端子名：以端口 x 为中心、宽度上限 = 相邻端子的间距，超长自动省略。
+        /// 上下边缘的端子名放不下时宁可能省，也不要把相邻两个名字压在一起。
+        /// </summary>
+        private static void DrawPortLabel(Graphics g, string text, float cx, float top,
+                                          RectangleF nodeRect, Color color, float maxWidth)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // 宽度=相邻端子的间距，否则 3 个名字会糊成一串（"输出图像Blob 列表Blob 数量"）
+            float w = Math.Min(80f, Math.Max(24f, maxWidth));
+            var rect = new RectangleF(cx - w / 2f, top, w, PortLabelH);
+            using (Brush b = new SolidBrush(color))
+            using (var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            using (Font f = new Font(UiTheme.FontSmall.FontFamily, 7.5f))
+            {
+                g.DrawString(text, f, b, rect, sf);
+            }
         }
 
         /// <summary>端子符号：小方块（VisionPro 风格），方块中心即连线端点。</summary>

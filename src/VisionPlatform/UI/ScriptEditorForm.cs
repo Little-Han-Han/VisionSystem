@@ -1,0 +1,408 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.Text;
+using System.Windows.Forms;
+using VisionPlatform.Flow;
+
+namespace VisionPlatform.UI
+{
+    /// <summary>
+    /// 脚本编辑器（Notepad++ 风格的三栏布局）。
+    /// <para>
+    /// 左上：上游节点及其输出（运行过一次就显示真实值，没跑过显示字段说明）；
+    /// 左下：脚本的输出变量（名称 + 类型），作为本节点的对外输出；
+    /// 右侧：只读的"头文件 + 函数签名"，下面是可编辑的方法体。
+    /// </para>
+    /// </summary>
+    public sealed class ScriptEditorForm : Form
+    {
+        private readonly FlowNode _node;
+
+        private TreeView treeUpstream;
+        private TextBox txtBody;
+        private ListView lstOutputs;
+        private TextBox txtOutName;
+        private ComboBox cmbOutType;
+        private Label lblStatus;
+        private SplitContainer splitMain;
+        private SplitContainer splitLeft;
+
+        private static readonly string[] OutTypes = { "double", "int", "string", "bool" };
+
+        /// <summary>上游节点快照（可为空：没跑过就只有节点清单）。</summary>
+        private readonly List<NodeOutput> _upstream = new List<NodeOutput>();
+
+        /// <summary>流程里排在脚本之前的节点（没有运行数据时也要能列出名字）。</summary>
+        private readonly List<string> _upstreamNames = new List<string>();
+
+        public ScriptEditorForm(FlowNode node, List<NodeOutput> upstream, List<string> upstreamNames)
+        {
+            _node = node;
+            if (upstream != null) _upstream.AddRange(upstream);
+            if (upstreamNames != null) _upstreamNames.AddRange(upstreamNames);
+
+            BuildUi();
+            LoadFromNode();
+
+            UiStyle.ApplyForm(this);
+        }
+
+        // =====================================================================
+        //  界面
+        // =====================================================================
+
+        private void BuildUi()
+        {
+            Text = "脚本编辑器";
+            StartPosition = FormStartPosition.CenterParent;
+            Size = new Size(1180, 720);
+            MinimumSize = new Size(900, 560);
+            BackColor = UiTheme.ColorPanelBg;
+            ForeColor = UiTheme.ColorTextPrimary;
+            Font = UiTheme.FontBody;
+
+            splitMain = new SplitContainer();
+            splitMain.Dock = DockStyle.Fill;
+            splitMain.Orientation = Orientation.Vertical;
+            // 约束先放宽：SplitContainer 在窗体还没尺寸时会用默认 SplitterDistance 布局，
+            // 这时若 MinSize 已经很大，会直接抛 "SplitterDistance 必须..."。
+            splitMain.Panel1MinSize = 25;
+            splitMain.Panel2MinSize = 25;
+            splitMain.BackColor = UiTheme.ColorDivider;
+
+            // ---------------- 左侧 ----------------
+            splitLeft = new SplitContainer();
+            splitLeft.Dock = DockStyle.Fill;
+            splitLeft.Orientation = Orientation.Horizontal;
+            splitLeft.Panel1MinSize = 25;
+            splitLeft.Panel2MinSize = 25;
+            splitLeft.BackColor = UiTheme.ColorDivider;
+
+            // 左上：上游输出
+            var grpUp = new GroupBox();
+            grpUp.Text = "上游节点的输出（本节点之前执行的全部节点）";
+            grpUp.Dock = DockStyle.Fill;
+            grpUp.ForeColor = UiTheme.ColorTextSecondary;
+            grpUp.Padding = new Padding(8, 6, 8, 8);
+
+            treeUpstream = new TreeView();
+            treeUpstream.Dock = DockStyle.Fill;
+            treeUpstream.BorderStyle = BorderStyle.None;
+            treeUpstream.BackColor = UiTheme.ColorPanelBg;
+            treeUpstream.ForeColor = UiTheme.ColorTextPrimary;
+            treeUpstream.Font = UiTheme.FontSmall;
+            treeUpstream.HideSelection = false;
+            grpUp.Controls.Add(treeUpstream);
+
+            // 左下：输出变量
+            var grpOut = new GroupBox();
+            grpOut.Text = "本脚本的输出变量（下游节点可按名字读取）";
+            grpOut.Dock = DockStyle.Fill;
+            grpOut.ForeColor = UiTheme.ColorTextSecondary;
+            grpOut.Padding = new Padding(8, 6, 8, 8);
+
+            var panelAdd = new Panel();
+            panelAdd.Dock = DockStyle.Top;
+            panelAdd.Height = 32;
+
+            txtOutName = new TextBox();
+            txtOutName.Width = 150;
+            txtOutName.Location = new Point(0, 4);
+            txtOutName.Text = "Score";
+
+            cmbOutType = new ComboBox();
+            cmbOutType.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbOutType.Items.AddRange(OutTypes);
+            cmbOutType.SelectedIndex = 0;
+            cmbOutType.Width = 96;
+            cmbOutType.Location = new Point(158, 4);
+
+            var btnAdd = new Button();
+            btnAdd.Text = "添加";
+            btnAdd.Width = 60;
+            btnAdd.Location = new Point(262, 3);
+            btnAdd.Click += OnAddOutput;
+
+            var btnDel = new Button();
+            btnDel.Text = "删除";
+            btnDel.Width = 60;
+            btnDel.Location = new Point(328, 3);
+            btnDel.Click += OnDeleteOutput;
+
+            panelAdd.Controls.Add(txtOutName);
+            panelAdd.Controls.Add(cmbOutType);
+            panelAdd.Controls.Add(btnAdd);
+            panelAdd.Controls.Add(btnDel);
+
+            lstOutputs = new ListView();
+            lstOutputs.Dock = DockStyle.Fill;
+            lstOutputs.View = View.Details;
+            lstOutputs.FullRowSelect = true;
+            lstOutputs.HideSelection = false;
+            lstOutputs.BorderStyle = BorderStyle.None;
+            lstOutputs.BackColor = UiTheme.ColorPanelBg;
+            lstOutputs.ForeColor = UiTheme.ColorTextPrimary;
+            lstOutputs.Font = UiTheme.FontSmall;
+            lstOutputs.Columns.Add("名称", 180);
+            lstOutputs.Columns.Add("类型", 90);
+
+            grpOut.Controls.Add(lstOutputs);
+            grpOut.Controls.Add(panelAdd);
+
+            splitLeft.Panel1.Controls.Add(grpUp);
+            splitLeft.Panel2.Controls.Add(grpOut);
+
+            // ---------------- 右侧 ----------------
+            var panelRight = new Panel();
+            panelRight.Dock = DockStyle.Fill;
+
+            var lblHead = new Label();
+            lblHead.Dock = DockStyle.Top;
+            lblHead.Height = 118;
+            lblHead.AutoSize = false;
+            lblHead.Font = new Font("Consolas", 9.5f);
+            lblHead.ForeColor = UiTheme.ColorTextSecondary;
+            lblHead.BackColor = UiTheme.ColorHeaderBg;
+            lblHead.Padding = new Padding(10, 8, 10, 8);
+            lblHead.Text =
+                "using System;\r\n" +
+                "using System.Collections.Generic;\r\n" +
+                "using System.Linq;\r\n" +
+                "using VisionPlatform.Flow;\r\n" +
+                "\r\n" +
+                "public class ScriptNode\r\n" +
+                "{\r\n" +
+                "    public bool Run(ScriptApi api)   // ← 下面只写这个方法体\r\n" +
+                "    {";
+
+            var lblTail = new Label();
+            lblTail.Dock = DockStyle.Bottom;
+            lblTail.Height = 26;
+            lblTail.AutoSize = false;
+            lblTail.Font = new Font("Consolas", 9.5f);
+            lblTail.ForeColor = UiTheme.ColorTextSecondary;
+            lblTail.BackColor = UiTheme.ColorHeaderBg;
+            lblTail.Padding = new Padding(10, 2, 10, 2);
+            lblTail.Text = "    }\r\n}";
+
+            txtBody = new TextBox();
+            txtBody.Dock = DockStyle.Fill;
+            txtBody.Multiline = true;
+            txtBody.AcceptsReturn = true;
+            txtBody.AcceptsTab = true;
+            txtBody.ScrollBars = ScrollBars.Both;
+            txtBody.WordWrap = false;
+            txtBody.Font = new Font("Consolas", 10f);
+            txtBody.BackColor = UiTheme.ColorViewBg;
+            txtBody.ForeColor = UiTheme.ColorTextPrimary;
+            txtBody.BorderStyle = BorderStyle.None;
+
+            panelRight.Controls.Add(txtBody);
+            panelRight.Controls.Add(lblHead);
+            panelRight.Controls.Add(lblTail);
+
+            splitMain.Panel1.Controls.Add(splitLeft);
+            splitMain.Panel2.Controls.Add(panelRight);
+
+            // ---------------- 底部按钮 ----------------
+            var panelBottom = new Panel();
+            panelBottom.Dock = DockStyle.Bottom;
+            panelBottom.Height = 44;
+
+            lblStatus = new Label();
+            lblStatus.Dock = DockStyle.Fill;
+            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+            lblStatus.ForeColor = UiTheme.ColorTextSecondary;
+            lblStatus.Padding = new Padding(8, 0, 0, 0);
+            lblStatus.Text = "api.Nodes / api.Get(名称) / api.First(类型) · 输出用 api.Set(\"名字\", 值) · 返回 false 表示 NG";
+
+            var btnOk = new Button();
+            btnOk.Text = "保存";
+            btnOk.Dock = DockStyle.Right;
+            btnOk.Width = 96;
+            btnOk.Click += OnSave;
+
+            var btnCancel = new Button();
+            btnCancel.Text = "取消";
+            btnCancel.Dock = DockStyle.Right;
+            btnCancel.Width = 96;
+            btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+
+            panelBottom.Controls.Add(lblStatus);
+            panelBottom.Controls.Add(btnOk);
+            panelBottom.Controls.Add(btnCancel);
+
+            Controls.Add(splitMain);
+            Controls.Add(panelBottom);
+        }
+
+        // =====================================================================
+        //  数据
+        // =====================================================================
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            // 尺寸确定后再定分割位置与最小宽高（构造期设会越界抛异常）
+            try
+            {
+                splitMain.Panel1MinSize = 220;
+                splitMain.Panel2MinSize = 320;
+                splitMain.SplitterDistance = 380;
+            }
+            catch (Exception) { }
+
+            try
+            {
+                splitLeft.Panel1MinSize = 120;
+                splitLeft.Panel2MinSize = 120;
+                splitLeft.SplitterDistance = Math.Max(180, splitLeft.Height / 2);
+            }
+            catch (Exception) { }
+        }
+
+        private void LoadFromNode()
+        {
+            txtBody.Text = _node != null ? _node.GetString("Source", "") : "";
+            if (string.IsNullOrWhiteSpace(txtBody.Text)) txtBody.Text = ScriptEngine.SampleScript;
+
+            lstOutputs.Items.Clear();
+            foreach (KeyValuePair<string, string> kv in ParseOutputs(_node != null ? _node.GetString("OutDefs", "") : ""))
+            {
+                var item = new ListViewItem(kv.Key);
+                item.SubItems.Add(kv.Value);
+                lstOutputs.Items.Add(item);
+            }
+
+            BuildUpstreamTree();
+        }
+
+        private void BuildUpstreamTree()
+        {
+            treeUpstream.BeginUpdate();
+            treeUpstream.Nodes.Clear();
+
+            if (_upstream.Count == 0)
+            {
+                // 还没运行过：列出"本节点之前有哪些节点"，最后补一句提示
+                foreach (string name in _upstreamNames)
+                    treeUpstream.Nodes.Add(new TreeNode(name) { ForeColor = UiTheme.ColorTextSecondary });
+
+                var hint = new TreeNode("运行一次流程后，这里会显示每个节点的实际输出值")
+                {
+                    ForeColor = UiTheme.ColorTextSecondary
+                };
+                treeUpstream.Nodes.Add(hint);
+
+                treeUpstream.EndUpdate();
+                return;
+            }
+
+            foreach (NodeOutput o in _upstream)
+            {
+                var root = new TreeNode(o.Name + "  [" + o.Type + "]  " + o.Status);
+                root.Nodes.Add("Ok = " + o.Ok);
+                if (o.TargetCount >= 0) root.Nodes.Add("TargetCount = " + o.TargetCount);
+                if (!double.IsNaN(o.TopScore)) root.Nodes.Add("TopScore = " + o.TopScore.ToString("F3", CultureInfo.InvariantCulture));
+                if (!double.IsNaN(o.MaxArea)) root.Nodes.Add("MaxArea = " + o.MaxArea.ToString("F0", CultureInfo.InvariantCulture));
+                if (!double.IsNaN(o.MaxCircularity)) root.Nodes.Add("MaxCircularity = " + o.MaxCircularity.ToString("F3", CultureInfo.InvariantCulture));
+                if (o.HasPose)
+                {
+                    root.Nodes.Add("Cx = " + o.Cx.ToString("F1", CultureInfo.InvariantCulture));
+                    root.Nodes.Add("Cy = " + o.Cy.ToString("F1", CultureInfo.InvariantCulture));
+                    root.Nodes.Add("Angle = " + o.Angle.ToString("F2", CultureInfo.InvariantCulture));
+                }
+                if (!string.IsNullOrEmpty(o.Text)) root.Nodes.Add("Text = " + o.Text);
+                if (!string.IsNullOrEmpty(o.Summary)) root.Nodes.Add("Summary = " + o.Summary);
+
+                treeUpstream.Nodes.Add(root);
+            }
+
+            treeUpstream.ExpandAll();
+            treeUpstream.EndUpdate();
+        }
+
+        private static List<KeyValuePair<string, string>> ParseOutputs(string raw)
+        {
+            var list = new List<KeyValuePair<string, string>>();
+            if (string.IsNullOrWhiteSpace(raw)) return list;
+
+            foreach (string part in raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string s = part.Trim();
+                if (s.Length == 0) continue;
+
+                string name = s, type = "double";
+                int i = s.IndexOf(':');
+                if (i > 0)
+                {
+                    name = s.Substring(0, i).Trim();
+                    type = s.Substring(i + 1).Trim();
+                }
+                if (name.Length == 0) continue;
+                list.Add(new KeyValuePair<string, string>(name, type));
+            }
+            return list;
+        }
+
+        private static string JoinOutputs(IEnumerable<KeyValuePair<string, string>> items)
+        {
+            var sb = new StringBuilder();
+            foreach (KeyValuePair<string, string> kv in items)
+            {
+                if (sb.Length > 0) sb.Append(';');
+                sb.Append(kv.Key).Append(':').Append(kv.Value);
+            }
+            return sb.ToString();
+        }
+
+        private void OnAddOutput(object sender, EventArgs e)
+        {
+            string name = (txtOutName.Text ?? "").Trim();
+            if (name.Length == 0) { MessageBox.Show(this, "请输入输出变量名。"); return; }
+
+            foreach (ListViewItem it in lstOutputs.Items)
+            {
+                if (string.Equals(it.Text, name, StringComparison.Ordinal))
+                {
+                    MessageBox.Show(this, "已存在同名输出：" + name);
+                    return;
+                }
+            }
+
+            var item = new ListViewItem(name);
+            item.SubItems.Add(cmbOutType.SelectedItem as string ?? "double");
+            lstOutputs.Items.Add(item);
+            txtOutName.Focus();
+            txtOutName.SelectAll();
+        }
+
+        private void OnDeleteOutput(object sender, EventArgs e)
+        {
+            if (lstOutputs.SelectedItems.Count == 0) return;
+            lstOutputs.Items.Remove(lstOutputs.SelectedItems[0]);
+        }
+
+        private void OnSave(object sender, EventArgs e)
+        {
+            if (_node != null)
+            {
+                _node.Set("Source", txtBody.Text ?? "");
+
+                var items = new List<KeyValuePair<string, string>>();
+                foreach (ListViewItem it in lstOutputs.Items)
+                {
+                    items.Add(new KeyValuePair<string, string>(
+                        it.Text, it.SubItems.Count > 1 ? it.SubItems[1].Text : "double"));
+                }
+                _node.Set("OutDefs", JoinOutputs(items));
+            }
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+    }
+}

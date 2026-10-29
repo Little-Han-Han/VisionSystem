@@ -49,6 +49,9 @@ namespace VisionPlatform.Flow
         /// <summary>示教了基准的节点 Id（空 = 没有）。宿主可据此刷新参数面板。</summary>
         public string BaselineNodeId { get; set; }
 
+        /// <summary>本轮各节点的输出台账（脚本编辑器用它展示"上游能读到什么"）。</summary>
+        public List<NodeOutput> NodeOutputs { get; set; }
+
         public FlowRunResult()
         {
             Message = "";
@@ -71,6 +74,9 @@ namespace VisionPlatform.Flow
     {
         private readonly VisionAlgo _algo;
         private readonly Dictionary<string, double[]> _autoRefs;
+
+        /// <summary>最近一次运行的节点输出台账（脚本编辑器读它展示上游数据）。</summary>
+        public List<NodeOutput> LastOutputs { get; private set; }
 
         /// <summary>本轮是否示教了位置修正基准（宿主据此落盘，避免下次又示教成 0 偏差）。</summary>
         private bool _baselineTaught;
@@ -277,6 +283,8 @@ namespace VisionPlatform.Flow
             result.Summary = string.Join("；", session.Summaries);
             result.BaselineTaught = _baselineTaught;
             result.BaselineNodeId = _baselineNodeId ?? "";
+            result.NodeOutputs = new List<NodeOutput>(session.Outputs);
+            LastOutputs = result.NodeOutputs;
             return result;
         }
 
@@ -444,11 +452,12 @@ namespace VisionPlatform.Flow
 
             var api = new ScriptApi(
                 new List<NodeOutput>(s.Outputs),
+                s.NamedValues,
                 s.Current != null ? s.Current.Width : 0,
                 s.Current != null ? s.Current.Height : 0);
 
             string error;
-            string result = ScriptEngine.Run(script, api, out error);
+            bool okScript = ScriptEngine.Run(script, api, out error);
 
             if (!string.IsNullOrEmpty(error))
             {
@@ -457,7 +466,7 @@ namespace VisionPlatform.Flow
                 return false;
             }
 
-            string text = string.IsNullOrEmpty(result) ? api.Text : result;
+            string text = api.Text;
             if (string.IsNullOrEmpty(text)) text = "(无输出)";
 
             p.Summary = "脚本：" + OneLineText(text);
@@ -465,11 +474,13 @@ namespace VisionPlatform.Flow
             // 把"读到几个上游节点"写进摘要：读不到数据时，用户第一眼就能判断是脚本写错
             // 还是执行顺序不对（脚本没排在链尾）。
             p.Summary += string.Format(CultureInfo.InvariantCulture, "（上游 {0} 个节点）", s.Outputs.Count);
+            if (api.SetNames.Count > 0)
+                p.Summary += "（输出：" + string.Join("、", api.SetNames.ToArray()) + "）";
             if (Math.Abs(api.Number) > 1e-12)
                 p.Summary += string.Format(CultureInfo.InvariantCulture, "（数值 {0:0.####}）", api.Number);
 
-            // 脚本可以把结果判为不通过
-            if (!api.Ok)
+            // 返回值与 api.Ok 任一为 false → 本节点判 NG
+            if (!okScript || !api.Ok)
             {
                 p.Summary += "（脚本判定不通过）";
                 return false;
@@ -1879,9 +1890,46 @@ namespace VisionPlatform.Flow
             // 覆盖式写入（链内多个位置修正节点以最后一个为准，不累加）
             s.Transform.Set(rx, ry, ra, dx, dy, dAngle, dScale);
 
-            // 可视化：基准坐标系（X 轴红、Y 轴绿、带箭头方向，随基准角度旋转）
-            foreach (IGeometryShape g in FlowShapes.CoordinateSystem(rx, ry, ra, FlowShapes.DefaultCrossArm * 1.5))
-                p.Shapes.Add(g);
+            // 可视化：**两个**坐标系 + 一条偏差箭头
+            //   淡青 = 基准（示教时的位置）
+            //   亮橙 = 实测（本帧工件的位置）
+            // 只画基准的话，用户看到的永远是一个固定十字，会以为"没有显示更新后的点"。
+            foreach (IGeometryShape g in FlowShapes.CoordinateSystem(
+                         rx, ry, ra, FlowShapes.ColorPoseRef, FlowShapes.ColorPoseRef,
+                         FlowShapes.NormalLine, FlowShapes.DefaultCrossArm * 1.2))
+            {
+                g.Name = FlowShapes.AuxContourName;   // 坐标系属"参考几何"，随「轮廓」开关显隐
+                p.AuxShapes.Add(g);
+            }
+
+            if (hasPose)
+            {
+                foreach (IGeometryShape g in FlowShapes.CoordinateSystem(
+                             curX, curY, curA, FlowShapes.ColorPoseNow, FlowShapes.ColorPoseNow,
+                             FlowShapes.BoldLine, FlowShapes.DefaultCrossArm * 1.5))
+                {
+                    g.Name = FlowShapes.AuxContourName;
+                    p.AuxShapes.Add(g);
+                }
+
+                // 偏差箭头：基准 → 实测（虚线，两端各一个小三角由坐标系箭头代劳）
+                if (Math.Abs(dx) > 0.5 || Math.Abs(dy) > 0.5)
+                {
+                    LineSegmentShape arrow = FlowShapes.Line(rx, ry, curX, curY,
+                                                             FlowShapes.ColorPoseNow, 2f, true);
+                    arrow.Name = FlowShapes.AuxContourName;
+                    p.AuxShapes.Add(arrow);
+
+                    // 偏差数值贴在箭头中点（1×1 的标记点 + 标签；LineSegment 本身没有 Label）
+                    var tag = new RectangleShape((float)((rx + curX) / 2.0), (float)((ry + curY) / 2.0), 1f, 1f);
+                    tag.StrokeColor = FlowShapes.ColorPoseNow;
+                    tag.LineWidth = 1f;
+                    tag.IsEditable = false;
+                    tag.Name = FlowShapes.AuxContourName;
+                    tag.Label = string.Format(CultureInfo.InvariantCulture, "dX={0:F1} dY={1:F1}", dx, dy);
+                    p.AuxShapes.Add(tag);
+                }
+            }
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "位置修正：基准({0:F1},{1:F1},{2:F1}°) 实测({3:F1},{4:F1},{5:F1}°) dX={6:F1} dY={7:F1} dA={8:F2}°"

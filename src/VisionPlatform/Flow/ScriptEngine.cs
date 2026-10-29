@@ -87,13 +87,57 @@ namespace VisionPlatform.Flow
     public sealed class ScriptApi
     {
         private readonly List<NodeOutput> _nodes;
+        private readonly Dictionary<string, object> _named;
 
-        internal ScriptApi(List<NodeOutput> nodes, int imageWidth, int imageHeight)
+        internal ScriptApi(List<NodeOutput> nodes, Dictionary<string, object> named,
+                           int imageWidth, int imageHeight)
         {
             _nodes = nodes ?? new List<NodeOutput>();
+            _named = named ?? new Dictionary<string, object>(StringComparer.Ordinal);
             ImageWidth = imageWidth;
             ImageHeight = imageHeight;
         }
+
+        /// <summary>
+        /// 写一个<strong>命名输出</strong>（脚本节点"自定义输出变量"的落点）。
+        /// 下游脚本节点用 <see cref="GetValue"/> 按名字读取，实现"传给其它节点"。
+        /// </summary>
+        public void Set(string name, object value)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            _named[name] = value;
+            if (!SetNames.Contains(name)) SetNames.Add(name);
+        }
+
+        /// <summary>本脚本这次写过的输出名（宿主用它汇总摘要）。</summary>
+        public readonly List<string> SetNames = new List<string>();
+
+        /// <summary>读其它脚本节点写过的命名输出；不存在返回 null。</summary>
+        public object GetValue(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            object v;
+            return _named.TryGetValue(name, out v) ? v : null;
+        }
+
+        /// <summary>读数值型命名输出（不存在或类型不符时返回 <paramref name="fallback"/>）。</summary>
+        public double GetNumber(string name, double fallback)
+        {
+            object v = GetValue(name);
+            if (v == null) return fallback;
+            try { return Convert.ToDouble(v); }
+            catch (Exception) { return fallback; }
+        }
+
+        /// <summary>读文本型命名输出。</summary>
+        public string GetText(string name, string fallback)
+        {
+            object v = GetValue(name);
+            return v == null ? fallback : v.ToString();
+        }
+
+        /// <summary>当前已有的全部命名输出名（脚本里可用于调试）。</summary>
+        public List<string> NamedKeys { get { return new List<string>(_named.Keys); } }
 
         /// <summary>本轮所有已执行节点的输出（按执行顺序）。</summary>
         public List<NodeOutput> Nodes { get { return _nodes; } }
@@ -161,20 +205,22 @@ namespace VisionPlatform.Flow
     /// </summary>
     public static class ScriptEngine
     {
+        // 固定骨架：用户只写 bool Run(ScriptApi api) 的方法体（Notepad++ 风格的头文件+函数名由这里给）
         private const string WrapperHead =
             "using System;\n" +
             "using System.Collections.Generic;\n" +
             "using System.Linq;\n" +
             "using System.Text;\n" +
             "using VisionPlatform.Flow;\n" +
-            "public static class __VsScript {\n" +
-            "  public static string Run(ScriptApi api) {\n";
+            "public class ScriptNode {\n" +
+            "  public bool Run(ScriptApi api) {\n";
 
         private const string WrapperTail = "\n  }\n}";
 
         private sealed class Compiled
         {
             public MethodInfo Entry;
+            public object Instance;      // ScriptNode 实例（Run 是实例方法）
             public string Error;
         }
 
@@ -191,44 +237,46 @@ namespace VisionPlatform.Flow
         /// <summary>
         /// 执行脚本。<paramref name="error"/> 非空表示编译/运行失败（节点应判 NG）。
         /// </summary>
-        public static string Run(string script, ScriptApi api, out string error)
+        public static bool Run(string script, ScriptApi api, out string error)
         {
             error = "";
             if (string.IsNullOrWhiteSpace(script))
             {
                 error = "脚本为空";
-                return "";
+                return false;
             }
 
             MethodInfo entry;
+            object instance;
             string compileError;
-            if (!TryCompile(script, out entry, out compileError))
+            if (!TryCompile(script, out entry, out instance, out compileError))
             {
                 error = compileError;
-                return "";
+                return false;
             }
 
             try
             {
-                object ret = entry.Invoke(null, new object[] { api });
-                return ret == null ? "" : ret.ToString();
+                object ret = entry.Invoke(instance, new object[] { api });
+                return ret is bool && (bool)ret;
             }
             catch (TargetInvocationException ex)
             {
                 Exception inner = ex.InnerException ?? ex;
                 error = "脚本运行异常：" + inner.GetType().Name + " " + inner.Message;
-                return "";
+                return false;
             }
             catch (Exception ex)
             {
                 error = "脚本运行异常：" + ex.GetType().Name + " " + ex.Message;
-                return "";
+                return false;
             }
         }
 
-        private static bool TryCompile(string script, out MethodInfo entry, out string error)
+        private static bool TryCompile(string script, out MethodInfo entry, out object instance, out string error)
         {
             entry = null;
+            instance = null;
             error = "";
 
             string key = script;   // 脚本即键（内容相同就复用）
@@ -238,7 +286,7 @@ namespace VisionPlatform.Flow
                 Compiled c;
                 if (_cache.TryGetValue(key, out c))
                 {
-                    if (c.Entry != null) { entry = c.Entry; return true; }
+                    if (c.Entry != null) { entry = c.Entry; instance = c.Instance; return true; }
                     error = c.Error;
                     return false;
                 }
@@ -280,8 +328,8 @@ namespace VisionPlatform.Flow
                         return false;
                     }
 
-                    Type t = r.CompiledAssembly.GetType("__VsScript");
-                    entry = t == null ? null : t.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
+                    Type t = r.CompiledAssembly.GetType("ScriptNode");
+                    entry = t == null ? null : t.GetMethod("Run", BindingFlags.Public | BindingFlags.Instance);
                     if (entry == null)
                     {
                         error = "脚本编译成功但找不到入口（内部错误）";
@@ -289,7 +337,8 @@ namespace VisionPlatform.Flow
                         return false;
                     }
 
-                    lock (_sync) _cache[key] = new Compiled { Entry = entry };
+                    instance = Activator.CreateInstance(t);
+                    lock (_sync) _cache[key] = new Compiled { Entry = entry, Instance = instance };
                     return true;
                 }
             }
@@ -305,29 +354,26 @@ namespace VisionPlatform.Flow
         /// 新建脚本节点时填入的<strong>骨架</strong>：三段式（取数 → 计算 → 返回），
         /// 让用户一打开就知道该写在哪、能用什么。
         /// </summary>
-        public static readonly string SampleScript = string.Join("\n", new string[]
+        // 用 \r\n 拼接：WinForms 多行 TextBox 只认 \r\n，用 \n 会把整段代码压成一行
+        public static readonly string SampleScript = string.Join("\r\n", new string[]
         {
-            @"// ===== 1) 取上游数据（脚本排在链尾，能读到前面所有节点）=====",
-            @"// api.Nodes：本轮所有已执行节点的输出；Get 支持 Id 或节点名，First 按类型取第一个",
-            @"var m    = api.First(""ShapeMatch"");",
-            @"var blob = api.First(""Blob"");",
-            @"var ocr  = api.First(""Ocr"");",
+            @"// 头文件/函数名由编辑器给出，这里只写 bool Run(ScriptApi api) 的方法体",
+            @"// 取上游（api.Nodes 已包含本节点之前的全部节点）",
+            @"var m = api.First(""ShapeMatch"");",
+            @"if (m == null) { api.Text = ""未找到形状匹配节点""; return false; }",
             @"",
-            @"// ===== 2) 计算 / 判断 =====",
-            @"if (m == null) { api.Ok = false; return ""未找到形状匹配节点""; }",
+            @"// 计算",
+            @"double score = m.TopScore;",
+            @"double cx = m.Cx, cy = m.Cy;",
             @"",
-            @"double score = m.TopScore;                 // 最高分",
-            @"double cx    = m.Cx, cy = m.Cy;            // 位姿中心",
-            @"int    n     = blob == null ? -1 : blob.TargetCount;   // Blob 数量",
-            @"string txt   = ocr  == null ? """" : ocr.Text;           // OCR 文本",
+            @"// 写结果：api.Text 是摘要，api.Set 是命名输出（下游节点可按名字取）",
+            @"api.Text = ""分数 "" + score.ToString(""F3"") + "" 中心("" + cx.ToString(""F1"") + "","" + cy.ToString(""F1"") + "")"";",
+            @"api.Set(""Score"", score);",
+            @"api.Set(""CenterX"", cx);",
+            @"api.Set(""CenterY"", cy);",
+            @"api.Set(""Passed"", score >= 0.7);",
             @"",
-            @"api.Ok     = score >= 0.7;                 // false → 本节点判 NG",
-            @"api.Number = score;                        // 数值结果（可选）",
-            @"",
-            @"// ===== 3) 返回结果文本（显示在结果区）=====",
-            @"return ""分数 "" + score.ToString(""F3"")",
-            @"     + "" 中心("" + cx.ToString(""F1"") + "","" + cy.ToString(""F1"") + "")""",
-            @"     + "" Blob "" + n + "" 文本 "" + txt;"
+            @"return score >= 0.7;   // false → 本节点判 NG"
         });
     }
 }

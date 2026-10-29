@@ -1519,6 +1519,12 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            if (string.Equals(key, "EditScript", StringComparison.Ordinal))
+            {
+                OpenScriptEditor();
+                return;
+            }
+
             if (string.Equals(key, "RetractBaseline", StringComparison.Ordinal))
             {
                 FlowNode node = _selectedNode ?? nodeParamPanel.Node;
@@ -1542,6 +1548,52 @@ namespace VisionPlatform.UI
 
             // RoiPick / RoiPreview 由预览区顶条与 T04 承接，这里不重复实现，也不静默吞掉
             Logger.Info("参数面板动作未在本窗体实现：" + key);
+        }
+
+        /// <summary>
+        /// 打开脚本编辑器：把"排在脚本之前的节点"和最近一次运行的输出一起带过去，
+        /// 左上角就能看到每个上游节点的真实数据（没跑过则只列节点名）。
+        /// </summary>
+        private void OpenScriptEditor()
+        {
+            FlowNode node = nodeParamPanel.CurrentNode;
+            if (node == null) { SetStatus("请先选中脚本节点"); return; }
+
+            // 按执行顺序取"脚本之前"的节点
+            var names = new List<string>();
+            List<FlowNode> order;
+            string err;
+            if (CurrentFlow != null && FlowOrder.Build(CurrentFlow, out order, out err) && order != null)
+            {
+                foreach (FlowNode n in order)
+                {
+                    if (n == null) continue;
+                    if (string.Equals(n.Id, node.Id, StringComparison.Ordinal)) break;
+                    names.Add(string.IsNullOrEmpty(n.Name) ? n.Id : n.Name);
+                }
+            }
+
+            // 最近一次运行的输出（只取上游的）
+            var outputs = new List<NodeOutput>();
+            if (_runner != null && _runner.LastOutputs != null)
+            {
+                foreach (NodeOutput o in _runner.LastOutputs)
+                {
+                    if (o == null) continue;
+                    if (string.Equals(o.Id, node.Id, StringComparison.Ordinal)) break;
+                    outputs.Add(o);
+                }
+            }
+
+            using (var dlg = new ScriptEditorForm(node, outputs, names))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    SaveFlows();
+                    nodeParamPanel.SetNode(node);
+                    SetStatus("脚本已保存");
+                }
+            }
         }
 
         private void OnCardCreateRequested(object sender, EventArgs e)

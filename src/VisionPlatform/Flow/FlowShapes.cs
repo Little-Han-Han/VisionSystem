@@ -44,6 +44,12 @@ namespace VisionPlatform.Flow
         /// <summary>未运行时的卡尺布局预览（浅青，虚线框）：与"运行结果"区分开，不冒充命中。</summary>
         public static readonly Color ColorCaliperLayout = Color.FromArgb(150, 160, 235);
 
+        /// <summary>位置修正：基准坐标系（淡青，只作参考）。</summary>
+        public static readonly Color ColorPoseRef = Color.FromArgb(120, 200, 220);
+
+        /// <summary>位置修正：实测坐标系（亮橙，跟工件一起跑）。</summary>
+        public static readonly Color ColorPoseNow = Color.FromArgb(255, 176, 60);
+
         /// <summary>命中边缘点（黄）。</summary>
         public static readonly Color ColorEdgeHit = Color.FromArgb(255, 235, 59);
 
@@ -371,6 +377,17 @@ namespace VisionPlatform.Flow
         /// </summary>
         public static List<IGeometryShape> CoordinateSystem(double x, double y, double angleDeg, double arm = DefaultCrossArm)
         {
+            return CoordinateSystem(x, y, angleDeg, ColorAxisX, ColorAxisY, NormalLine, arm);
+        }
+
+        /// <summary>
+        /// 彩色可定制的坐标系：位置修正里用两种颜色区分「基准坐标系」与「实测坐标系」，
+        /// 否则两个十字叠在一起，用户只看得到一个点（"没有显示更新后的点"）。
+        /// </summary>
+        public static List<IGeometryShape> CoordinateSystem(double x, double y, double angleDeg,
+                                                           Color axisX, Color axisY, float width,
+                                                           double arm)
+        {
             var list = new List<IGeometryShape>(8);
             double a = angleDeg * Math.PI / 180.0;
             double cos = Math.Cos(a), sin = Math.Sin(a);
@@ -379,16 +396,16 @@ namespace VisionPlatform.Flow
             // X 轴：沿角度方向（红），末端两条短箭头线表方向
             double xx = x + cos * arm, xy = y + sin * arm;
             double aX = Math.Atan2(sin, cos);
-            list.Add(Line(x, y, xx, xy, ColorAxisX, NormalLine, false));
-            list.Add(Line(xx, xy, xx + Math.Cos(aX + Math.PI * 0.75) * head, xy + Math.Sin(aX + Math.PI * 0.75) * head, ColorAxisX, NormalLine, false));
-            list.Add(Line(xx, xy, xx + Math.Cos(aX - Math.PI * 0.75) * head, xy + Math.Sin(aX - Math.PI * 0.75) * head, ColorAxisX, NormalLine, false));
+            list.Add(Line(x, y, xx, xy, axisX, width, false));
+            list.Add(Line(xx, xy, xx + Math.Cos(aX + Math.PI * 0.75) * head, xy + Math.Sin(aX + Math.PI * 0.75) * head, axisX, width, false));
+            list.Add(Line(xx, xy, xx + Math.Cos(aX - Math.PI * 0.75) * head, xy + Math.Sin(aX - Math.PI * 0.75) * head, axisX, width, false));
 
             // Y 轴：X 方向顺时针转 90°（y 向下坐标系，绿）
             double yx = x - sin * arm, yy = y + cos * arm;
             double aY = Math.Atan2(cos, -sin);
-            list.Add(Line(x, y, yx, yy, ColorAxisY, NormalLine, false));
-            list.Add(Line(yx, yy, yx + Math.Cos(aY + Math.PI * 0.75) * head, yy + Math.Sin(aY + Math.PI * 0.75) * head, ColorAxisY, NormalLine, false));
-            list.Add(Line(yx, yy, yx + Math.Cos(aY - Math.PI * 0.75) * head, yy + Math.Sin(aY - Math.PI * 0.75) * head, ColorAxisY, NormalLine, false));
+            list.Add(Line(x, y, yx, yy, axisY, width, false));
+            list.Add(Line(yx, yy, yx + Math.Cos(aY + Math.PI * 0.75) * head, yy + Math.Sin(aY + Math.PI * 0.75) * head, axisY, width, false));
+            list.Add(Line(yx, yy, yx + Math.Cos(aY - Math.PI * 0.75) * head, yy + Math.Sin(aY - Math.PI * 0.75) * head, axisY, width, false));
 
             // 原点标记
             list.Add(Marker(x, y, ColorRefCross));

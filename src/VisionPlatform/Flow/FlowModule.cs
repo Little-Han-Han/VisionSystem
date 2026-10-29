@@ -578,6 +578,18 @@ namespace VisionPlatform.Flow
             if (m == null) return new List<ParamItem>();
 
             List<ParamItem> list = m.CreateDefaultParams();
+
+            // 脚本节点：新拖入就带骨架，用户不必从空白开始（编辑器里也是这一份）
+            if (type == FlowNodeType.Script)
+            {
+                bool hasSource = false;
+                foreach (ParamItem it in list)
+                    if (it != null && it.Key == "Source") hasSource = true;
+
+                if (!hasSource) list.Add(new ParamItem { Key = "Source", Value = ScriptEngine.SampleScript });
+                return list;
+            }
+
             if (type != FlowNodeType.Ocr) return list;
 
             Dictionary<string, string> newDefaults = m.CreateNewParams();
