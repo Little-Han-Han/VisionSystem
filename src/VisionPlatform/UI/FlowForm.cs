@@ -67,6 +67,9 @@ namespace VisionPlatform.UI
         //  所以设计器里的 nodeParamPanel 在构造期
         //  从 panelRight 摘下来，重新装进这里新建的容器。
         // ---------------------------------------------------------------------
+        /// <summary>上次已落盘的示教基准键（节点 Id + 三个值），用于去重，避免每帧写盘。</summary>
+        private string _baselineSavedKey = "";
+
         private Panel panelRightSplit;      // 右栏左缘的竖直分隔条（可拖宽右栏）
         private bool _draggingRightSplit;
         private int _dragStartX;
@@ -2311,6 +2314,18 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>节点进度：刷新画布节点状态边框与耗时（工作线程 → BeginInvoke 切 UI）。</summary>
+        /// <summary>按 Id 找当前流程里的节点（找不到返回 null）。</summary>
+        private FlowNode FindNodeById(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId) || CurrentFlow == null || CurrentFlow.Nodes == null) return null;
+
+            foreach (FlowNode n in CurrentFlow.Nodes)
+            {
+                if (n != null && string.Equals(n.Id, nodeId, StringComparison.Ordinal)) return n;
+            }
+            return null;
+        }
+
         private void OnControllerProgress(object sender, FlowProgressEventArgs e)
         {
             FlowProgressSnapshot snap = e != null ? e.Snapshot : null;
@@ -2323,19 +2338,31 @@ namespace VisionPlatform.UI
                 {
                     if (IsDisposed) return;
 
-                    // 位置修正首次示教了基准 → 必须立刻落盘，否则下次运行又示教成 0 偏差
-                    //（用户视角就是"位置修正完全没有反应"）。
+                    // 位置修正示教了基准 → 必须立刻落盘，否则下次运行又示教成 0 偏差
+                    //（用户视角就是"位置修正时好时坏、坐标有时不变"）。
+                    // 节点级快照也会带这个标志（单步执行没有链尾快照），所以按"值"去重：
+                    // 连续运行时同一节点每帧都会报，不去重会每帧写一次配置。
                     if (snap.BaselineTaught)
                     {
-                        SaveFlows();
-                        SetStatus("已自动示教位置修正基准（基准 X/Y/角 已填入本节点）");
+                        FlowNode taught = FindNodeById(snap.BaselineNodeId);
+                        string key = snap.BaselineNodeId + "|"
+                                     + (taught != null ? taught.GetString("RefX", "") + "," +
+                                                          taught.GetString("RefY", "") + "," +
+                                                          taught.GetString("RefAngle", "") : "");
 
-                        // 面板正显示这个节点 → 立刻刷新，让用户看到新填入的基准值
-                        FlowNode showNode = nodeParamPanel.CurrentNode;
-                        if (showNode != null && string.Equals(showNode.Id, snap.BaselineNodeId,
-                                                              StringComparison.Ordinal))
+                        if (!string.Equals(key, _baselineSavedKey, StringComparison.Ordinal))
                         {
-                            nodeParamPanel.SetNode(showNode);
+                            _baselineSavedKey = key;
+                            SaveFlows();
+                            SetStatus("已自动示教位置修正基准（基准 X/Y/角 已填入本节点）");
+
+                            // 面板正显示这个节点 → 立刻刷新，让用户看到新填入的基准值
+                            FlowNode showNode = nodeParamPanel.CurrentNode;
+                            if (showNode != null && taught != null
+                                && string.Equals(showNode.Id, taught.Id, StringComparison.Ordinal))
+                            {
+                                nodeParamPanel.SetNode(showNode);
+                            }
                         }
                     }
 

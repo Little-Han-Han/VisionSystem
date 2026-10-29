@@ -268,6 +268,17 @@ namespace VisionPlatform.Flow
     /// </remarks>
     public sealed class FlowRunSession : IDisposable
     {
+
+        /// <summary>
+        /// 本会话里"刚示教过位置修正基准"的节点 Id。
+        /// <para>
+        /// 【为什么要放在会话里】示教是节点级事件，但宿主只在"链尾快照"里看到它 ——
+        /// 单步执行（StepOnce）根本没有链尾快照，于是基准永远没落盘，下次运行又示教成 0 偏差，
+        /// 现场表现就是"位置修正时好时坏、坐标有时不变"。
+        /// </para>
+        /// </summary>
+        public readonly HashSet<string> BaselineTaughtNodes = new HashSet<string>(StringComparer.Ordinal);
+
         /// <summary>被执行的流程。</summary>
         public FlowDefinition Flow { get; set; }
 

@@ -41,6 +41,8 @@ namespace VisionPlatform.UI
             this.tsComboFlow = new System.Windows.Forms.ToolStripComboBox();
             this.tsBtnCameraMgr = new System.Windows.Forms.ToolStripButton();
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnRunFlow = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnStepFlow = new System.Windows.Forms.ToolStripButton();
             this.tsBtnFlow = new System.Windows.Forms.ToolStripButton();
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
@@ -139,6 +141,8 @@ namespace VisionPlatform.UI
                 this.tsSep2,
                 this.tsLabelFlow,
                 this.tsComboFlow,
+                this.tsBtnRunFlow,
+                this.tsBtnStepFlow,
                 this.tsBtnCameraMgr,
                 this.tsBtnAlgo,
                 this.tsBtnFlow,
@@ -230,6 +234,22 @@ namespace VisionPlatform.UI
             this.tsBtnFlow.Text = "流程编排";
             this.tsBtnFlow.ToolTipText = "算法流程编排：拖拽节点、连线、绑定相机与视图、运行";
             this.tsBtnFlow.Click += new System.EventHandler(this.OnOpenFlowForm);
+            // 
+            // tsBtnRunFlow
+            // 
+            this.tsBtnRunFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnRunFlow.Name = "tsBtnRunFlow";
+            this.tsBtnRunFlow.Text = "运行";
+            this.tsBtnRunFlow.ToolTipText = "按当前配置运行选中流程（图像源为文件/文件夹时不再弹选图框）";
+            this.tsBtnRunFlow.Click += new System.EventHandler(this.OnRunSelectedFlow);
+            // 
+            // tsBtnStepFlow
+            // 
+            this.tsBtnStepFlow.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnStepFlow.Name = "tsBtnStepFlow";
+            this.tsBtnStepFlow.Text = "单步";
+            this.tsBtnStepFlow.ToolTipText = "单步执行选中流程：每点一次往下走一个节点，直到链尾";
+            this.tsBtnStepFlow.Click += new System.EventHandler(this.OnStepSelectedFlow);
 
             this.tsBtnComm.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnComm.Name = "tsBtnComm";
@@ -702,6 +722,8 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripComboBox tsComboLayout;
         private System.Windows.Forms.ToolStripLabel tsLabelFlow;
         private System.Windows.Forms.ToolStripComboBox tsComboFlow;
+        private System.Windows.Forms.ToolStripButton tsBtnRunFlow;
+        private System.Windows.Forms.ToolStripButton tsBtnStepFlow;
         private System.Windows.Forms.ToolStripButton tsBtnRightPanel;
         private System.Windows.Forms.ToolStripSeparator tsSep2;
         private System.Windows.Forms.ToolStripButton tsBtnCameraMgr;

@@ -681,6 +681,15 @@ namespace VisionPlatform.Flow
             if (p.Metrics != null) snap.Metrics = p.Metrics;
 
             SnapOffsetInfo(snap, s);
+
+            // 单步/连续都要让宿主知道"这个节点刚示教了基准"，否则基准永远落不了盘
+            if (s != null && s.BaselineTaughtNodes != null
+                && !string.IsNullOrEmpty(p.NodeId) && s.BaselineTaughtNodes.Contains(p.NodeId))
+            {
+                snap.BaselineTaught = true;
+                snap.BaselineNodeId = p.NodeId;
+            }
+
             PushNode(snap);
         }
 

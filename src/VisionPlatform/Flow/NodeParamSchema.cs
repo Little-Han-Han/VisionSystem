@@ -361,6 +361,8 @@ namespace VisionPlatform.Flow
             t.Fields.Add(Folder("FolderPath", "图片文件夹", "",
                 "仅「本地图片文件夹」时生效：按文件名顺序逐张取，每次运行 / 每个周期换下一张，到末尾回到第一张。"
                 + "结果区会显示「第 i/N 张 · 文件名」"));
+            t.Fields.Add(Int("FolderHoldMs", "每张停留(ms)", 0, 60000, "800",
+                "0 = 每个周期换一张；>0 = 同一张至少停留这么久（连续运行时便于观察）"));
             t.Fields.Add(Bool("FolderPersist", "记住播放位置", "0",
                 "关闭：位置只在本次软件运行内递增（重启回到第一张）；开启：退出后仍从上次的位置继续"));
             t.Fields.Add(Int("TimeoutMs", "抓帧超时(ms)", 100, 60000, "3000"));

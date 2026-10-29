@@ -190,6 +190,17 @@ namespace VisionPlatform.Flow
         private static readonly object _sync = new object();
         private static readonly Dictionary<string, int> _index = new Dictionary<string, int>(StringComparer.Ordinal);
 
+        // 每张图"开始显示的时间"：配合「每张停留(ms)」决定这一帧要不要换图。
+        // 连续运行时每周期都会 Next 一次，没有这个节流就会 30fps 刷图，人眼根本看不清。
+        private static readonly Dictionary<string, DateTime> _shownAt =
+            new Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+        // 上一次"实际返回给界面显示"的索引。停留期内必须返回它 ——
+        // 若返回游标（已经 +1），停留就变成了"下一张已经在显示、只是没再推进"，
+        // 表现是每点一次还是换图（这正是第一版 hold 失效的原因）。
+        private static readonly Dictionary<string, int> _shownIndex =
+            new Dictionary<string, int>(StringComparer.Ordinal);
+
         private static bool _loaded;
         private static bool _dirty;
         private static DateTime _lastFlushUtc = DateTime.MinValue;
@@ -267,7 +278,17 @@ namespace VisionPlatform.Flow
         /// 取当前索引并推进一位（到末尾回到 0）。返回本次应当使用的位置。
         /// </summary>
         /// <param name="persist">true = 落盘（节点参数「记住播放位置」）。</param>
+        /// <param name="holdMs">
+        /// 同一张图的最小停留时间（毫秒）；<c>0</c> = 每个周期换一张。
+        /// 连续运行 30fps 时若不设停留，图片会以肉眼看不清的速度狂翻。
+        /// </param>
         public static int Next(string key, int count, bool persist)
+        {
+            return Next(key, count, persist, 0);
+        }
+
+        /// <summary>带"每张停留"的取图：停留未到就复用当前这张，不推进索引。</summary>
+        public static int Next(string key, int count, bool persist, int holdMs)
         {
             if (count <= 0) return 0;
             if (key == null) key = "";
@@ -279,6 +300,17 @@ namespace VisionPlatform.Flow
                 int v;
                 if (!_index.TryGetValue(key, out v)) v = 0;
                 v = ((v % count) + count) % count;
+
+                DateTime shown;
+                bool hasShown = _shownAt.TryGetValue(key, out shown);
+                if (holdMs > 0 && hasShown && (DateTime.UtcNow - shown).TotalMilliseconds < holdMs)
+                {
+                    int shownIdx;
+                    return _shownIndex.TryGetValue(key, out shownIdx) ? shownIdx : v;
+                }
+
+                _shownAt[key] = DateTime.UtcNow;
+                _shownIndex[key] = v;
 
                 int next = v + 1;
                 if (next >= count) next = 0;
@@ -301,6 +333,8 @@ namespace VisionPlatform.Flow
             {
                 EnsureLoaded();
                 _index[key ?? ""] = 0;
+                _shownAt.Remove(key ?? "");
+                _shownIndex.Remove(key ?? "");
                 _dirty = true;
                 FlushIfDue();
             }
@@ -312,6 +346,8 @@ namespace VisionPlatform.Flow
             lock (_sync)
             {
                 _index.Clear();
+                _shownAt.Clear();
+                _shownIndex.Clear();
                 _loaded = true;
                 _dirty = flush;
                 if (flush) Flush();

@@ -2228,11 +2228,32 @@ namespace VisionPlatform.UI
             }
         }
 
-        /// <summary>下拉框选中流程即触发：选一张本地图片并运行该流程（回填期间抑制）。</summary>
+        /// <summary>
+        /// 下拉框选中流程：<strong>只做准备，不再自动运行</strong>。
+        /// <para>
+        /// 原实现"一选中就弹选图对话框并运行"，用「本地图片文件夹」做调试时每次换流程都被拦一次；
+        /// 现在由工具条的「运行 / 单步」按钮触发（见 <see cref="OnRunSelectedFlow"/>）。
+        /// </para>
+        /// </summary>
         private void OnFlowComboSelected(object sender, EventArgs e)
         {
             if (_loadingFlowCombo) return;
-            RunSelectedFlow();
+
+            FlowDefinition selected = tsComboFlow.SelectedItem as FlowDefinition;
+            if (selected != null)
+                tsLabelStatus.Text = "已选中流程：" + (selected.Name ?? "") + "（点「运行」或「单步」执行）";
+        }
+
+        /// <summary>工具条「运行」：按当前配置跑一次选中流程。</summary>
+        private void OnRunSelectedFlow(object sender, EventArgs e)
+        {
+            RunSelectedFlow(false);
+        }
+
+        /// <summary>工具条「单步」：每点一次往下走一个节点，直到链尾。</summary>
+        private void OnStepSelectedFlow(object sender, EventArgs e)
+        {
+            RunSelectedFlow(true);
         }
 
         /// <summary>
@@ -2240,58 +2261,83 @@ namespace VisionPlatform.UI
         /// 改为该图片（保证无需相机）→ 校验 → 经本窗体自有的 FlowRunController 以 camera=null 运行；
         /// 结果经 FlowOutputChannel 既有链路显示到主视图并驱动 OK/NG 徽标。
         /// </summary>
+        /// <summary>兼容旧调用：等价于「运行」。</summary>
         private void RunSelectedFlow()
+        {
+            RunSelectedFlow(false);
+        }
+
+        /// <summary>
+        /// 运行 / 单步执行下拉框选中的流程。
+        /// <para>
+        /// <strong>图像源已是「本地文件 / 文件夹」时不再弹选图对话框</strong>，直接按流程配置跑 ——
+        /// 文件夹模式会按「每张停留(ms)」自动换图，单步/运行都能一张一张看效果。
+        /// 只有流程确实需要相机时，才回落到"选一张本地图片代替相机"的旧行为。
+        /// </para>
+        /// </summary>
+        /// <param name="step">true = 单步（每点一次一个节点）；false = 整链运行一次。</param>
+        private void RunSelectedFlow(bool step)
         {
             if (_flowRunner == null) { MessageBox.Show(this, "算法库不可用，无法运行流程。"); return; }
             if (_flowCtrl == null || _flowCtrl.IsBusy) return;
 
             FlowDefinition selected = tsComboFlow.SelectedItem as FlowDefinition;
-            if (selected == null) return;
+            if (selected == null) { tsLabelStatus.Text = "请先在下拉框选择一个流程"; return; }
 
             // 坑④：绝不改 ConfigStore 里的原定义——直接改会把 FlowForm 里配置的图片路径持久化覆盖，
             // 且可能与并行运行的流程并发改参数。统一跑克隆。
             FlowDefinition clone = selected.Clone();
 
-            string imagePath;
-            using (OpenFileDialog dlg = new OpenFileDialog())
-            {
-                dlg.Title = "选择要检测的本地图片";
-                dlg.Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp|所有文件|*.*";
-                dlg.CheckFileExists = true;
-                if (!string.IsNullOrEmpty(_lastImageDir) && Directory.Exists(_lastImageDir))
-                    dlg.InitialDirectory = _lastImageDir;
-
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                imagePath = dlg.FileName;
-                _lastImageDir = Path.GetDirectoryName(imagePath);
-            }
-
-            // 把克隆里所有图像源节点都指到这张图（写回键与 FlowForm.OnPreviewImageLoaded 一致）
-            int imageSources = 0;
-            if (clone.Nodes != null)
-            {
-                foreach (FlowNode node in clone.Nodes)
-                {
-                    if (!IsImageSourceNode(node)) continue;
-                    node.Set("Source", "File");
-                    node.Set("FilePath", imagePath);
-                    imageSources++;
-                }
-            }
-
-            if (imageSources == 0)
-            {
-                MessageBox.Show(this, "该流程没有图像源节点，无法用本地图片运行。", "无法运行",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            // 双保险：所有图像源已是 File 时 NeedsCamera 必为 false；仍为 true 说明存在别的取图路径
             if (FlowRunner.NeedsCamera(clone))
             {
-                MessageBox.Show(this, "该流程仍需相机（存在未改为本地图片的图像源）。", "无法运行",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                if (step)
+                {
+                    MessageBox.Show(this,
+                        "该流程的图像源是「流程绑定相机」，单步调试请把图像源改为「本地图片文件」或「本地图片文件夹」。",
+                        "单步不支持相机取图", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 旧行为兜底：选一张本地图片顶替相机
+                string imagePath;
+                using (OpenFileDialog dlg = new OpenFileDialog())
+                {
+                    dlg.Title = "选择要检测的本地图片";
+                    dlg.Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp|所有文件|*.*";
+                    dlg.CheckFileExists = true;
+                    if (!string.IsNullOrEmpty(_lastImageDir) && Directory.Exists(_lastImageDir))
+                        dlg.InitialDirectory = _lastImageDir;
+
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                    imagePath = dlg.FileName;
+                    _lastImageDir = Path.GetDirectoryName(imagePath);
+                }
+
+                int imageSources = 0;
+                if (clone.Nodes != null)
+                {
+                    foreach (FlowNode node in clone.Nodes)
+                    {
+                        if (!IsImageSourceNode(node)) continue;
+                        node.Set("Source", "File");
+                        node.Set("FilePath", imagePath);
+                        imageSources++;
+                    }
+                }
+
+                if (imageSources == 0)
+                {
+                    MessageBox.Show(this, "该流程没有图像源节点，无法用本地图片运行。", "无法运行",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (FlowRunner.NeedsCamera(clone))
+                {
+                    MessageBox.Show(this, "该流程仍需相机（存在未改为本地图片的图像源）。", "无法运行",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
             }
 
             string err;
@@ -2306,8 +2352,10 @@ namespace VisionPlatform.UI
             if (clone.ViewIndex < 1 || clone.ViewIndex > _views.Count) clone.ViewIndex = 1;
 
             tsComboFlow.Enabled = false;   // 运行期间禁选，OnFlowRunCompleted 里恢复
-            Logger.Info("主界面下拉运行流程：" + selected.Name + "（本地图片 " + Path.GetFileName(imagePath) + "）");
-            _flowCtrl.RunOnce(clone, null);   // 图像源全部为 File → NeedsCamera=false，camera=null 合法
+            Logger.Info("主界面" + (step ? "单步" : "运行") + "流程：" + (selected.Name ?? ""));
+
+            if (step) _flowCtrl.StepOnce(clone, null);   // 图像源为文件/文件夹 → 不需要相机
+            else _flowCtrl.RunOnce(clone, null);
         }
 
         /// <summary>节点是「图像源」时返回 true（与 FlowForm.IsImageSource 同一口径）。</summary>

@@ -415,7 +415,8 @@ namespace VisionPlatform.Flow
                         string cursorKey = ImageFolderCursor.Key(s.Flow, node, folder);
 
                         int idx = ImageFolderCursor.Next(cursorKey, files.Length,
-                                                        node.GetBool("FolderPersist", false));
+                                                        node.GetBool("FolderPersist", false),
+                                                        node.GetInt("FolderHoldMs", 0));
                         path = files[idx];
 
                         frameNote = string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 张 · {2}",
@@ -1752,6 +1753,9 @@ namespace VisionPlatform.Flow
                 autoFirstLatch = true;
                 _baselineTaught = true;
                 _baselineNodeId = node.Id;
+
+                // 会话级也记一笔：单步执行没有链尾快照，宿主只能从节点快照里看到这件事
+                if (s.BaselineTaughtNodes != null) s.BaselineTaughtNodes.Add(node.Id);
             }
 
             double dx = hasPose ? (curX - rx) : 0.0;
