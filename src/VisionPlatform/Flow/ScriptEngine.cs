@@ -301,12 +301,33 @@ namespace VisionPlatform.Flow
             }
         }
 
-        /// <summary>脚本编辑器里显示的示例（新建脚本节点时的默认内容）。</summary>
-        public const string SampleScript =
-            "// api.Nodes 是本轮所有已执行节点的输出；Get 支持 Id 或节点名\n" +
-            "var m = api.First(\"ShapeMatch\");\n" +
-            "if (m == null || !m.Ok) { api.Ok = false; return \"未定位\"; }\n" +
-            "api.Number = m.TopScore;\n" +
-            "return \"分数 \" + m.TopScore.ToString(\"F3\") + \" @ (\" + m.Cx.ToString(\"F1\") + \",\" + m.Cy.ToString(\"F1\") + \")\";";
+        /// <summary>
+        /// 新建脚本节点时填入的<strong>骨架</strong>：三段式（取数 → 计算 → 返回），
+        /// 让用户一打开就知道该写在哪、能用什么。
+        /// </summary>
+        public static readonly string SampleScript = string.Join("\n", new string[]
+        {
+            @"// ===== 1) 取上游数据（脚本排在链尾，能读到前面所有节点）=====",
+            @"// api.Nodes：本轮所有已执行节点的输出；Get 支持 Id 或节点名，First 按类型取第一个",
+            @"var m    = api.First(""ShapeMatch"");",
+            @"var blob = api.First(""Blob"");",
+            @"var ocr  = api.First(""Ocr"");",
+            @"",
+            @"// ===== 2) 计算 / 判断 =====",
+            @"if (m == null) { api.Ok = false; return ""未找到形状匹配节点""; }",
+            @"",
+            @"double score = m.TopScore;                 // 最高分",
+            @"double cx    = m.Cx, cy = m.Cy;            // 位姿中心",
+            @"int    n     = blob == null ? -1 : blob.TargetCount;   // Blob 数量",
+            @"string txt   = ocr  == null ? """" : ocr.Text;           // OCR 文本",
+            @"",
+            @"api.Ok     = score >= 0.7;                 // false → 本节点判 NG",
+            @"api.Number = score;                        // 数值结果（可选）",
+            @"",
+            @"// ===== 3) 返回结果文本（显示在结果区）=====",
+            @"return ""分数 "" + score.ToString(""F3"")",
+            @"     + "" 中心("" + cx.ToString(""F1"") + "","" + cy.ToString(""F1"") + "")""",
+            @"     + "" Blob "" + n + "" 文本 "" + txt;"
+        });
     }
 }

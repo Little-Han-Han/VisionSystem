@@ -461,6 +461,10 @@ namespace VisionPlatform.Flow
             if (string.IsNullOrEmpty(text)) text = "(无输出)";
 
             p.Summary = "脚本：" + OneLineText(text);
+
+            // 把"读到几个上游节点"写进摘要：读不到数据时，用户第一眼就能判断是脚本写错
+            // 还是执行顺序不对（脚本没排在链尾）。
+            p.Summary += string.Format(CultureInfo.InvariantCulture, "（上游 {0} 个节点）", s.Outputs.Count);
             if (Math.Abs(api.Number) > 1e-12)
                 p.Summary += string.Format(CultureInfo.InvariantCulture, "（数值 {0:0.####}）", api.Number);
 

@@ -44,7 +44,7 @@ namespace VisionPlatform.UI
         public const float MinViewZoom = 0.25f;
         /// <summary>最大缩放倍率。</summary>
         public const float MaxViewZoom = 3.0f;
-        private const int NominalNodeH = TitleH + RowH + SummaryH + NodePadBottom;   // 1 行端子的实际高度（拖入落点居中用）
+        private const int NominalNodeH = TitleH + SummaryH + NodePadBottom + 6;   // 节点标准高度（拖入落点居中用）
         private const float PortGlyph = 9f;      // 端子方形符号边长
         private const float PortHitRadius = 10f; // 端子命中半径（端子命中优先于节点本体）
         private const int HitTol = 6;            // 连线命中容差
@@ -330,39 +330,74 @@ namespace VisionPlatform.UI
                 list.Add(n);
             }
 
-            // ---- 列内排序：重心法（barycenter）----
+            // ---- 自上而下排布（VisionPro 风格）：每层一行，行内按重心排 ----
             // 原来按"旧 Y"排序，重排一次线就乱一次（旧 Y 是上一次的结果，越排越斜）。
-            // 改成：每个节点按**上游节点的平均中心 Y** 排序 —— 父在上、子在下的相对顺序稳定下来，
-            // 连线交叉显著减少；没有上游的（源节点）仍按旧 Y 排，保持用户手工摆放的意向。
-            var centerY = new Dictionary<string, float>(StringComparer.Ordinal);
+            // 改成：行内按**上游节点的平均中心 X** 排序，父子相对位置稳定、连线交叉显著减少；
+            // 源节点无上游时仍按旧 X（保留用户手工摆放的意向）。
+            var centerX = new Dictionary<string, float>(StringComparer.Ordinal);
+            float yTop = AutoLayoutMargin;
 
-            int colIndex = 0;
             foreach (KeyValuePair<int, List<FlowNode>> kv in columns)
             {
-                List<FlowNode> column = kv.Value;
+                List<FlowNode> row = kv.Value;
 
-                column.Sort(delegate(FlowNode a, FlowNode b)
+                row.Sort(delegate(FlowNode a, FlowNode b)
                 {
-                    float wa = Barycenter(a, upstream, centerY);
-                    float wb = Barycenter(b, upstream, centerY);
+                    float wa = BarycenterX(a, upstream, centerX);
+                    float wb = BarycenterX(b, upstream, centerX);
                     int c = wa.CompareTo(wb);
                     return c != 0 ? c : FlowOrder.CompareNodes(a, b);
                 });
 
-                float x = AutoLayoutMargin + colIndex * AutoLayoutColGap;
-                float y = AutoLayoutMargin;
-                foreach (FlowNode n in column)
+                float rowH = 0f;
+                foreach (FlowNode n in row)
+                {
+                    float h = NodeHeight(n);
+                    if (h > rowH) rowH = h;
+                }
+
+                float x = AutoLayoutMargin;
+                foreach (FlowNode n in row)
                 {
                     n.X = x;
-                    n.Y = y;
-                    centerY[n.Id] = y + NodeHeight(n) / 2f;
-                    y += NodeHeight(n) + AutoLayoutRowGap;
+                    n.Y = yTop + (rowH - NodeHeight(n)) / 2f;   // 行内垂直居中
+                    centerX[n.Id] = x + NodeW / 2f;
+                    x += NodeW + AutoLayoutColGap;
                 }
-                colIndex++;
+
+                // 竖直方向要留够连线空间：行高 + 2 倍行间距
+                yTop += rowH + AutoLayoutRowGap * 2;
             }
 
             RaiseChanged();     // 坐标变了，通知外部保存
             Invalidate();
+        }
+
+        /// <summary>
+        /// 节点的"重心 X"：上游节点中心 X 的平均值（无上游时用自身 X）。
+        /// 自上而下排布时用它决定"行内左右顺序"——父节点在左，子节点尽量排在它上方。
+        /// </summary>
+        private static float BarycenterX(FlowNode node,
+                                         Dictionary<string, List<string>> upstream,
+                                         Dictionary<string, float> centerX)
+        {
+            if (node == null) return 0f;
+
+            List<string> ups;
+            if (upstream == null || centerX == null
+                || !upstream.TryGetValue(node.Id, out ups) || ups == null || ups.Count == 0)
+            {
+                return node.X;
+            }
+
+            float sum = 0f;
+            int n = 0;
+            foreach (string up in ups)
+            {
+                float v;
+                if (centerX.TryGetValue(up, out v)) { sum += v; n++; }
+            }
+            return n > 0 ? sum / n : node.X;
         }
 
         /// <summary>
@@ -501,7 +536,8 @@ namespace VisionPlatform.UI
 
         private static float NodeHeight(FlowNode n)
         {
-            return TitleH + PortRowCount(n) * RowH + SummaryH + NodePadBottom;
+            // 端口已移到上下边缘（VisionPro 风格），节点高度不再随端口数变化
+            return TitleH + SummaryH + NodePadBottom + 6;
         }
 
         /// <summary>
@@ -509,8 +545,26 @@ namespace VisionPlatform.UI
         /// </summary>
         private static PointF PortPoint(FlowNode n, FlowPortDir dir, int index)
         {
-            float y = n.Y + TitleH + index * RowH + RowH * 0.5f;
-            return new PointF(dir == FlowPortDir.In ? n.X : n.X + NodeW, y);
+            // VisionPro 风格：输入端子沿【上边】、输出端子沿【下边】，按数量均匀分布。
+            // 所有命中测试 / 连线端点都走这里，改一处全链路跟着变。
+            int count = PortCount(n, dir);
+            if (count < 1) count = 1;
+            float step = NodeW / (count + 1f);
+            float x = n.X + step * (index + 1);
+            float y = dir == FlowPortDir.In ? n.Y : n.Y + NodeHeight(n);
+            return new PointF(x, y);
+        }
+
+        /// <summary>某方向的端子数量（用于沿边均分）。</summary>
+        private static int PortCount(FlowNode n, FlowPortDir dir)
+        {
+            FlowNodeType t;
+            if (n == null || !n.TryGetType(out t)) return 0;
+
+            List<FlowPortDef> list = dir == FlowPortDir.In
+                ? FlowPortSchema.InputsOf(t)
+                : FlowPortSchema.OutputsOf(t);
+            return list != null ? list.Count : 0;
         }
 
         /// <summary>
@@ -654,9 +708,10 @@ namespace VisionPlatform.UI
         /// </summary>
         private static void BezierControls(PointF a, PointF b, out PointF c1, out PointF c2)
         {
-            float cx = Math.Max(MinBezierCx, Math.Abs(b.X - a.X) * 0.5f);
-            c1 = new PointF(a.X + cx, a.Y);
-            c2 = new PointF(b.X - cx, b.Y);
+            // 自上而下连线：控制点沿竖直方向拉开，曲线才不会贴成折线
+            float cy = Math.Max(MinBezierCx, Math.Abs(b.Y - a.Y) * 0.5f);
+            c1 = new PointF(a.X, a.Y + cy);
+            c2 = new PointF(b.X, b.Y - cy);
         }
 
         private static PointF BezierEval(PointF a, PointF c1, PointF c2, PointF b, float t)
@@ -1269,9 +1324,7 @@ namespace VisionPlatform.UI
                 bool hovered = _hoverValid && _hoverPort.Node == n
                     && _hoverPort.Dir == FlowPortDir.In && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, ins[k], FlowPortDir.In, k, hovered));
-                var labelRect = new RectangleF(r.X + 10f, c.Y - RowH * 0.5f, r.Width - 20f, RowH);
-                using (Brush tb = new SolidBrush(PortTextColor(n, ins[k], FlowPortDir.In, k, hovered)))
-                    g.DrawString(ins[k].DisplayName, UiTheme.FontBody, tb, labelRect, sfNear);
+                // 端子在上下边缘：节点内不再排端子文字（放不下），名称由 hover tooltip 给出
             }
 
             for (int k = 0; k < outs.Count; k++)
@@ -1281,9 +1334,7 @@ namespace VisionPlatform.UI
                 bool hovered = _hoverValid && _hoverPort.Node == n
                     && _hoverPort.Dir == FlowPortDir.Out && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
-                var labelRect = new RectangleF(r.X + 10f, c.Y - RowH * 0.5f, r.Width - 20f, RowH);
-                using (Brush tb = new SolidBrush(PortTextColor(n, outs[k], FlowPortDir.Out, k, hovered)))
-                    g.DrawString(outs[k].DisplayName, UiTheme.FontBody, tb, labelRect, sfFar);
+                // 同上：输出端子的名称走 tooltip
             }
 
             // 运行状态附加信息：节点下方「xx ms」+ 失败标记（纯文本，FR-ALG-23）

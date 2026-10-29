@@ -170,6 +170,9 @@ namespace VisionPlatform.Flow
             // 这里给「要用 ROI 的节点」补一条虚拟依赖：位置修正 → 该节点。
             ApplyPositionCorrectFirst(byId, upstream, downstream);
 
+            // 脚本节点"读前面所有节点" → 它必须排在它们之后执行
+            ApplyScriptLast(byId, upstream, downstream);
+
             Dictionary<string, int> indegree = new Dictionary<string, int>(StringComparer.Ordinal);
             HashSet<string> inGraph = new HashSet<string>(StringComparer.Ordinal);
             HashSet<string> remaining = new HashSet<string>(StringComparer.Ordinal);
@@ -311,6 +314,49 @@ namespace VisionPlatform.Flow
         /// ② 已有直接连线的不重复加；③ 若本节点是位置修正的祖先（会成环）则跳过。
         /// </para>
         /// </summary>
+        /// <summary>
+        /// 脚本节点必须排在<strong>所有其它节点之后</strong>执行。
+        /// <para>
+        /// 【为什么必须补虚拟依赖】脚本的 Image 通常直接连图像源（用户只想要"一个输入"），
+        /// 按拓扑序它会**第一个**执行 —— 此时 <c>session.Outputs</c> 还是空的，
+        /// 脚本读到的上游数据全是 null（现场表现："脚本读不到上流数据"）。
+        /// 这里给每个脚本补"其它节点 → 脚本"的边，让它落到链尾。
+        /// </para>
+        /// <para>成环保护：若某节点本来是脚本的下游（脚本 → … → 它），跳过该边。</para>
+        /// </summary>
+        private static void ApplyScriptLast(
+            Dictionary<string, FlowNode> byId,
+            Dictionary<string, HashSet<string>> upstream,
+            Dictionary<string, List<string>> downstream)
+        {
+            var scripts = new List<string>();
+            foreach (KeyValuePair<string, FlowNode> kv in byId)
+            {
+                FlowNodeType t;
+                if (kv.Value.TryGetType(out t) && t == FlowNodeType.Script) scripts.Add(kv.Key);
+            }
+            if (scripts.Count == 0) return;
+
+            foreach (string sid in scripts)
+            {
+                foreach (KeyValuePair<string, FlowNode> kv in byId)
+                {
+                    string nid = kv.Key;
+                    if (string.Equals(nid, sid, StringComparison.Ordinal)) continue;
+
+                    FlowNodeType nt;
+                    if (!kv.Value.TryGetType(out nt)) continue;
+                    if (nt == FlowNodeType.Script) continue;          // 脚本之间保持用户连线的顺序
+
+                    if (upstream[sid].Contains(nid)) continue;         // 已有直接边
+                    if (ReachesDownstream(downstream, sid, nid)) continue;  // nid 是脚本下游 → 加边会成环
+
+                    upstream[sid].Add(nid);
+                    downstream[nid].Add(sid);
+                }
+            }
+        }
+
         private static void ApplyPositionCorrectFirst(
             Dictionary<string, FlowNode> byId,
             Dictionary<string, HashSet<string>> upstream,

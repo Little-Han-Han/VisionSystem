@@ -423,8 +423,9 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.Script, Title = "脚本" };
 
             t.Fields.Add(Group("脚本（C# 方法体）"));
-            t.Fields.Add(Code("Source", "代码", "", 200));
-            t.Fields.Add(Note("可直接写 C# 语句，用 return 返回结果文本。可用变量 api（ScriptApi）：\n"
+            t.Fields.Add(Code("Source", "代码", ScriptEngine.SampleScript, 320));
+            t.Fields.Add(Note("写法：三段式（取数 → 计算 → return 结果文本）。脚本节点固定排在链尾，"
+                + "所以能读到前面**所有**节点的输出。可用变量 api（ScriptApi）：\n"
                 + "  api.Nodes            本轮所有已执行节点的输出（按执行顺序）\n"
                 + "  api.Get(\"Id或名称\")  取某个节点；First(\"Ocr\") 按类型取第一个\n"
                 + "  字段：Ok / Status / Summary / TargetCount / TopScore / MaxArea / "
