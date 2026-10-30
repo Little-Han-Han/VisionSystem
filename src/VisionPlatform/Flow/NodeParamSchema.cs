@@ -423,12 +423,10 @@ namespace VisionPlatform.Flow
         {
             var t = new NodeParamTable { Type = FlowNodeType.Script, Title = "脚本" };
 
-            t.Fields.Add(Action("EditScript", "打开脚本编辑器…", ""));
-            // 方法体与输出定义由编辑器维护；这里隐藏，避免面板上两处编辑打架
-            t.Fields.Add(Code("Source", "方法体", ScriptEngine.SampleScript, 200, true));
-            t.Fields.Add(Text("OutDefs", "输出变量定义", "", "", true));
-
-            t.FooterNote = "";
+            // 只有这一个入口：代码与输出变量都在编辑器里维护。
+            // 参数表里**不放** Source / OutDefs（它们只是存储键，不在这里编辑），
+            // 也不放任何说明文字 —— 用户明确要求"高级参数全部删掉"。
+            t.Fields.Add(Action("EditScript", "编辑脚本…", ""));
             return t;
         }
 

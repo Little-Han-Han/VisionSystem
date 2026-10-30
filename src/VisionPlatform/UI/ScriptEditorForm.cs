@@ -9,11 +9,12 @@ using VisionPlatform.Flow;
 namespace VisionPlatform.UI
 {
     /// <summary>
-    /// 脚本编辑器（Notepad++ 风格的三栏布局）。
+    /// 脚本编辑器（参考 VisionMaster 脚本窗：左侧变量、右侧全高代码区、底部预编译 / 运行 / 确定）。
     /// <para>
-    /// 左上：上游节点及其输出（运行过一次就显示真实值，没跑过显示字段说明）；
-    /// 左下：脚本的输出变量（名称 + 类型），作为本节点的对外输出；
-    /// 右侧：只读的"头文件 + 函数签名"，下面是可编辑的方法体。
+    /// 【为什么不再用 SplitContainer】SplitContainer 在窗体还没尺寸时设置
+    /// <c>SplitterDistance</c> / <c>PanelMinSize</c> 会抛异常；上一版被 try/catch 吞掉后
+    /// 停在默认 50px，代码区只剩一条缝 —— 用户看到的是"只读签名 + 一条黑边"，自然说"不能编辑"。
+    /// 这里改成纯 Dock 布局，尺寸由窗体自己算，不再有这个问题。
     /// </para>
     /// </summary>
     public sealed class ScriptEditorForm : Form
@@ -26,18 +27,12 @@ namespace VisionPlatform.UI
         private TextBox txtOutName;
         private ComboBox cmbOutType;
         private Label lblStatus;
-        private SplitContainer splitMain;
-        private SplitContainer splitLeft;
-        private SplitContainer splitRight;
         private TextBox txtResult;
         private ListView lstResultVals;
 
         private static readonly string[] OutTypes = { "double", "int", "string", "bool" };
 
-        /// <summary>上游节点快照（可为空：没跑过就只有节点清单）。</summary>
         private readonly List<NodeOutput> _upstream = new List<NodeOutput>();
-
-        /// <summary>流程里排在脚本之前的节点（没有运行数据时也要能列出名字）。</summary>
         private readonly List<string> _upstreamNames = new List<string>();
 
         public ScriptEditorForm(FlowNode node, List<NodeOutput> upstream, List<string> upstreamNames)
@@ -51,7 +46,7 @@ namespace VisionPlatform.UI
 
             UiStyle.ApplyForm(this);
 
-            // 主题会把所有 TextBox 统一成 9pt 雅黑；代码区必须是等宽字体，否则缩进一塌糊涂
+            // 主题会把所有 TextBox 统一成 9pt 雅黑；代码区必须等宽，否则缩进一塌糊涂
             txtBody.Font = new Font("Consolas", 10f);
             txtBody.BackColor = UiTheme.ColorViewBg;
             txtBody.ForeColor = UiTheme.ColorTextPrimary;
@@ -60,85 +55,75 @@ namespace VisionPlatform.UI
         }
 
         // =====================================================================
-        //  界面
+        //  界面（纯 Dock，无 SplitContainer）
         // =====================================================================
 
         private void BuildUi()
         {
             Text = "脚本编辑器";
             StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(1180, 720);
-            MinimumSize = new Size(900, 560);
+            Size = new Size(1100, 700);
+            MinimumSize = new Size(860, 520);
             BackColor = UiTheme.ColorPanelBg;
             ForeColor = UiTheme.ColorTextPrimary;
             Font = UiTheme.FontBody;
 
-            splitMain = new SplitContainer();
-            splitMain.Dock = DockStyle.Fill;
-            splitMain.Orientation = Orientation.Vertical;
-            // 约束先放宽：SplitContainer 在窗体还没尺寸时会用默认 SplitterDistance 布局，
-            // 这时若 MinSize 已经很大，会直接抛 "SplitterDistance 必须..."。
-            splitMain.Panel1MinSize = 25;
-            splitMain.Panel2MinSize = 25;
-            splitMain.BackColor = UiTheme.ColorDivider;
+            // ---------- 底部按钮 ----------
+            var panelBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
 
-            // ---------------- 左侧 ----------------
-            splitLeft = new SplitContainer();
-            splitLeft.Dock = DockStyle.Fill;
-            splitLeft.Orientation = Orientation.Horizontal;
-            splitLeft.Panel1MinSize = 25;
-            splitLeft.Panel2MinSize = 25;
-            splitLeft.BackColor = UiTheme.ColorDivider;
+            lblStatus = new Label
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = UiTheme.ColorTextSecondary,
+                Padding = new Padding(8, 0, 0, 0),
+                Text = "返回 false = 本节点 NG；api.Set(\"名称\", 值) 就是本节点的输出"
+            };
 
-            // 左上：上游输出
-            var grpUp = new GroupBox();
-            grpUp.Text = "上游节点的输出（本节点之前执行的全部节点）";
-            grpUp.Dock = DockStyle.Fill;
-            grpUp.ForeColor = UiTheme.ColorTextSecondary;
-            grpUp.Padding = new Padding(8, 6, 8, 8);
+            var btnOk = new Button { Text = "确定", Dock = DockStyle.Right, Width = 92 };
+            btnOk.Click += OnSave;
 
-            treeUpstream = new TreeView();
-            treeUpstream.Dock = DockStyle.Fill;
-            treeUpstream.BorderStyle = BorderStyle.None;
-            treeUpstream.BackColor = UiTheme.ColorPanelBg;
-            treeUpstream.ForeColor = UiTheme.ColorTextPrimary;
-            treeUpstream.Font = UiTheme.FontSmall;
-            treeUpstream.HideSelection = false;
-            grpUp.Controls.Add(treeUpstream);
+            var btnCancel = new Button { Text = "取消", Dock = DockStyle.Right, Width = 92 };
+            btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
-            // 左下：输出变量
-            var grpOut = new GroupBox();
-            grpOut.Text = "本脚本的输出变量（下游节点可按名字读取）";
-            grpOut.Dock = DockStyle.Fill;
-            grpOut.ForeColor = UiTheme.ColorTextSecondary;
-            grpOut.Padding = new Padding(8, 6, 8, 8);
+            var btnRun = new Button { Text = "运行", Dock = DockStyle.Right, Width = 92 };
+            btnRun.Click += OnRunScript;
 
-            var panelAdd = new Panel();
-            panelAdd.Dock = DockStyle.Top;
-            panelAdd.Height = 32;
+            var btnCheck = new Button { Text = "预编译", Dock = DockStyle.Right, Width = 92 };
+            btnCheck.Click += OnCompileOnly;
 
-            txtOutName = new TextBox();
-            txtOutName.Width = 150;
-            txtOutName.Location = new Point(0, 4);
-            txtOutName.Text = "Score";
+            panelBottom.Controls.Add(lblStatus);
+            panelBottom.Controls.Add(btnCheck);
+            panelBottom.Controls.Add(btnRun);
+            panelBottom.Controls.Add(btnCancel);
+            panelBottom.Controls.Add(btnOk);
 
-            cmbOutType = new ComboBox();
-            cmbOutType.DropDownStyle = ComboBoxStyle.DropDownList;
+            // ---------- 左栏：输入变量（上） + 输出变量（下） ----------
+            var panelLeft = new Panel { Dock = DockStyle.Left, Width = 300, Padding = new Padding(6) };
+
+            var grpOut = new GroupBox
+            {
+                Text = "输出变量（本节点的输出）",
+                Dock = DockStyle.Bottom,
+                Height = 240,
+                ForeColor = UiTheme.ColorTextSecondary,
+                Padding = new Padding(8, 6, 8, 8)
+            };
+
+            var panelAdd = new Panel { Dock = DockStyle.Top, Height = 34 };
+            txtOutName = new TextBox { Width = 96, Location = new Point(0, 5), Text = "Score" };
+            cmbOutType = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 66,
+                Location = new Point(100, 5)
+            };
             cmbOutType.Items.AddRange(OutTypes);
             cmbOutType.SelectedIndex = 0;
-            cmbOutType.Width = 96;
-            cmbOutType.Location = new Point(158, 4);
 
-            var btnAdd = new Button();
-            btnAdd.Text = "添加";
-            btnAdd.Width = 60;
-            btnAdd.Location = new Point(262, 3);
+            var btnAdd = new Button { Text = "添加", Width = 50, Location = new Point(170, 4) };
             btnAdd.Click += OnAddOutput;
-
-            var btnDel = new Button();
-            btnDel.Text = "删除";
-            btnDel.Width = 60;
-            btnDel.Location = new Point(328, 3);
+            var btnDel = new Button { Text = "删除", Width = 50, Location = new Point(224, 4) };
             btnDel.Click += OnDeleteOutput;
 
             panelAdd.Controls.Add(txtOutName);
@@ -146,194 +131,159 @@ namespace VisionPlatform.UI
             panelAdd.Controls.Add(btnAdd);
             panelAdd.Controls.Add(btnDel);
 
-            lstOutputs = new ListView();
-            lstOutputs.Dock = DockStyle.Fill;
-            lstOutputs.View = View.Details;
-            lstOutputs.FullRowSelect = true;
-            lstOutputs.HideSelection = false;
-            lstOutputs.BorderStyle = BorderStyle.None;
-            lstOutputs.BackColor = UiTheme.ColorPanelBg;
-            lstOutputs.ForeColor = UiTheme.ColorTextPrimary;
-            lstOutputs.Font = UiTheme.FontSmall;
-            lstOutputs.Columns.Add("名称", 180);
-            lstOutputs.Columns.Add("类型", 90);
+            lstOutputs = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = UiTheme.ColorPanelBg,
+                ForeColor = UiTheme.ColorTextPrimary,
+                Font = UiTheme.FontSmall
+            };
+            lstOutputs.Columns.Add("名称", 144);
+            lstOutputs.Columns.Add("类型", 76);
 
             grpOut.Controls.Add(lstOutputs);
             grpOut.Controls.Add(panelAdd);
 
-            splitLeft.Panel1.Controls.Add(grpUp);
-            splitLeft.Panel2.Controls.Add(grpOut);
+            var grpUp = new GroupBox
+            {
+                Text = "输入变量（上游节点输出，双击插入代码）",
+                Dock = DockStyle.Fill,
+                ForeColor = UiTheme.ColorTextSecondary,
+                Padding = new Padding(8, 6, 8, 8)
+            };
 
-            // ---------------- 右侧 ----------------
-            var panelRight = new Panel();
-            panelRight.Dock = DockStyle.Fill;
+            treeUpstream = new TreeView
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = UiTheme.ColorPanelBg,
+                ForeColor = UiTheme.ColorTextPrimary,
+                Font = UiTheme.FontSmall,
+                HideSelection = false
+            };
+            treeUpstream.DoubleClick += OnUpstreamDoubleClick;
+            grpUp.Controls.Add(treeUpstream);
 
-            // 只留两行（类 + 函数签名）：占太多会把代码区挤没，用户会以为"不能写代码"
-            var lblHead = new Label();
-            lblHead.Dock = DockStyle.Top;
-            lblHead.Height = 44;
-            lblHead.AutoSize = false;
-            lblHead.Font = new Font("Consolas", 9.5f);
-            lblHead.ForeColor = UiTheme.ColorTextSecondary;
-            lblHead.BackColor = UiTheme.ColorHeaderBg;
-            lblHead.Padding = new Padding(10, 4, 10, 2);
-            lblHead.Text =
-                "public class ScriptNode\r\n" +
-                "    public bool Run(ScriptApi api)   // 在下面的大括号里写代码\r\n" +
-                "    {";
+            panelLeft.Controls.Add(grpUp);
+            panelLeft.Controls.Add(grpOut);
 
-            // 「结果」区：运行后在编辑器里直接看输出（不用切回流程页）
-            var panelResult = new Panel();
-            panelResult.Dock = DockStyle.Fill;
-            panelResult.BackColor = UiTheme.ColorPanelBg;
+            // ---------- 右栏：签名(Top) / 结果(Bottom) / 代码(Fill) ----------
+            var panelRight = new Panel { Dock = DockStyle.Fill };
 
-            var lblResult = new Label();
-            lblResult.Dock = DockStyle.Top;
-            lblResult.Height = 24;
-            lblResult.Text = "运行结果";
-            lblResult.ForeColor = UiTheme.ColorTextSecondary;
-            lblResult.BackColor = UiTheme.ColorHeaderBg;
-            lblResult.Padding = new Padding(8, 4, 8, 0);
+            var panelResult = new Panel { Dock = DockStyle.Bottom, Height = 180 };
 
-            lstResultVals = new ListView();
-            lstResultVals.Dock = DockStyle.Bottom;
-            lstResultVals.Height = 120;
-            lstResultVals.View = View.Details;
-            lstResultVals.FullRowSelect = true;
-            lstResultVals.BorderStyle = BorderStyle.None;
-            lstResultVals.BackColor = UiTheme.ColorPanelBg;
-            lstResultVals.ForeColor = UiTheme.ColorTextPrimary;
-            lstResultVals.Font = UiTheme.FontSmall;
-            lstResultVals.Columns.Add("输出名", 150);
+            var lblResultTitle = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 22,
+                Text = "运行结果",
+                ForeColor = UiTheme.ColorTextSecondary,
+                BackColor = UiTheme.ColorHeaderBg,
+                Padding = new Padding(8, 3, 8, 0)
+            };
+
+            lstResultVals = new ListView
+            {
+                Dock = DockStyle.Bottom,
+                Height = 70,
+                View = View.Details,
+                FullRowSelect = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = UiTheme.ColorPanelBg,
+                ForeColor = UiTheme.ColorTextPrimary,
+                Font = UiTheme.FontSmall
+            };
+            lstResultVals.Columns.Add("输出名", 140);
             lstResultVals.Columns.Add("值", 260);
 
-            txtResult = new TextBox();
-            txtResult.Dock = DockStyle.Fill;
-            txtResult.Multiline = true;
-            txtResult.ReadOnly = true;
-            txtResult.ScrollBars = ScrollBars.Vertical;
-            txtResult.BorderStyle = BorderStyle.None;
-            txtResult.Font = new Font("Consolas", 9.5f);
-            txtResult.BackColor = UiTheme.ColorViewBg;
-            txtResult.ForeColor = UiTheme.ColorTextPrimary;
+            txtResult = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 9.5f),
+                BackColor = UiTheme.ColorViewBg,
+                ForeColor = UiTheme.ColorTextPrimary
+            };
 
             panelResult.Controls.Add(txtResult);
             panelResult.Controls.Add(lstResultVals);
-            panelResult.Controls.Add(lblResult);
+            panelResult.Controls.Add(lblResultTitle);
 
-            splitRight = new SplitContainer();
-            splitRight.Dock = DockStyle.Fill;
-            splitRight.Orientation = Orientation.Horizontal;
-            splitRight.Panel1MinSize = 25;
-            splitRight.Panel2MinSize = 25;
-            splitRight.BackColor = UiTheme.ColorDivider;
-            var lblTail = new Label();
-            lblTail.Dock = DockStyle.Bottom;
-            lblTail.Height = 18;
-            lblTail.AutoSize = false;
-            lblTail.Font = new Font("Consolas", 9.5f);
-            lblTail.ForeColor = UiTheme.ColorTextSecondary;
-            lblTail.BackColor = UiTheme.ColorHeaderBg;
-            lblTail.Padding = new Padding(10, 0, 10, 0);
-            lblTail.Text = "    }";
+            var lblHead = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 40,
+                AutoSize = false,
+                Font = new Font("Consolas", 9.5f),
+                ForeColor = UiTheme.ColorTextSecondary,
+                BackColor = UiTheme.ColorHeaderBg,
+                Padding = new Padding(10, 3, 10, 2),
+                Text = "public class ScriptNode\r\n    public bool Run(ScriptApi api)   // 下面的大括号里写代码\r\n    {"
+            };
 
-            splitRight.Panel1.Controls.Add(txtBody);
-            splitRight.Panel1.Controls.Add(lblTail);
-            splitRight.Panel1.Controls.Add(lblHead);
-            splitRight.Panel2.Controls.Add(panelResult);
+            txtBody = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                WordWrap = false,
+                AcceptsReturn = true,
+                AcceptsTab = true,
+                ScrollBars = ScrollBars.Both,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 10f),
+                BackColor = UiTheme.ColorViewBg,
+                ForeColor = UiTheme.ColorTextPrimary,
+                ReadOnly = false,
+                Enabled = true
+            };
 
-            txtBody = new TextBox();
-            txtBody.Dock = DockStyle.Fill;
-            txtBody.Multiline = true;
-            txtBody.AcceptsReturn = true;
-            txtBody.AcceptsTab = true;
-            txtBody.ScrollBars = ScrollBars.Both;
-            txtBody.WordWrap = false;
-            txtBody.Font = new Font("Consolas", 10f);
-            txtBody.BackColor = UiTheme.ColorViewBg;
-            txtBody.ForeColor = UiTheme.ColorTextPrimary;
-            txtBody.BorderStyle = BorderStyle.None;
+            var lblTail = new Label
+            {
+                Dock = DockStyle.Bottom,
+                Height = 20,
+                AutoSize = false,
+                Font = new Font("Consolas", 9.5f),
+                ForeColor = UiTheme.ColorTextSecondary,
+                BackColor = UiTheme.ColorHeaderBg,
+                Padding = new Padding(10, 0, 10, 0),
+                Text = "    }"
+            };
 
-            panelRight.Controls.Add(splitRight);
+            // Dock 处理顺序 = 集合倒序：先加的 Fill 最后停靠，正好吃满剩余空间
+            panelRight.Controls.Add(txtBody);
+            panelRight.Controls.Add(lblTail);
+            panelRight.Controls.Add(lblHead);
+            panelRight.Controls.Add(panelResult);
 
-            splitMain.Panel1.Controls.Add(splitLeft);
-            splitMain.Panel2.Controls.Add(panelRight);
-
-            // ---------------- 底部按钮 ----------------
-            var panelBottom = new Panel();
-            panelBottom.Dock = DockStyle.Bottom;
-            panelBottom.Height = 44;
-
-            lblStatus = new Label();
-            lblStatus.Dock = DockStyle.Fill;
-            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblStatus.ForeColor = UiTheme.ColorTextSecondary;
-            lblStatus.Padding = new Padding(8, 0, 0, 0);
-            lblStatus.Text = "api.Nodes / api.Get(名称) / api.First(类型) · 输出用 api.Set(\"名字\", 值) · 返回 false 表示 NG";
-
-            var btnRun = new Button();
-            btnRun.Text = "运行";
-            btnRun.Dock = DockStyle.Right;
-            btnRun.Width = 96;
-            btnRun.Click += OnRunScript;
-
-            var btnOk = new Button();
-            btnOk.Text = "保存";
-            btnOk.Dock = DockStyle.Right;
-            btnOk.Width = 96;
-            btnOk.Click += OnSave;
-
-            var btnCancel = new Button();
-            btnCancel.Text = "取消";
-            btnCancel.Dock = DockStyle.Right;
-            btnCancel.Width = 96;
-            btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-
-            panelBottom.Controls.Add(lblStatus);
-            panelBottom.Controls.Add(btnRun);
-            panelBottom.Controls.Add(btnOk);
-            panelBottom.Controls.Add(btnCancel);
-
-            Controls.Add(splitMain);
+            Controls.Add(panelRight);
+            Controls.Add(panelLeft);
             Controls.Add(panelBottom);
+        }
+
+        /// <summary>双击左侧的输入变量 → 把取值语句插入代码区（少打字、少打错）。</summary>
+        private void OnUpstreamDoubleClick(object sender, EventArgs e)
+        {
+            TreeNode n = treeUpstream.SelectedNode;
+            if (n == null || n.Tag == null) return;
+
+            string snippet = n.Tag as string;
+            if (string.IsNullOrEmpty(snippet)) return;
+
+            int pos = txtBody.SelectionStart;
+            txtBody.Text = txtBody.Text.Insert(pos, snippet);
+            txtBody.SelectionStart = pos + snippet.Length;
+            txtBody.Focus();
         }
 
         // =====================================================================
         //  数据
         // =====================================================================
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-
-            // 打开就把光标放进代码区，用户不用先猜"哪里能写"
-            try { txtBody.Focus(); txtBody.SelectionStart = txtBody.TextLength; } catch (Exception) { }
-
-            // 尺寸确定后再定分割位置与最小宽高（构造期设会越界抛异常）
-            try
-            {
-                splitMain.Panel1MinSize = 220;
-                splitMain.Panel2MinSize = 320;
-                splitMain.SplitterDistance = 380;
-            }
-            catch (Exception) { }
-
-            try
-            {
-                splitLeft.Panel1MinSize = 120;
-                splitLeft.Panel2MinSize = 120;
-                splitLeft.SplitterDistance = Math.Max(180, splitLeft.Height / 2);
-            }
-            catch (Exception) { }
-
-            try
-            {
-                splitRight.Panel1MinSize = 160;
-                splitRight.Panel2MinSize = 120;
-                splitRight.SplitterDistance = Math.Max(200, (int)(splitRight.Height * 0.62));
-            }
-            catch (Exception) { }
-        }
 
         private void LoadFromNode()
         {
@@ -358,15 +308,13 @@ namespace VisionPlatform.UI
 
             if (_upstream.Count == 0)
             {
-                // 还没运行过：列出"本节点之前有哪些节点"，最后补一句提示
                 foreach (string name in _upstreamNames)
                     treeUpstream.Nodes.Add(new TreeNode(name) { ForeColor = UiTheme.ColorTextSecondary });
 
-                var hint = new TreeNode("运行一次流程后，这里会显示每个节点的实际输出值")
+                treeUpstream.Nodes.Add(new TreeNode("运行一次流程后，这里会显示每个节点的实际输出值")
                 {
                     ForeColor = UiTheme.ColorTextSecondary
-                };
-                treeUpstream.Nodes.Add(hint);
+                });
 
                 treeUpstream.EndUpdate();
                 return;
@@ -374,19 +322,25 @@ namespace VisionPlatform.UI
 
             foreach (NodeOutput o in _upstream)
             {
-                var root = new TreeNode(o.Name + "  [" + o.Type + "]  " + o.Status);
+                var root = new TreeNode(o.Name + "  [" + o.Type + "]");
 
-                // 按"类型 + 键名 + 格式化值"展示：角度带 °、坐标带括号、判定 OK/NG
                 foreach (PortValue v in o.Values)
                 {
                     if (v == null) continue;
-                    root.Nodes.Add(string.Format(CultureInfo.InvariantCulture,
-                        "{0}（{1}） = {2}　→ api.{3}(\"{4}\", \"{5}\")",
-                        v.DisplayName, v.KindName, v.Format(),
-                        v.Kind == FlowPortKind.Bool ? "Flag" : "Num", o.Name, v.Key));
-                }
 
-                if (!string.IsNullOrEmpty(o.Summary)) root.Nodes.Add("摘要 = " + o.Summary);
+                    string code;
+                    if (v.Kind == FlowPortKind.Bool)
+                        code = "api.Flag(\"" + o.Name + "\", \"" + v.Key + "\", false)";
+                    else if (v.Kind == FlowPortKind.Point)
+                        code = "api.X(\"" + o.Name + "\", \"" + v.Key + "\", 0)";
+                    else if (v.Kind == FlowPortKind.Text)
+                        code = "api.Get(\"" + o.Name + "\", \"" + v.Key + "\").Format()";
+                    else
+                        code = "api.Num(\"" + o.Name + "\", \"" + v.Key + "\", 0)";
+
+                    root.Nodes.Add(new TreeNode(string.Format(CultureInfo.InvariantCulture,
+                        "{0}（{1}）= {2}", v.DisplayName, v.KindName, v.Format())) { Tag = code });
+                }
 
                 treeUpstream.Nodes.Add(root);
             }
@@ -456,18 +410,38 @@ namespace VisionPlatform.UI
             lstOutputs.Items.Remove(lstOutputs.SelectedItems[0]);
         }
 
-        /// <summary>
-        /// 在编辑器里直接跑当前脚本：用"最近一次运行的上游输出"构造 api，
-        /// 结果写进下方结果区（文本 + 命名输出表），不用切回流程页。
-        /// </summary>
+        // =====================================================================
+        //  编译 / 运行
+        // =====================================================================
+
+        private ScriptApi CreateApi()
+        {
+            return new ScriptApi(new List<NodeOutput>(_upstream),
+                                 new Dictionary<string, object>(StringComparer.Ordinal), 0, 0);
+        }
+
+        private void OnCompileOnly(object sender, EventArgs e)
+        {
+            string error;
+            ScriptEngine.Run(txtBody.Text ?? "", CreateApi(), out error);
+
+            if (string.IsNullOrEmpty(error))
+            {
+                txtResult.ForeColor = UiTheme.ColorOk;
+                txtResult.Text = "编译通过。";
+            }
+            else
+            {
+                txtResult.ForeColor = UiTheme.ColorNg;
+                txtResult.Text = "编译失败：\r\n" + error;
+            }
+        }
+
         private void OnRunScript(object sender, EventArgs e)
         {
             lstResultVals.Items.Clear();
-            txtResult.Text = "";
 
-            var api = new ScriptApi(new List<NodeOutput>(_upstream), new Dictionary<string, object>(StringComparer.Ordinal),
-                                    0, 0);
-
+            var api = CreateApi();
             string error;
             bool ok = ScriptEngine.Run(txtBody.Text ?? "", api, out error);
 
@@ -484,8 +458,6 @@ namespace VisionPlatform.UI
             if (Math.Abs(api.Number) > 1e-12)
                 sb.AppendLine("数值：" + api.Number.ToString("0.####", CultureInfo.InvariantCulture));
             sb.AppendLine("上游节点：" + api.Nodes.Count + " 个");
-            sb.AppendLine();
-            sb.AppendLine("提示：这里用的是最近一次运行的上游数据；真要刷新数据请先回流程页运行一次。");
 
             txtResult.Text = sb.ToString();
             txtResult.ForeColor = UiTheme.ColorTextPrimary;
@@ -516,6 +488,20 @@ namespace VisionPlatform.UI
 
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            // 打开就把光标放进代码区，用户不用先猜"哪里能写"
+            try
+            {
+                txtBody.Focus();
+                txtBody.SelectionStart = txtBody.TextLength;
+                txtBody.ScrollToCaret();
+            }
+            catch (Exception) { }
         }
     }
 }
