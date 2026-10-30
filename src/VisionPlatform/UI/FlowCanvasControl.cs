@@ -748,23 +748,6 @@ namespace VisionPlatform.UI
             };
         }
 
-        /// <summary>
-        /// 执行流线（纵向为主）：上一个节点底部 → 竖直 → 水平 → 竖直进下一个节点顶部。
-        /// </summary>
-        private static PointF[] OrthoPolyline(PointF a, PointF b)
-        {
-            float midY = (a.Y + b.Y) * 0.5f;
-            if (midY < a.Y + 12f) midY = a.Y + 12f;          // 太近时也给一段竖直，避免退化
-
-            return new[]
-            {
-                a,
-                new PointF(a.X, midY),
-                new PointF(b.X, midY),
-                b
-            };
-        }
-
         private static PointF[] BezierPolyline(PointF a, PointF b)
         {
             PointF c1, c2;
@@ -1242,9 +1225,6 @@ namespace VisionPlatform.UI
 
             if (_flow == null) { g.ResetTransform(); return; }
 
-            // 执行流（粗灰线，只表示先后），压在数据线下面
-            DrawExecutionFlow(g);
-
             // 数据连线（彩色正交折线，压在节点下面）
             for (int i = 0; i < _flow.Links.Count; i++)
                 DrawLink(g, _flow.Links[i], i == _selectedLinkIndex);
@@ -1345,59 +1325,6 @@ namespace VisionPlatform.UI
             if (idx >= 0 && idx < outs.Count && outs[idx] != null) return KindColor(outs[idx].Kind);
 
             return UiTheme.ColorAccent;
-        }
-
-        /// <summary>
-        /// 执行流：按<strong>拓扑序</strong>把相邻节点用一根粗灰线连起来（只表示"先后顺序"，
-        /// 不传数据）。数据依赖另有彩色正交折线，二者一眼能分开 —— 与 VisionPro 一致。
-        /// </summary>
-        private void DrawExecutionFlow(Graphics g)
-        {
-            if (_flow == null) return;
-
-            List<FlowNode> order;
-            string err;
-            if (!FlowOrder.Build(_flow, out order, out err) || order == null || order.Count < 2) return;
-
-            // 虚线 + 低对比度：它是"顺序提示"，不该跟数据线抢注意力；
-            // 也走正交折线，否则跨列时会斜穿整块画面。
-            using (var pen = new Pen(WithAlpha(UiTheme.ColorTextSecondary, 70), 2f))
-            using (var brush = new SolidBrush(WithAlpha(UiTheme.ColorTextSecondary, 80)))
-            {
-                pen.DashStyle = DashStyle.Dash;
-
-                for (int i = 0; i < order.Count - 1; i++)
-                {
-                    FlowNode a = order[i];
-                    FlowNode b = order[i + 1];
-                    if (a == null || b == null) continue;
-
-                    var pa = new PointF(a.X + NodeW / 2f, a.Y + NodeHeight(a));
-                    var pb = new PointF(b.X + NodeW / 2f, b.Y);
-
-                    // 已有数据线的一对节点：顺序线整体右移几像素，避免与数据线完全重合
-                    float off = HasDirectLink(a, b) ? 7f : 0f;
-                    pa.X += off;
-                    pb.X += off;
-
-                    PointF[] pts = OrthoPolyline(pa, pb);
-                    g.DrawLines(pen, pts);
-
-                    DrawArrow(g, new PointF(pb.X, pb.Y - 10f), pb, WithAlpha(UiTheme.ColorTextSecondary, 80), 7f);
-                }
-            }
-        }
-
-        private bool HasDirectLink(FlowNode a, FlowNode b)
-        {
-            if (_flow == null || _flow.Links == null) return false;
-            foreach (FlowLink l in _flow.Links)
-            {
-                if (l == null) continue;
-                if (string.Equals(l.FromNodeId, a.Id, StringComparison.Ordinal)
-                    && string.Equals(l.ToNodeId, b.Id, StringComparison.Ordinal)) return true;
-            }
-            return false;
         }
 
         private void DrawNode(Graphics g, FlowNode n, bool selected)
