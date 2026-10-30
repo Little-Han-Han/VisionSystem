@@ -575,6 +575,8 @@ namespace VisionPlatform.UI
 
         private System.Windows.Forms.SplitContainer splitMain;
         private FlowCanvasControl canvas;
+        private FlowTreeView _treeView;
+        private System.Windows.Forms.Panel _treeBar;
         private FlowPreviewPanel flowPreview;
     }
 }

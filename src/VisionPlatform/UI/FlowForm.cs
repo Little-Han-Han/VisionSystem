@@ -94,11 +94,13 @@ namespace VisionPlatform.UI
             CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
 
             canvas.NodeSelected += OnCanvasNodeSelected;
+            InitTreeView();
             canvas.NodeAdded += OnCanvasChanged;
             canvas.NodeMoved += OnCanvasChanged;
             canvas.LinkAdded += OnCanvasLinkChanged;
             canvas.LinkRemoved += OnCanvasLinkChanged;
             canvas.Changed += OnCanvasEdited;
+            canvas.Changed += delegate { if (_treeView != null) _treeView.Rebuild(); };
             // 连线被拒 / 端子重连：画布只弹 2.8 秒 toast，会漏看，故同时进日志与状态条
             canvas.LinkRejected += OnLinkRejected;
             canvas.LinkReplaced += OnLinkReplaced;
@@ -643,6 +645,7 @@ namespace VisionPlatform.UI
         {
             FlowDefinition f = CurrentFlow;
             canvas.Flow = f;
+            if (_treeView != null) _treeView.Flow = f;
 
             _loading = true;
             try
@@ -807,6 +810,47 @@ namespace VisionPlatform.UI
         #endregion
 
         #region 画布与参数事件
+
+        /// <summary>
+        /// 初始化 QuickBuild 风格的<strong>作业树</strong>视图（默认显示）。
+        /// 与画布共用同一份 FlowDefinition 与选中事件，只是呈现方式不同：
+        /// 树视图读"顺序 + 每步输出"，画布用于自由摆放与拖线。
+        /// </summary>
+        private void InitTreeView()
+        {
+            _treeView = new FlowTreeView { Dock = DockStyle.Fill, Visible = true };
+            _treeView.StatusProvider = delegate(string id) { return canvas != null ? canvas.GetNodeStatus(id) : null; };
+            _treeView.NodeSelected += OnCanvasNodeSelected;
+
+            _treeBar = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = UiTheme.ColorPanelBg };
+
+            var btnTree = new Button { Text = "作业树", Left = 6, Top = 3, Width = 76, Height = 24 };
+            btnTree.Click += delegate { ShowTree(true); };
+
+            var btnCanvas = new Button { Text = "画布", Left = 86, Top = 3, Width = 76, Height = 24 };
+            btnCanvas.Click += delegate { ShowTree(false); };
+
+            _treeBar.Controls.Add(btnTree);
+            _treeBar.Controls.Add(btnCanvas);
+
+            // 后加的 Dock.Fill 控件在上层；用 Visible 切换两个视图
+            splitMain.Panel1.Controls.Add(_treeView);
+            splitMain.Panel1.Controls.Add(_treeBar);
+
+            canvas.Visible = false;
+        }
+
+        /// <summary>切换「作业树 / 画布」。</summary>
+        private void ShowTree(bool tree)
+        {
+            if (_treeView == null || canvas == null) return;
+
+            _treeView.Visible = tree;
+            canvas.Visible = !tree;
+            canvas.RefreshView();
+
+            if (tree) _treeView.Rebuild();
+        }
 
         private void OnCanvasNodeSelected(object sender, FlowNodeEventArgs e)
         {
@@ -2427,6 +2471,8 @@ namespace VisionPlatform.UI
                     //（用户视角就是"位置修正时好时坏、坐标有时不变"）。
                     // 节点级快照也会带这个标志（单步执行没有链尾快照），所以按"值"去重：
                     // 连续运行时同一节点每帧都会报，不去重会每帧写一次配置。
+                    if (_treeView != null && _treeView.Visible) _treeView.Invalidate();
+
                     if (snap.BaselineTaught)
                     {
                         FlowNode taught = FindNodeById(snap.BaselineNodeId);
