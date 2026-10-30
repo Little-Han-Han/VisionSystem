@@ -25,8 +25,8 @@ namespace VisionPlatform.UI
     public sealed class FlowCanvasControl : Control
     {
         // 画布几何常量（屏幕像素）
-        private const int NodeW = 260;           // 节点宽度（上下边缘要排 3~4 个中文端子名）
-        private const int TitleH = 28;           // 节点标题行高度
+        private const int NodeW = 150;           // 节点宽度
+        private const int TitleH = 26;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
         private const int SummaryH = SummaryRowH * 2 + 2;   // 卡片底部结果区总高（常驻，未运行也占位）
@@ -44,7 +44,7 @@ namespace VisionPlatform.UI
         public const float MinViewZoom = 0.25f;
         /// <summary>最大缩放倍率。</summary>
         public const float MaxViewZoom = 3.0f;
-        private const int NominalNodeH = TitleH + SummaryH + NodePadBottom + 6;   // 节点标准高度（拖入落点居中用）
+        private const int NominalNodeH = TitleH + RowH + SummaryH + NodePadBottom;   // 1 行端子的实际高度（拖入落点居中用）
         private const float PortGlyph = 9f;      // 端子方形符号边长
         private const float PortHitRadius = 10f; // 端子命中半径（端子命中优先于节点本体）
         private const int HitTol = 6;            // 连线命中容差
@@ -534,16 +534,13 @@ namespace VisionPlatform.UI
             return Math.Max(NodeInputs(n).Count, NodeOutputs(n).Count);
         }
 
-        /// <summary>每个端子占的行高（左右两列逐行排列，VisionPro 作业树式）。</summary>
-        private const int PortLabelH = 18;
+        /// <summary>端子行高（一个端子一行）。</summary>
+        private const int PortLabelH = RowH;
 
         private static float NodeHeight(FlowNode n)
         {
-            // 左列输入、右列输出逐行排列：行数取两者较大值
-            int rows = Math.Max(PortCount(n, FlowPortDir.In), PortCount(n, FlowPortDir.Out));
-            if (rows < 1) rows = 1;
-
-            return TitleH + rows * PortLabelH + SummaryH + NodePadBottom;
+            // 回到最初的公式：标题 + 端子行（左右合计行数）+ 结果区
+            return TitleH + PortRowCount(n) * RowH + SummaryH + NodePadBottom;
         }
 
         /// <summary>
@@ -553,9 +550,8 @@ namespace VisionPlatform.UI
         {
             // VisionPro 作业树式：输入端子沿【左边缘】、输出端子沿【右边缘】，一个端子一行。
             // 名字画在同一行的内侧，方块与名字严格对齐 —— 不会再出现"名字在上面、方块在别处"。
-            float y = n.Y + TitleH + index * PortLabelH + PortLabelH * 0.5f;
-            float x = dir == FlowPortDir.In ? n.X : n.X + NodeW;
-            return new PointF(x, y);
+            float y = n.Y + TitleH + index * RowH + RowH * 0.5f;
+            return new PointF(dir == FlowPortDir.In ? n.X : n.X + NodeW, y);
         }
 
         /// <summary>某方向的端子数量（用于沿边均分）。</summary>
@@ -1347,23 +1343,6 @@ namespace VisionPlatform.UI
                 g.DrawPath(pen, path);
             }
 
-            // 卡片式标题栏：把圆角矩形顶部裁出来铺一层稍亮的底色，
-            // 卡片与"背景里的线"立刻分开（VisionPro 的作业列表也是这种条状标题）
-            using (GraphicsPath clip = RoundedRect(r, 8f))
-            {
-                GraphicsState st = g.Save();
-                g.SetClip(clip);
-                using (Brush header = new SolidBrush(UiTheme.ColorHeaderBg))
-                    g.FillRectangle(header, r.X, r.Y, r.Width, TitleH);
-                g.Restore(st);
-            }
-
-            // 标题左侧的类型色条：一眼分清"采集 / 定位 / 测量 / 输出"
-            using (Brush stripe = new SolidBrush(TypeStripeColor(n)))
-            {
-                g.FillRectangle(stripe, r.X + 3f, r.Y + 5f, 4f, TitleH - 10f);
-            }
-
             // 标题行（节点名）
             string title = string.IsNullOrEmpty(n.Name) ? n.Type : n.Name;
             var titleRect = new RectangleF(r.X, r.Y, r.Width, TitleH);
@@ -1387,9 +1366,9 @@ namespace VisionPlatform.UI
                 DrawPortGlyph(g, c, PortColor(n, ins[k], FlowPortDir.In, k, hovered));
 
                 // 端子名画在标题下方一行，以端口 x 为中心（用户要求"名称不要是空的"）
-                DrawPortLabel(g, ins[k].DisplayName, r.X + 12f, c.Y - PortLabelH * 0.5f,
+                DrawPortLabel(g, ins[k].DisplayName, r.X + 10f, c.Y - RowH * 0.5f,
                               r, hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
-                              NodeW * 0.5f - 16f, StringAlignment.Near);
+                              r.Width - 20f, StringAlignment.Near);
             }
 
             for (int k = 0; k < outs.Count; k++)
@@ -1400,9 +1379,9 @@ namespace VisionPlatform.UI
                     && _hoverPort.Dir == FlowPortDir.Out && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
 
-                DrawPortLabel(g, outs[k].DisplayName, r.Right - 12f, c.Y - PortLabelH * 0.5f,
+                DrawPortLabel(g, outs[k].DisplayName, r.Right - 10f, c.Y - RowH * 0.5f,
                               r, hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
-                              NodeW * 0.5f - 16f, StringAlignment.Far);
+                              r.Width - 20f, StringAlignment.Far);
             }
 
             // 运行状态附加信息：节点下方「xx ms」+ 失败标记（纯文本，FR-ALG-23）
