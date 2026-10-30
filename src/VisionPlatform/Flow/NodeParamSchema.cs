@@ -263,12 +263,13 @@ namespace VisionPlatform.Flow
         /// （文件用 <c>OpenFileDialog</c> 且过滤器写死图片格式，目录场景会被误导）。
         /// </summary>
         /// <summary>多行代码框（等宽字体）。</summary>
-        private static NodeParamField Code(string key, string label, string def, int height = 160)
+        private static NodeParamField Code(string key, string label, string def, int height = 160,
+                                           bool advanced = false)
         {
             return new NodeParamField
             {
                 Key = key, Label = label, Kind = NodeParamKind.Code, Default = def, Height = height,
-                Hint = ""
+                Hint = "", Advanced = advanced
             };
         }
 
@@ -422,22 +423,12 @@ namespace VisionPlatform.Flow
         {
             var t = new NodeParamTable { Type = FlowNodeType.Script, Title = "脚本" };
 
-            t.Fields.Add(Group("脚本（C# 方法体）"));
-            t.Fields.Add(Action("EditScript", "打开脚本编辑器…",
-                "三栏编辑器：左上=上游节点输出，左下=本脚本的输出变量，右侧=方法体"));
-            t.Fields.Add(Code("Source", "方法体（bool Run(ScriptApi api)）", ScriptEngine.SampleScript, 300));
-            t.Fields.Add(Text("OutDefs", "输出变量定义", "", "内部维护：由编辑器写入，格式 名称:类型;…", true));
-            t.Fields.Add(Note("写法：三段式（取数 → 计算 → return 结果文本）。脚本节点固定排在链尾，"
-                + "所以能读到前面**所有**节点的输出。可用变量 api（ScriptApi）：\n"
-                + "  api.Nodes            本轮所有已执行节点的输出（按执行顺序）\n"
-                + "  api.Get(\"Id或名称\")  取某个节点；First(\"Ocr\") 按类型取第一个\n"
-                + "  字段：Ok / Status / Summary / TargetCount / TopScore / MaxArea / "
-                + "MaxCircularity / Text / Cx / Cy / Angle / Scale / ShapeCount / ElapsedMs\n"
-                + "  api.ImageWidth / api.ImageHeight  当前帧尺寸\n"
-                + "  写回：api.Text（结果文本）、api.Number（数值）、api.Ok=false（判不通过）"));
+            t.Fields.Add(Action("EditScript", "打开脚本编辑器…", ""));
+            // 方法体与输出定义由编辑器维护；这里隐藏，避免面板上两处编辑打架
+            t.Fields.Add(Code("Source", "方法体", ScriptEngine.SampleScript, 200, true));
+            t.Fields.Add(Text("OutDefs", "输出变量定义", "", "", true));
 
-            t.FooterNote = "脚本以当前用户权限在进程内执行（不是沙箱），只放自己写的代码；"
-                         + "首次运行会编译（几十~几百毫秒），之后按内容缓存。";
+            t.FooterNote = "";
             return t;
         }
 

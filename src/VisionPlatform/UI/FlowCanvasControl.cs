@@ -679,7 +679,7 @@ namespace VisionPlatform.UI
 
                 PointF a, b;
                 if (!LinkEndPoints(l, out a, out b)) continue;
-                if (DistanceToPolyline(pt, BezierPolyline(a, b)) <= HitTol) return i;
+                if (DistanceToPolyline(pt, OrthoPolyline(a, b)) <= HitTol) return i;
             }
             return -1;
         }
@@ -730,6 +730,24 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>把贝塞尔曲线采样成折线（连线命中测试用）。</summary>
+        /// <summary>
+        /// VisionPro 风格的正交折线：源端子 → 竖直下探 → 水平 → 竖直进目标端子。
+        /// 命中测试与绘制共用同一组点，保证"点哪选哪"。
+        /// </summary>
+        private static PointF[] OrthoPolyline(PointF a, PointF b)
+        {
+            float midY = (a.Y + b.Y) * 0.5f;
+            if (midY < a.Y + 12f) midY = a.Y + 12f;          // 太近时也给一段竖直，避免退化
+
+            return new[]
+            {
+                a,
+                new PointF(a.X, midY),
+                new PointF(b.X, midY),
+                b
+            };
+        }
+
         private static PointF[] BezierPolyline(PointF a, PointF b)
         {
             PointF c1, c2;
@@ -1207,7 +1225,10 @@ namespace VisionPlatform.UI
 
             if (_flow == null) { g.ResetTransform(); return; }
 
-            // 连线（先画，压在节点下面）
+            // 执行流（粗灰线，只表示先后），压在数据线下面
+            DrawExecutionFlow(g);
+
+            // 数据连线（彩色正交折线，压在节点下面）
             for (int i = 0; i < _flow.Links.Count; i++)
                 DrawLink(g, _flow.Links[i], i == _selectedLinkIndex);
 
@@ -1262,27 +1283,98 @@ namespace VisionPlatform.UI
             PointF a, b;
             if (!LinkEndPoints(link, out a, out b)) return;
 
-            Color color = selected ? UiTheme.ColorWarn : WithAlpha(UiTheme.ColorAccent, 215);
+            // 线色跟着"源端子的数据类型"走（图像=青、位姿=紫、数值=绿…），
+            // 这样不用悬停也能看出这根线传的是图还是数。
+            Color color = selected ? UiTheme.ColorWarn : LinkKindColor(link);
+            PointF[] pts = OrthoPolyline(a, b);
 
-            // 直线连线（用户要求：不要曲线，直接用直线）—— 上下布局下直线最清楚
-            using (Pen pen = new Pen(color, selected ? 2.6f : 2f))
+            using (Pen pen = new Pen(color, selected ? 2.8f : 2f))
             {
-                g.DrawLine(pen, a, b);
+                pen.LineJoin = LineJoin.Round;
+                g.DrawLines(pen, pts);
             }
 
-            // 箭头画在目标端子处，方向沿 a → b
-            float dx = b.X - a.X, dy = b.Y - a.Y;
-            float len = (float)Math.Sqrt(dx * dx + dy * dy);
-            if (len > 1e-3f)
+            // 箭头：折线最后一段是竖直向下，箭头朝下
+            using (Brush brush = new SolidBrush(color))
             {
-                float ux = dx / len, uy = dy / len;
-                var p1 = new PointF(b.X - ux * ArrowSize - uy * ArrowSize * 0.5f,
-                                    b.Y - uy * ArrowSize + ux * ArrowSize * 0.5f);
-                var p2 = new PointF(b.X - ux * ArrowSize + uy * ArrowSize * 0.5f,
-                                    b.Y - uy * ArrowSize - ux * ArrowSize * 0.5f);
-                using (Brush brush = new SolidBrush(color))
-                    g.FillPolygon(brush, new[] { b, p1, p2 });
+                float s = ArrowSize;
+                var p1 = new PointF(b.X - s * 0.55f, b.Y - s);
+                var p2 = new PointF(b.X + s * 0.55f, b.Y - s);
+                g.FillPolygon(brush, new[] { b, p1, p2 });
             }
+        }
+
+        /// <summary>连线颜色 = 源端子的数据类型色（找不到时用强调色）。</summary>
+        private Color LinkKindColor(FlowLink link)
+        {
+            if (_flow == null || link == null) return UiTheme.ColorAccent;
+
+            FlowNode from = _flow.FindNode(link.FromNodeId);
+            if (from == null) return UiTheme.ColorAccent;
+
+            int idx = PortIndexOf(from, FlowPortDir.Out, link.FromPort ?? "");
+            List<FlowPortDef> outs = NodeOutputs(from);
+            if (idx >= 0 && idx < outs.Count && outs[idx] != null) return KindColor(outs[idx].Kind);
+
+            return UiTheme.ColorAccent;
+        }
+
+        /// <summary>
+        /// 执行流：按<strong>拓扑序</strong>把相邻节点用一根粗灰线连起来（只表示"先后顺序"，
+        /// 不传数据）。数据依赖另有彩色正交折线，二者一眼能分开 —— 与 VisionPro 一致。
+        /// </summary>
+        private void DrawExecutionFlow(Graphics g)
+        {
+            if (_flow == null) return;
+
+            List<FlowNode> order;
+            string err;
+            if (!FlowOrder.Build(_flow, out order, out err) || order == null || order.Count < 2) return;
+
+            // 虚线 + 低对比度：它是"顺序提示"，不该跟数据线抢注意力；
+            // 也走正交折线，否则跨列时会斜穿整块画面。
+            using (var pen = new Pen(WithAlpha(UiTheme.ColorTextSecondary, 70), 2f))
+            using (var brush = new SolidBrush(WithAlpha(UiTheme.ColorTextSecondary, 80)))
+            {
+                pen.DashStyle = DashStyle.Dash;
+
+                for (int i = 0; i < order.Count - 1; i++)
+                {
+                    FlowNode a = order[i];
+                    FlowNode b = order[i + 1];
+                    if (a == null || b == null) continue;
+
+                    var pa = new PointF(a.X + NodeW / 2f, a.Y + NodeHeight(a));
+                    var pb = new PointF(b.X + NodeW / 2f, b.Y);
+
+                    // 已有数据线的一对节点：顺序线整体右移几像素，避免与数据线完全重合
+                    float off = HasDirectLink(a, b) ? 7f : 0f;
+                    pa.X += off;
+                    pb.X += off;
+
+                    PointF[] pts = OrthoPolyline(pa, pb);
+                    g.DrawLines(pen, pts);
+
+                    g.FillPolygon(brush, new[]
+                    {
+                        new PointF(pb.X, pb.Y - 1f),
+                        new PointF(pb.X - 3.5f, pb.Y - 8f),
+                        new PointF(pb.X + 3.5f, pb.Y - 8f)
+                    });
+                }
+            }
+        }
+
+        private bool HasDirectLink(FlowNode a, FlowNode b)
+        {
+            if (_flow == null || _flow.Links == null) return false;
+            foreach (FlowLink l in _flow.Links)
+            {
+                if (l == null) continue;
+                if (string.Equals(l.FromNodeId, a.Id, StringComparison.Ordinal)
+                    && string.Equals(l.ToNodeId, b.Id, StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         private void DrawNode(Graphics g, FlowNode n, bool selected)
@@ -1305,10 +1397,21 @@ namespace VisionPlatform.UI
                 g.DrawPath(pen, path);
             }
 
+            // 卡片式标题栏：把圆角矩形顶部裁出来铺一层稍亮的底色，
+            // 卡片与"背景里的线"立刻分开（VisionPro 的作业列表也是这种条状标题）
+            using (GraphicsPath clip = RoundedRect(r, 8f))
+            {
+                GraphicsState st = g.Save();
+                g.SetClip(clip);
+                using (Brush header = new SolidBrush(UiTheme.ColorHeaderBg))
+                    g.FillRectangle(header, r.X, r.Y, r.Width, TitleH);
+                g.Restore(st);
+            }
+
             // 标题左侧的类型色条：一眼分清"采集 / 定位 / 测量 / 输出"
             using (Brush stripe = new SolidBrush(TypeStripeColor(n)))
             {
-                g.FillRectangle(stripe, r.X + 2f, r.Y + 6f, 3.5f, Math.Min(16f, TitleH - 8f));
+                g.FillRectangle(stripe, r.X + 3f, r.Y + 5f, 4f, TitleH - 10f);
             }
 
             // 标题行（节点名）

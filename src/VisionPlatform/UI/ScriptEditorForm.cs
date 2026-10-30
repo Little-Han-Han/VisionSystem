@@ -50,6 +50,13 @@ namespace VisionPlatform.UI
             LoadFromNode();
 
             UiStyle.ApplyForm(this);
+
+            // 主题会把所有 TextBox 统一成 9pt 雅黑；代码区必须是等宽字体，否则缩进一塌糊涂
+            txtBody.Font = new Font("Consolas", 10f);
+            txtBody.BackColor = UiTheme.ColorViewBg;
+            txtBody.ForeColor = UiTheme.ColorTextPrimary;
+            txtResult.Font = new Font("Consolas", 9.5f);
+            txtResult.BackColor = UiTheme.ColorViewBg;
         }
 
         // =====================================================================
@@ -161,23 +168,18 @@ namespace VisionPlatform.UI
             var panelRight = new Panel();
             panelRight.Dock = DockStyle.Fill;
 
+            // 只留两行（类 + 函数签名）：占太多会把代码区挤没，用户会以为"不能写代码"
             var lblHead = new Label();
             lblHead.Dock = DockStyle.Top;
-            lblHead.Height = 118;
+            lblHead.Height = 44;
             lblHead.AutoSize = false;
             lblHead.Font = new Font("Consolas", 9.5f);
             lblHead.ForeColor = UiTheme.ColorTextSecondary;
             lblHead.BackColor = UiTheme.ColorHeaderBg;
-            lblHead.Padding = new Padding(10, 8, 10, 8);
+            lblHead.Padding = new Padding(10, 4, 10, 2);
             lblHead.Text =
-                "using System;\r\n" +
-                "using System.Collections.Generic;\r\n" +
-                "using System.Linq;\r\n" +
-                "using VisionPlatform.Flow;\r\n" +
-                "\r\n" +
                 "public class ScriptNode\r\n" +
-                "{\r\n" +
-                "    public bool Run(ScriptApi api)   // ← 下面只写这个方法体\r\n" +
+                "    public bool Run(ScriptApi api)   // 在下面的大括号里写代码\r\n" +
                 "    {";
 
             // 「结果」区：运行后在编辑器里直接看输出（不用切回流程页）
@@ -225,7 +227,18 @@ namespace VisionPlatform.UI
             splitRight.Panel1MinSize = 25;
             splitRight.Panel2MinSize = 25;
             splitRight.BackColor = UiTheme.ColorDivider;
+            var lblTail = new Label();
+            lblTail.Dock = DockStyle.Bottom;
+            lblTail.Height = 18;
+            lblTail.AutoSize = false;
+            lblTail.Font = new Font("Consolas", 9.5f);
+            lblTail.ForeColor = UiTheme.ColorTextSecondary;
+            lblTail.BackColor = UiTheme.ColorHeaderBg;
+            lblTail.Padding = new Padding(10, 0, 10, 0);
+            lblTail.Text = "    }";
+
             splitRight.Panel1.Controls.Add(txtBody);
+            splitRight.Panel1.Controls.Add(lblTail);
             splitRight.Panel1.Controls.Add(lblHead);
             splitRight.Panel2.Controls.Add(panelResult);
 
@@ -292,6 +305,9 @@ namespace VisionPlatform.UI
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+
+            // 打开就把光标放进代码区，用户不用先猜"哪里能写"
+            try { txtBody.Focus(); txtBody.SelectionStart = txtBody.TextLength; } catch (Exception) { }
 
             // 尺寸确定后再定分割位置与最小宽高（构造期设会越界抛异常）
             try

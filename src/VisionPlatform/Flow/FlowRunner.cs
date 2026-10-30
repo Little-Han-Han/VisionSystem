@@ -453,6 +453,13 @@ namespace VisionPlatform.Flow
         {
             string script = node.GetString("Source", "");
 
+            // 空脚本 = "还没写"：按未实现处理（返回 false → 本节点 NG），不当编译错误报
+            if (string.IsNullOrWhiteSpace(script))
+            {
+                p.Summary = "脚本：未编写（在大括号里写代码后再运行）";
+                return false;
+            }
+
             var api = new ScriptApi(
                 new List<NodeOutput>(s.Outputs),
                 s.NamedValues,
@@ -479,6 +486,11 @@ namespace VisionPlatform.Flow
             p.Summary += string.Format(CultureInfo.InvariantCulture, "（上游 {0} 个节点）", s.Outputs.Count);
             if (api.SetNames.Count > 0)
                 p.Summary += "（输出：" + string.Join("、", api.SetNames.ToArray()) + "）";
+
+            // 声明的输出变量必须都写过，否则下游拿到的是空值 —— 在摘要里点名
+            string missing = MissingOutputs(node.GetString("OutDefs", ""), api.SetNames);
+            if (missing.Length > 0)
+                p.Summary += "（缺少输出：" + missing + "）";
             if (Math.Abs(api.Number) > 1e-12)
                 p.Summary += string.Format(CultureInfo.InvariantCulture, "（数值 {0:0.####}）", api.Number);
 
@@ -490,6 +502,28 @@ namespace VisionPlatform.Flow
             }
 
             return true;
+        }
+
+        /// <summary>OutDefs 里声明了、但脚本没有 api.Set 的输出名（逗号分隔）。</summary>
+        private static string MissingOutputs(string defs, List<string> setNames)
+        {
+            if (string.IsNullOrWhiteSpace(defs) || setNames == null) return "";
+
+            var missing = new List<string>();
+            foreach (string part in defs.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string name = part.Trim();
+                int i = name.IndexOf(':');
+                if (i > 0) name = name.Substring(0, i).Trim();
+                if (name.Length == 0) continue;
+
+                bool found = false;
+                foreach (string s2 in setNames)
+                    if (string.Equals(s2, name, StringComparison.Ordinal)) { found = true; break; }
+
+                if (!found) missing.Add(name);
+            }
+            return string.Join("、", missing.ToArray());
         }
 
         private static string OneLineText(string text)
