@@ -65,6 +65,12 @@ namespace VisionPlatform.Flow
         /// <summary>产出图形数量（叠加层里的目标框 / 边线等）。</summary>
         public int ShapeCount;
 
+        /// <summary>
+        /// 逐个目标的几何/测量（Blob 的每个区域、匹配的每个目标）。
+        /// 脚本用 <c>api.Regions("节点名")</c> 拿到，可遍历做分级判定。
+        /// </summary>
+        public List<RegionInfo> Regions = new List<RegionInfo>();
+
         /// <summary>是否成功（Ok 或 Warn；Ng / Skipped 为 false）。</summary>
         public bool Ok
         {
@@ -207,6 +213,13 @@ namespace VisionPlatform.Flow
                 if (string.Equals(_nodes[i].Name, idOrName, StringComparison.Ordinal)) return _nodes[i];
 
             return null;
+        }
+
+        /// <summary>取某节点逐个目标的几何（Blob 的每个区域 / 匹配的每个目标）。</summary>
+        public List<RegionInfo> Regions(string idOrName)
+        {
+            NodeOutput o = Get(idOrName);
+            return o == null ? new List<RegionInfo>() : o.Regions;
         }
 
         /// <summary>按类型取第一个匹配的节点输出（如 "Ocr"）；没有返回 null。</summary>

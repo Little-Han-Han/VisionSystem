@@ -25,8 +25,8 @@ namespace VisionPlatform.UI
     public sealed class FlowCanvasControl : Control
     {
         // 画布几何常量（屏幕像素）
-        private const int NodeW = 200;           // 节点宽度（上下边缘要排 3~4 个中文端子名）
-        private const int TitleH = 26;           // 节点标题行高度
+        private const int NodeW = 260;           // 节点宽度（上下边缘要排 3~4 个中文端子名）
+        private const int TitleH = 28;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
         private const int SummaryH = SummaryRowH * 2 + 2;   // 卡片底部结果区总高（常驻，未运行也占位）
@@ -1438,7 +1438,7 @@ namespace VisionPlatform.UI
 
                 // 端子名画在标题下方一行，以端口 x 为中心（用户要求"名称不要是空的"）
                 DrawPortLabel(g, ins[k].DisplayName, c.X, r.Y + TitleH, r,
-                              hovered ? UiTheme.ColorTextPrimary : KindColor(ins[k].Kind),
+                              hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
                               NodeW / (ins.Count + 1f) - 2f);
             }
 
@@ -1451,7 +1451,7 @@ namespace VisionPlatform.UI
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
 
                 DrawPortLabel(g, outs[k].DisplayName, c.X, r.Bottom - NodePadBottom - PortLabelH, r,
-                              hovered ? UiTheme.ColorTextPrimary : KindColor(outs[k].Kind),
+                              hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
                               NodeW / (outs.Count + 1f) - 2f);
             }
 
@@ -1629,7 +1629,8 @@ namespace VisionPlatform.UI
         {
             float x = r.X + 10f;
             float w = r.Width - 20f;
-            float y1 = r.Bottom - NodePadBottom - SummaryRowH * 2f - 1f;
+            // 底部有一行"输出端子名"，摘要区必须画在它上面，否则会被名字压住看不见
+            float y1 = r.Bottom - NodePadBottom - PortLabelH - SummaryRowH * 2f - 1f;
             float y2 = y1 + SummaryRowH;
 
             var sfNear = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center,
@@ -1651,7 +1652,8 @@ namespace VisionPlatform.UI
                 if (state == FlowNodeRunState.Waiting)
                 {
                     var rectWait = new RectangleF(x, y1, w, SummaryRowH);
-                    using (Brush b = new SolidBrush(UiTheme.ColorDisabled))
+                    // ColorDisabled 在深色卡片上几乎看不见，这里用次要文字色降一点透明度
+                    using (Brush b = new SolidBrush(WithAlpha(UiTheme.ColorTextSecondary, 150)))
                         g.DrawString("未运行", UiTheme.FontMono, b, rectWait, sfNear);
                 }
             }

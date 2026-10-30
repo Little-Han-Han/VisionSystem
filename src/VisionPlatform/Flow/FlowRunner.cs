@@ -438,6 +438,18 @@ namespace VisionPlatform.Flow
             // 类型化输出：判定 / 数值 / 角度 / 坐标 / 文本（结果显示与脚本共用这一份）
             o.Values = NodeOutputSchema.Build(type, m, o.Ok);
 
+            // 节点自己上报的（更细：长度 / 角度 / 有效点数 / 剔除数 / 逐目标几何）优先并入
+            if (p.Outputs != null)
+            {
+                foreach (PortValue v in p.Outputs)
+                {
+                    if (v == null || string.IsNullOrEmpty(v.Key)) continue;
+                    o.Values.RemoveAll(x => x != null && string.Equals(x.Key, v.Key, StringComparison.OrdinalIgnoreCase));
+                    o.Values.Add(v);
+                }
+            }
+            if (p.Regions != null) o.Regions = new List<RegionInfo>(p.Regions);
+
             s.Outputs.Add(o);
         }
 
@@ -2625,6 +2637,7 @@ namespace VisionPlatform.Flow
                     return false;
                 }
 
+                int allCount = br.Value != null ? br.Value.Count : 0;
                 var kept = new List<BlobResult>();
                 foreach (BlobResult b in br.Value)
                 {
@@ -2659,6 +2672,29 @@ namespace VisionPlatform.Flow
                     p.Metrics.MaxArea = kept[0].Area;
                     p.Metrics.MaxCircularity = Circularity(kept[0]);
                 }
+
+                // 逐个区域上报：中心 / 面积 / 宽 / 高 / 角度 / 圆度
+                // （只看"最大面积"不够 —— 分级判定、按序号取坐标都要用到每一个）
+                for (int i = 0; i < kept.Count; i++)
+                {
+                    BlobResult b2 = kept[i];
+                    PointF bc2 = MapRoiPoint(s, usedRoi, blobAffine, b2.Cx, b2.Cy);
+                    p.Regions.Add(new RegionInfo
+                    {
+                        Index = i + 1,
+                        Cx = bc2.X,
+                        Cy = bc2.Y,
+                        Area = b2.Area,
+                        Width = b2.Width,
+                        Height = b2.Height,
+                        Angle = b2.Angle,
+                        Circularity = Circularity(b2)
+                    });
+                }
+
+                // 被筛选掉的个数（面积/宽高/圆度不达标）也上报，便于调参
+                p.Outputs.Add(new PortValue("RejectedCount", "剔除数", FlowPortKind.Number,
+                    (double)Math.Max(0, allCount - kept.Count)));
 
                 // ROI 轮廓是「输入几何」而不是「检测目标」：走 AuxShapes，
                 // 否则结果区会多出 4 条"边线"行，与"12 个 Blob"永久对不上（UI-R05）。
@@ -2837,10 +2873,27 @@ namespace VisionPlatform.Flow
                 return false;
             }
 
+            int calTotal = r.Points != null ? r.Points.Count : 0;
+            int calRejected = Math.Max(0, calTotal - r.ValidCount);
+
+            // 直线卡尺的运行参数全部上报（长度/角度/直线度/有效点/剔除数）
+            p.Outputs.Add(new PortValue("Length", "长度", FlowPortKind.Number, r.Length));
+            p.Outputs.Add(new PortValue("Angle", "角度", FlowPortKind.Angle, r.AngleDeg));
+            p.Outputs.Add(new PortValue("Rms", "直线度", FlowPortKind.Number, r.Rms));
+            p.Outputs.Add(new PortValue("ValidCount", "有效点", FlowPortKind.Number, (double)r.ValidCount));
+            p.Outputs.Add(new PortValue("CaliperCount", "卡尺数", FlowPortKind.Number, (double)calTotal));
+            p.Outputs.Add(new PortValue("RejectedCount", "剔除数", FlowPortKind.Number, (double)calRejected));
+            if (r.Line != null)
+            {
+                p.Outputs.Add(new PortValue("Start", "起点", FlowPortKind.Point,
+                    new PointF((float)r.Line.X1, (float)r.Line.Y1)));
+                p.Outputs.Add(new PortValue("End", "终点", FlowPortKind.Point,
+                    new PointF((float)r.Line.X2, (float)r.Line.Y2)));
+            }
+
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "直线卡尺：长度 {0:F1} 角度 {1:F2}° RMS {2:F2} 有效点 {3}/{4}",
-                r.Length, r.AngleDeg, r.Rms, r.ValidCount,
-                r.Points != null ? r.Points.Count : 0)
+                r.Length, r.AngleDeg, r.Rms, r.ValidCount, calTotal)
                 + PoseInputNote(s, node);   // 让用户一眼看到 ROI 到底有没有跟着修正
             return true;
         }
@@ -2942,10 +2995,22 @@ namespace VisionPlatform.Flow
                 return false;
             }
 
+            int circTotal = r.Points != null ? r.Points.Count : 0;
+            double radius = r.Circle.Radius;
+
+            p.Outputs.Add(new PortValue("Diameter", "直径", FlowPortKind.Number, diameter));
+            p.Outputs.Add(new PortValue("Radius", "半径", FlowPortKind.Number, radius));
+            p.Outputs.Add(new PortValue("Center", "圆心", FlowPortKind.Point,
+                new PointF((float)r.Circle.Cx, (float)r.Circle.Cy)));
+            p.Outputs.Add(new PortValue("Rms", "圆度", FlowPortKind.Number, r.Rms));
+            p.Outputs.Add(new PortValue("ValidCount", "有效点", FlowPortKind.Number, (double)r.ValidCount));
+            p.Outputs.Add(new PortValue("CaliperCount", "卡尺数", FlowPortKind.Number, (double)circTotal));
+            p.Outputs.Add(new PortValue("RejectedCount", "剔除数", FlowPortKind.Number,
+                (double)Math.Max(0, circTotal - r.ValidCount)));
+
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "圆卡尺：直径 {0:F1} 圆心 ({1:F1},{2:F1}) RMS {3:F2} 有效点 {4}/{5}",
-                diameter, r.Circle.Cx, r.Circle.Cy, r.Rms, r.ValidCount,
-                r.Points != null ? r.Points.Count : 0)
+                diameter, r.Circle.Cx, r.Circle.Cy, r.Rms, r.ValidCount, circTotal)
                 + PoseInputNote(s, node);
             return true;
         }

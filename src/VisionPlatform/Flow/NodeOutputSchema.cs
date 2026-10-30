@@ -232,4 +232,41 @@ namespace VisionPlatform.Flow
             return sb.ToString();
         }
     }
+
+    /// <summary>
+    /// 一个检测目标（Blob / 圆 / 匹配）的几何与测量值。
+    /// <para>
+    /// 【为什么要单独一个结构】汇总值（最大面积、最高分）回答不了"每个目标分别是什么样"；
+    /// 脚本要做分级判定、要把第 3 个目标的坐标传给下游，就必须拿到<strong>逐个目标</strong>的数据。
+    /// </para>
+    /// </summary>
+    public sealed class RegionInfo
+    {
+        /// <summary>序号（从 1 开始）。</summary>
+        public int Index;
+        /// <summary>中心 X。</summary>
+        public double Cx;
+        /// <summary>中心 Y。</summary>
+        public double Cy;
+        /// <summary>面积（像素²）。</summary>
+        public double Area;
+        /// <summary>宽。</summary>
+        public double Width;
+        /// <summary>高。</summary>
+        public double Height;
+        /// <summary>角度（度）。</summary>
+        public double Angle;
+        /// <summary>圆度（4πA/P²）。</summary>
+        public double Circularity;
+        /// <summary>附加文本（OCR 文本 / 类别名等）。</summary>
+        public string Text = "";
+
+        /// <summary>一行摘要：`#1 (320.0, 240.0) 40×30 A=1200 C=0.86`。</summary>
+        public string Describe()
+        {
+            return string.Format(CultureInfo.InvariantCulture,
+                "#{0} ({1:F1}, {2:F1}) {3:F0}×{4:F0} A={5:F0} C={6:F2}",
+                Index, Cx, Cy, Width, Height, Area, Circularity);
+        }
+    }
 }

@@ -196,6 +196,15 @@ namespace VisionPlatform.Flow
     /// <summary>单个节点执行后的进度（供画布状态标注与预览区回看）。</summary>
     public sealed class FlowNodeProgress
     {
+        /// <summary>
+        /// 节点自己上报的<strong>类型化输出</strong>（长度 / 角度 / 有效点数 / 剔除数 …）。
+        /// <see cref="FlowRunSession.Outputs"/> 收集时合并进 <see cref="NodeOutput.Values"/>。
+        /// </summary>
+        public List<PortValue> Outputs = new List<PortValue>();
+
+        /// <summary>节点上报的逐个目标几何（Blob 每个区域 / 匹配每个目标）。</summary>
+        public List<RegionInfo> Regions = new List<RegionInfo>();
+
         /// <summary>节点 Id。</summary>
         public string NodeId { get; set; }
 
