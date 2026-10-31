@@ -69,6 +69,15 @@ namespace VisionPlatform.Flow
         /// 计算结果写回结果区。<c>api</c> 是 <see cref="ScriptApi"/> 实例，<c>return</c> 的字符串即结果摘要。
         /// </summary>
         Script,
+
+        /// <summary>深度学习：目标语义分割（YOLO26-seg，OpenVINO 推理）。输出每个目标的框 + 掩膜面积。</summary>
+        DlSeg,
+
+        /// <summary>深度学习：目标姿态估计（YOLO26-pose），输出框 + 关键点。</summary>
+        DlPose,
+
+        /// <summary>深度学习：深度估计，输出 0~1 归一化深度图。</summary>
+        DlDepth,
 }
 
     /// <summary>

@@ -78,6 +78,7 @@ namespace VisionPlatform.Flow
         /// <summary>最近一次运行的节点输出台账（脚本编辑器读它展示上游数据）。</summary>
         public List<NodeOutput> LastOutputs { get; private set; }
 
+
         /// <summary>本轮是否示教了位置修正基准（宿主据此落盘，避免下次又示教成 0 偏差）。</summary>
         private bool _baselineTaught;
 
@@ -385,6 +386,9 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.SendData:      return RunSendData(s, node, p);
                 case FlowNodeType.ReceiveData:   return RunReceiveData(s, node, p);
                 case FlowNodeType.Script:        return RunScript(s, node, p);
+                case FlowNodeType.DlSeg:         return RunDl(s, node, p, NativeDl.TaskSeg);
+                case FlowNodeType.DlPose:        return RunDl(s, node, p, NativeDl.TaskPose);
+                case FlowNodeType.DlDepth:       return RunDl(s, node, p, NativeDl.TaskDepth);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -543,6 +547,143 @@ namespace VisionPlatform.Flow
             if (string.IsNullOrEmpty(text)) return "";
             string v = text.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Trim();
             return v.Length > 200 ? v.Substring(0, 200) + "…" : v;
+        }
+
+        // ---------------------- 深度学习（OpenVINO：分割 / 姿态 / 深度）----------------------
+
+        /// <summary>
+        /// 深度学习节点统一入口。模型编译在 <see cref="Native.VisionAlgo"/> 里按
+        /// "任务|路径|设备"缓存，连续运行时只编译一次。
+        /// </summary>
+        private bool RunDl(FlowRunSession s, FlowNode node, FlowNodeProgress p, int task)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "深度学习：没有输入图像（请接在图像源之后）";
+                return true;
+            }
+
+            string modelPath = node.GetString("ModelPath", "");
+            if (string.IsNullOrWhiteSpace(modelPath))
+                modelPath = DefaultDlModel(task);
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                p.Summary = "深度学习：未找到模型（请在节点里指定 .onnx，或放到 models"
+                          + System.IO.Path.DirectorySeparatorChar + DlFolderOf(task) + " 目录下）";
+                return false;
+            }
+
+            string device = node.GetString("Device", "CPU");
+            if (string.Equals(node.GetString("Backend", "OpenVINO"), "CUDA", StringComparison.OrdinalIgnoreCase))
+                device = "CUDA";
+
+            // 彩色输入优先（与目标识别一致）
+            Bitmap input = s.ColorInput != null ? s.ColorInput : s.Current;
+
+            if (task == NativeDl.TaskDepth)
+            {
+                float mn, mx;
+                var dr = _algo.DlDepth(input, modelPath, device, out mn, out mx);
+                // 不能用 Tail：它会把"模型文件不存在："这类前缀截掉，只剩一个路径
+                if (!dr.Success) { p.Summary = "深度估计：" + dr.Message; return false; }
+
+                float[] map = dr.Value;
+                double sum = 0;
+                for (int i = 0; i < map.Length; i++) sum += map[i];
+                double mean = map.Length > 0 ? sum / map.Length : 0;
+
+                p.Metrics.TargetCount = 1;
+                p.Outputs.Add(new PortValue("Min", "最小值", FlowPortKind.Number, (double)mn));
+                p.Outputs.Add(new PortValue("Max", "最大值", FlowPortKind.Number, (double)mx));
+                p.Outputs.Add(new PortValue("Mean", "均值", FlowPortKind.Number, mean));
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "深度估计：范围 {0:F3}~{1:F3} 均值 {2:F3}", mn, mx, mean);
+                return true;
+            }
+
+            float score = (float)node.GetDouble("ScoreThresh", 0.25);
+            float iou = (float)node.GetDouble("IouThresh", 0.45);
+            int maxCount = node.GetInt("MaxCount", 100);
+
+            var r = _algo.DlDetect(task, input, score, iou, maxCount, modelPath, device);
+            if (!r.Success)
+            {
+                p.Summary = (task == NativeDl.TaskSeg ? "语义分割：" : "姿态估计：") + r.Message;
+                return false;
+            }
+
+            List<NativeDl.DlTarget> targets = r.Value ?? new List<NativeDl.DlTarget>();
+            p.Metrics.TargetCount = targets.Count;
+
+            double best = 0;
+            foreach (NativeDl.DlTarget t in targets) if (t.Score > best) best = t.Score;
+            if (targets.Count > 0) p.Metrics.TopScore = best;
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                NativeDl.DlTarget t = targets[i];
+                double cx = t.X + t.Width / 2;
+                double cy = t.Y + t.Height / 2;
+
+                if (task == NativeDl.TaskSeg)
+                {
+                    p.Shapes.Add(FlowShapes.BlobRect(cx, cy, t.Width, t.Height,
+                        string.Format(CultureInfo.InvariantCulture,
+                            "#{0} {1:F2} · {2}px²", i + 1, t.Score, t.MaskArea)));
+
+                    p.Regions.Add(new RegionInfo
+                    {
+                        Index = i + 1,
+                        Cx = cx, Cy = cy,
+                        Width = t.Width, Height = t.Height,
+                        Area = t.MaskArea
+                    });
+                }
+                else
+                {
+                    p.Shapes.Add(FlowShapes.BlobRect(cx, cy, t.Width, t.Height,
+                        string.Format(CultureInfo.InvariantCulture, "#{0} {1:F2}", i + 1, t.Score)));
+
+                    for (int k = 0; k < t.KeyPoints.Count; k++)
+                    {
+                        if (t.KeyPointScores.Count > k && t.KeyPointScores[k] < 0.3f) continue;
+                        p.Shapes.Add(FlowShapes.BlobRect(t.KeyPoints[k].X, t.KeyPoints[k].Y, 4, 4, null));
+                    }
+                }
+            }
+
+            int kps = task == NativeDl.TaskPose ? _algo.DlPoseKeypoints() : 0;
+            p.Outputs.Add(new PortValue("Count", "目标数", FlowPortKind.Number, (double)targets.Count));
+            p.Outputs.Add(new PortValue("Score", "最高分", FlowPortKind.Number, best));
+            if (task == NativeDl.TaskPose && kps > 0)
+                p.Outputs.Add(new PortValue("KeyPoints", "关键点/目标", FlowPortKind.Number, (double)kps));
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "{0}：{1} 个目标 · 最高分 {2:F3}",
+                task == NativeDl.TaskSeg ? "语义分割" : "姿态估计", targets.Count, best)
+                + (task == NativeDl.TaskPose && kps > 0 ? "（" + kps + " 关键点）" : "");
+            return targets.Count > 0 || node.GetInt("MinCount", 0) <= 0;
+        }
+
+        /// <summary>models\&lt;任务&gt;\ 下第一个 .onnx（用户把模型丢进去即可用）。</summary>
+        private static string DefaultDlModel(int task)
+        {
+            try
+            {
+                string dir = System.IO.Path.Combine(Core.AppPaths.Root, "models", DlFolderOf(task));
+                if (!System.IO.Directory.Exists(dir)) return "";
+                string[] files = System.IO.Directory.GetFiles(dir, "*.onnx");
+                if (files.Length == 0) return "";
+                Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                return files[0];
+            }
+            catch (Exception) { return ""; }
+        }
+
+        private static string DlFolderOf(int task)
+        {
+            return task == NativeDl.TaskSeg ? "seg" : task == NativeDl.TaskPose ? "pose" : "depth";
         }
 
         // ---------------------- 图像源（FR-ALG-01）----------------------

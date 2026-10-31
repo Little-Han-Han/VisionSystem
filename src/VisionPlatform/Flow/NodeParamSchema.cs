@@ -343,6 +343,9 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.SendData:        return SendData();
                 case FlowNodeType.ReceiveData:     return ReceiveData();
                 case FlowNodeType.Script:          return Script();
+                case FlowNodeType.DlSeg:           return DlTable(FlowNodeType.DlSeg, "目标语义分割");
+                case FlowNodeType.DlPose:          return DlTable(FlowNodeType.DlPose, "目标姿态估计");
+                case FlowNodeType.DlDepth:         return DlTable(FlowNodeType.DlDepth, "目标深度估计");
                 default:                           return null;
             }
         }
@@ -428,6 +431,47 @@ namespace VisionPlatform.Flow
             // 也不放任何说明文字 —— 用户明确要求"高级参数全部删掉"。
             t.Fields.Add(Action("EditScript", "编辑脚本…", ""));
             return t;
+        }
+
+        /// <summary>
+        /// 深度学习节点的参数表（三个任务共用，只有阈值行按任务取舍）。
+        /// 模型路径留空时运行期自动取 models&lt;任务&gt;\ 下第一个 .onnx。
+        /// </summary>
+        private static NodeParamTable DlTable(FlowNodeType type, string title)
+        {
+            var t = new NodeParamTable { Type = type, Title = title };
+
+            t.Fields.Add(Group("模型"));
+            t.Fields.Add(File("ModelPath", "模型文件(.onnx)",
+                "留空则自动使用 models\\" + DlFolder(type) + "\\ 下的第一个 .onnx；"
+                + "同目录可放 <模型名>.txt（每行一个类别名）"));
+            t.Fields.Add(Enum("Backend", "推理后端", "OpenVINO",
+                new[] { "OpenVINO", "CUDA（预留）" }, new[] { "OpenVINO", "CUDA" },
+                "CUDA 接口已预留、尚未实现；选它会在运行期给出明确提示"));
+            t.Fields.Add(Enum("Device", "推理设备", "CPU",
+                new[] { "CPU", "GPU", "NPU" }, new[] { "CPU", "GPU", "NPU" },
+                "OpenVINO 设备名；GPU/NPU 需对应的设备插件"));
+
+            if (type != FlowNodeType.DlDepth)
+            {
+                t.Fields.Add(Group("检测参数"));
+                t.Fields.Add(Dbl("ScoreThresh", "置信度阈值", 0, 1, 2, 0.05m, "0.25", "低于该分数丢弃"));
+                t.Fields.Add(Dbl("IouThresh", "NMS IoU 阈值", 0, 1, 2, 0.05m, "0.45", "同类框重叠超此值合并"));
+                t.Fields.Add(Int("MaxCount", "最多目标数", 1, 1000, "100"));
+                t.Fields.Add(Int("MinCount", "最少目标数", 0, 1000, "0", "少于此数判 NG；0 = 不判"));
+            }
+
+            t.FooterNote = type == FlowNodeType.DlSeg
+                ? "输出每个目标的框 + 掩膜面积（缺陷检测可在此基础上按面积/数量判定）"
+                : type == FlowNodeType.DlPose
+                    ? "输出每个目标的框 + 关键点（关键点以 4px 小方块叠加显示）"
+                    : "深度图按 0~1 归一化输出，同时给出原始值域（Min/Max）";
+            return t;
+        }
+
+        private static string DlFolder(FlowNodeType type)
+        {
+            return type == FlowNodeType.DlSeg ? "seg" : type == FlowNodeType.DlPose ? "pose" : "depth";
         }
 
         private static NodeParamTable PositionCorrect()

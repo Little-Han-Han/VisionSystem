@@ -436,6 +436,9 @@ namespace VisionPlatform.Flow
         /// <summary>识别（字符识别 OCR）。</summary>
         public const string CatRecognition = "Recognition";
 
+        /// <summary>深度学习（OpenVINO 推理）：语义分割 / 姿态估计 / 深度估计。与传统算法分开。</summary>
+        public const string CatDeepLearning = "DeepLearning";
+
         /// <summary>全部算法模块，按工具箱显示顺序排列（16 项）。</summary>
         public static readonly List<FlowModuleInfo> All = new List<FlowModuleInfo>
         {
@@ -455,6 +458,9 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("ResultOutput",     "结果输出",        FlowNodeType.ResultOutput,     CatOutput),
             new FlowModuleInfo("SendData",         "发送数据",        FlowNodeType.SendData,         CatOutput),
             new FlowModuleInfo("Script",           "脚本",            FlowNodeType.Script,           CatOutput),
+            new FlowModuleInfo("DlSeg",            "目标语义分割",    FlowNodeType.DlSeg,            CatDeepLearning),
+            new FlowModuleInfo("DlPose",           "目标姿态估计",    FlowNodeType.DlPose,           CatDeepLearning),
+            new FlowModuleInfo("DlDepth",          "目标深度估计",    FlowNodeType.DlDepth,          CatDeepLearning),
             new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput)
         };
 
@@ -506,9 +512,9 @@ namespace VisionPlatform.Flow
             var keys = new[]
             {
                 CatAcquisition, CatImageProcessing, CatLocation,
-                CatCaliper, CatSegmentation, CatOutput, CatRecognition
+                CatCaliper, CatSegmentation, CatRecognition, CatDeepLearning, CatOutput
             };
-            var names = new[] { "采集", "图像处理", "定位与匹配", "卡尺与测量", "分割与拟合", "输出与通信", "识别" };
+            var names = new[] { "采集", "图像处理", "定位与匹配", "卡尺与测量", "分割与拟合", "识别", "深度学习", "输出与通信" };
 
             var result = new List<FlowModuleCategory>(keys.Length);
             // 本地索引：Categories 此刻尚未赋值完成（正在初始化），不能走 CategoryOfKey

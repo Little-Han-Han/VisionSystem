@@ -136,6 +136,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClInclude Include="include\algo\va_classify.h" />
     <ClInclude Include="include\algo\va_ocr.h" />
     <ClInclude Include="include\algo\va_detect.h" />
+    <ClInclude Include="include\algo\va_dl.h" />
   </ItemGroup>
   <!-- 源文件夹：src 下放实现，其中 algo 子目录对应各算法头文件 -->
   <ItemGroup>
@@ -153,6 +154,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClCompile Include="src\algo\algo_classify.cpp" />
     <ClCompile Include="src\algo\algo_ocr.cpp" />
     <ClCompile Include="src\algo\algo_detect.cpp" />
+    <ClCompile Include="src\algo\algo_dl.cpp" />
   </ItemGroup>
   <!-- Common 文件夹：导出宏、错误码、公共类型、生命周期与内部工具，
        头文件与源文件同目录，被 include 与 src 共同引用 -->

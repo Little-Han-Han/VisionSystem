@@ -263,6 +263,45 @@ namespace VisionPlatform.Flow
                     P("Text", "脚本结果", FlowPortKind.Text, false)
                 });
 
+            // 深度学习：图像进、图像+指标出（与目标识别同一套端口风格）
+            Register(FlowNodeType.DlSeg,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Any", "任意输入", FlowPortKind.Any, false, "", true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Count", "目标数", FlowPortKind.Number, false),
+                    P("Score", "最高分", FlowPortKind.Number, false)
+                });
+
+            Register(FlowNodeType.DlPose,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Any", "任意输入", FlowPortKind.Any, false, "", true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Count", "目标数", FlowPortKind.Number, false),
+                    P("KeyPoints", "关键点", FlowPortKind.Number, false)
+                });
+
+            Register(FlowNodeType.DlDepth,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Min", "最小值", FlowPortKind.Number, false),
+                    P("Max", "最大值", FlowPortKind.Number, false)
+                });
+
             Register(FlowNodeType.ResultOutput,
                 new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true, "", true) },
                 new List<FlowPortDef>());

@@ -1183,6 +1183,105 @@ namespace VisionPlatform.Native
         /// 模型按路径缓存，同一路径不重复编译；路径 / 设备变化时自动重载。
         /// <para>输入优先用彩色帧（<see cref="ColorInput"/> 同款链路），灰度帧也会自动转 BGR 后推理。</para>
         /// </summary>
+        // ---------------------- 深度学习（分割 / 姿态 / 深度）---------------------
+
+        private readonly HashSet<string> _dlReady = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>加载模型（按"任务|路径|设备"缓存，避免连续运行时每帧重编译）。</summary>
+        private string DlEnsure(int task, string modelPath, string device, out string error)
+        {
+            error = "";
+            string mp = ResolveModelPath(modelPath);
+            if (string.IsNullOrWhiteSpace(mp)) { error = "未指定模型路径"; return null; }
+            if (!System.IO.File.Exists(mp)) { error = "模型文件不存在：" + mp; return null; }
+
+            string dev = string.IsNullOrEmpty(device) ? "CPU" : device;
+            string key = task + "|" + mp + "|" + dev;
+            if (_dlReady.Contains(key)) return mp;
+
+            int rc = task == NativeDl.TaskSeg ? NativeDl.SegCreate(_handle, mp, dev)
+                   : task == NativeDl.TaskPose ? NativeDl.PoseCreate(_handle, mp, dev)
+                   : NativeDl.DepthCreate(_handle, mp, dev);
+
+            if (rc != 0)
+            {
+                error = (string.Equals(dev, "CUDA", StringComparison.OrdinalIgnoreCase)
+                        ? "CUDA 推理尚未实现（接口已预留），请先用 CPU/GPU"
+                        : VaResult.ToString(rc) + "：" + LastError);
+                return null;
+            }
+
+            _dlReady.Add(key);
+            return mp;
+        }
+
+        /// <summary>语义分割 / 姿态估计（共用一套目标结构）。</summary>
+        public OpResult<List<NativeDl.DlTarget>> DlDetect(int task, Bitmap src,
+                                                          float scoreThresh, float iouThresh,
+                                                          int maxCount, string modelPath, string device)
+        {
+            if (src == null) return OpResult<List<NativeDl.DlTarget>>.Fail("输入图像为空");
+
+            string err;
+            string mp = DlEnsure(task, modelPath, device, out err);
+            if (mp == null) return OpResult<List<NativeDl.DlTarget>>.Fail(err);
+
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    List<NativeDl.DlTarget> list = task == NativeDl.TaskSeg
+                        ? NativeDl.SegRun(_handle, ref img, scoreThresh, iouThresh, maxCount, out err)
+                        : NativeDl.PoseRun(_handle, ref img, scoreThresh, iouThresh, maxCount, out err);
+
+                    if (!string.IsNullOrEmpty(err))
+                        return OpResult<List<NativeDl.DlTarget>>.Fail(err);
+
+                    return OpResult<List<NativeDl.DlTarget>>.Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<NativeDl.DlTarget>>.Fail("推理异常：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>姿态关键点数（未加载时 0）。</summary>
+        public int DlPoseKeypoints()
+        {
+            try { return NativeDl.PoseKeypoints(_handle); }
+            catch (Exception) { return 0; }
+        }
+
+        /// <summary>深度估计：返回 0~1 归一化深度图（尺寸同输入）。</summary>
+        public OpResult<float[]> DlDepth(Bitmap src, string modelPath, string device,
+                                         out float min, out float max)
+        {
+            min = 0f; max = 0f;
+            if (src == null) return OpResult<float[]>.Fail("输入图像为空");
+
+            string err;
+            string mp = DlEnsure(NativeDl.TaskDepth, modelPath, device, out err);
+            if (mp == null) return OpResult<float[]>.Fail(err);
+
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    float[] map = NativeDl.DepthRun(_handle, ref img, src.Width, src.Height,
+                                                    out min, out max, out err);
+                    if (map == null) return OpResult<float[]>.Fail(err);
+                    return OpResult<float[]>.Ok(map);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<float[]>.Fail("推理异常：" + ex.Message);
+                }
+            }
+        }
+
         public OpResult<DetectOutput> Detect(Bitmap src, DetectParam param)
         {
             if (src == null) return OpResult<DetectOutput>.Fail("输入图像为空");

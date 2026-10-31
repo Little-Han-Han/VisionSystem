@@ -29,6 +29,7 @@
 #include "algo/va_ocr.h"
 // YOLO 目标检测的参数 / 结果结构体（VA_DetectResult）声明在对外头文件里
 #include "algo/va_detect.h"
+#include "algo/va_dl.h"
 
 namespace va {
 
@@ -80,6 +81,23 @@ struct DetectorState {
     DetectorState() : input_w(0), input_h(0), num_classes(0), created(false) {}
 };
 
+// 通用深度学习状态：语义分割 / 姿态估计 / 深度估计共用（模型不同、后处理不同）。
+// 与 DetectorState 的区别：输出解析按 task 分支，且可能有多个输出（seg 的 proto）。
+struct DlState {
+    ov::Core                  core;
+    ov::CompiledModel         compiled;
+    ov::InferRequest          infer;
+    int                       input_w;
+    int                       input_h;
+    int                       num_classes;
+    int                       task;          // VA_DL_TASK_*（1=seg 2=pose 3=depth）
+    int                       keypoints;     // pose：关键点数
+    std::vector<std::string>  class_names;
+    bool                      created;
+
+    DlState() : input_w(0), input_h(0), num_classes(0), task(0), keypoints(0), created(false) {}
+};
+
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
@@ -89,6 +107,9 @@ struct Context {
     ClassifierState clf;            // 分类器（样本 + 模型）
     OcrState        ocr;            // 传统算法 OCR（模板库）
     DetectorState   det;             // YOLO 目标检测器
+    DlState         seg;             // YOLO 语义分割
+    DlState         pose;            // YOLO 姿态估计
+    DlState         depth;           // 深度估计
 
     Context() : hasTemplate(false) {}
 };
@@ -200,6 +221,25 @@ int ClfClear(Context* ctx);
 // 加载 Ultralytics 导出的 YOLO ONNX（输出布局 [1, 4+num_classes, anchors]），
 // 编译到指定设备并缓存类别名表。实现见 src/algo/algo_detect.cpp，导出见 va_det_*。
 int DetCreate(Context* ctx, const char* model_path, const char* device);
+
+// ---------------------- 深度学习（seg / pose / depth）---------------------
+int DlSegCreate(Context* ctx, const char* model_path, const char* device);
+int DlSegRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
+             VA_DlBox* out_boxes, int max_count, int* out_count);
+
+int DlPoseCreate(Context* ctx, const char* model_path, const char* device);
+int DlPoseRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
+              VA_DlBox* out_boxes, int max_count, int* out_count,
+              VA_DlKeyPoint* out_kps, int kps_capacity,
+              int* out_kps_per_box, int* out_kps_written);
+int DlPoseKeypoints(Context* ctx, int* out_k);
+
+int DlDepthCreate(Context* ctx, const char* model_path, const char* device);
+int DlDepthRun(Context* ctx, const VA_Image* img, float* out_map, int width, int height,
+               float* out_min, float* out_max);
+
+int DlClear(Context* ctx, int task);
+int DlBackendAvailable(int backend);
 int DetRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
            VA_DetectResult* out_results, int max_count, int* out_count);
 int DetClassCount(Context* ctx, int* out_count);

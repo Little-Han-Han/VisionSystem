@@ -97,6 +97,7 @@
     <Compile Include="Models\User.cs" />
     <Compile Include="Native\NativeCamera.cs" />
     <Compile Include="Native\VisionAlgo.cs" />
+    <Compile Include="Native\NativeDl.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Recipe\Recipe.cs" />

@@ -375,6 +375,67 @@ int VA_CALL va_det_clear(void* handle)
     return va::DetClear(ctx);
 }
 
+// ---------------------- 深度学习（seg / pose / depth）---------------------
+
+int VA_CALL va_dl_seg_create(void* handle, const char* model_path, const char* device)
+{
+    VA_CTX();
+    return va::DlSegCreate(ctx, model_path, device);
+}
+
+int VA_CALL va_dl_seg_run(void* handle, const VA_Image* img, float score_thresh, float iou_thresh,
+                          VA_DlBox* out_boxes, int max_count, int* out_count)
+{
+    VA_CTX();
+    return va::DlSegRun(ctx, img, score_thresh, iou_thresh, out_boxes, max_count, out_count);
+}
+
+int VA_CALL va_dl_pose_create(void* handle, const char* model_path, const char* device)
+{
+    VA_CTX();
+    return va::DlPoseCreate(ctx, model_path, device);
+}
+
+int VA_CALL va_dl_pose_run(void* handle, const VA_Image* img, float score_thresh, float iou_thresh,
+                           VA_DlBox* out_boxes, int max_count, int* out_count,
+                           VA_DlKeyPoint* out_kps, int kps_capacity,
+                           int* out_kps_per_box, int* out_kps_written)
+{
+    VA_CTX();
+    return va::DlPoseRun(ctx, img, score_thresh, iou_thresh, out_boxes, max_count, out_count,
+                         out_kps, kps_capacity, out_kps_per_box, out_kps_written);
+}
+
+int VA_CALL va_dl_pose_keypoints(void* handle, int* out_k)
+{
+    VA_CTX();
+    return va::DlPoseKeypoints(ctx, out_k);
+}
+
+int VA_CALL va_dl_depth_create(void* handle, const char* model_path, const char* device)
+{
+    VA_CTX();
+    return va::DlDepthCreate(ctx, model_path, device);
+}
+
+int VA_CALL va_dl_depth_run(void* handle, const VA_Image* img, float* out_map, int width, int height,
+                            float* out_min, float* out_max)
+{
+    VA_CTX();
+    return va::DlDepthRun(ctx, img, out_map, width, height, out_min, out_max);
+}
+
+int VA_CALL va_dl_clear(void* handle, int task)
+{
+    VA_CTX();
+    return va::DlClear(ctx, task);
+}
+
+int VA_CALL va_dl_backend_available(int backend)
+{
+    return va::DlBackendAvailable(backend);
+}
+
 // ---------------------- 摄像头（独立句柄，平行于算法 Context）----------------------
 
 /* 相机句柄取用：空句柄直接返回 VA_ERR_HANDLE */
