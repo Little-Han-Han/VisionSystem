@@ -81,13 +81,25 @@ namespace VisionPlatform.Flow
         /// <summary>鼠标悬停提示；可空。</summary>
         public string Hint { get; private set; }
 
-        public FlowPortDef(string key, string displayName, FlowPortKind kind, bool required, string hint = "")
+        /// <summary>
+        /// 是否允许<strong>多条线</strong>同时接入（扇入）。
+        /// <para>
+        /// 默认 false：输入端子语义上是"唯一数据源"，再连一条就替换旧的（换数据源）。
+        /// 汇总类端子（脚本的 Any、结果输出的 Any/Image）要允许并行分支同时接进来 ——
+        /// 这不是"换源"，而是"多路汇入同一处"。
+        /// </para>
+        /// </summary>
+        public bool MultiIn { get; private set; }
+
+        public FlowPortDef(string key, string displayName, FlowPortKind kind, bool required,
+                           string hint = "", bool multiIn = false)
         {
             Key = key ?? "";
             DisplayName = displayName ?? "";
             Kind = kind;
             Required = required;
             Hint = hint ?? "";
+            MultiIn = multiIn;
         }
 
         /// <summary>本端子是否接受来自 <paramref name="source"/> 类型的数据。</summary>
@@ -243,7 +255,7 @@ namespace VisionPlatform.Flow
                 new List<FlowPortDef>
                 {
                     P("Image", "图像", FlowPortKind.Image, false),
-                    P("Any", "任意输入", FlowPortKind.Any, false)
+                    P("Any", "任意输入", FlowPortKind.Any, false, "", true)   // 汇总：允许多路汇入
                 },
                 new List<FlowPortDef>
                 {
@@ -252,7 +264,7 @@ namespace VisionPlatform.Flow
                 });
 
             Register(FlowNodeType.ResultOutput,
-                new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true) },
+                new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true, "", true) },
                 new List<FlowPortDef>());
 
             // ---- 本期新增：图像滤波 / 颜色提取 ----
@@ -336,9 +348,10 @@ namespace VisionPlatform.Flow
 
         // ---------------------- 注册与构造器 ----------------------
 
-        private static FlowPortDef P(string key, string displayName, FlowPortKind kind, bool required, string hint = "")
+        private static FlowPortDef P(string key, string displayName, FlowPortKind kind, bool required,
+                                     string hint = "", bool multiIn = false)
         {
-            return new FlowPortDef(key, displayName, kind, required, hint);
+            return new FlowPortDef(key, displayName, kind, required, hint, multiIn);
         }
 
         /// <summary>登记一个节点类型的输入 / 输出端子表（静态构造期调用一次）。</summary>

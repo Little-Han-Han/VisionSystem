@@ -25,7 +25,7 @@ namespace VisionPlatform.UI
     public sealed class FlowCanvasControl : Control
     {
         // 画布几何常量（屏幕像素）
-        private const int NodeW = 150;           // 节点宽度
+        private const int NodeW = 180;           // 节点宽度（上/下边缘要排 3~4 个端子名）
         private const int TitleH = 26;           // 节点标题行高度
         private const int RowH = 18;             // 端子行高
         private const int SummaryRowH = 13;      // 结果摘要每行高度（摘要 + 耗时/状态共两行）
@@ -44,7 +44,7 @@ namespace VisionPlatform.UI
         public const float MinViewZoom = 0.25f;
         /// <summary>最大缩放倍率。</summary>
         public const float MaxViewZoom = 3.0f;
-        private const int NominalNodeH = TitleH + RowH + SummaryH + NodePadBottom;   // 1 行端子的实际高度（拖入落点居中用）
+        private const int NominalNodeH = TitleH + PortLabelH + SummaryH + PortLabelH + NodePadBottom;   // 节点标准高度
         private const float PortGlyph = 9f;      // 端子方形符号边长
         private const float PortHitRadius = 10f; // 端子命中半径（端子命中优先于节点本体）
         private const int HitTol = 6;            // 连线命中容差
@@ -237,7 +237,7 @@ namespace VisionPlatform.UI
         // ---------------------- 自动整理布局（供 FlowForm 按钮调用）----------------------
 
         /// <summary>自动整理布局的列间距（固定）。</summary>
-        private const int AutoLayoutColGap = 180;
+        private const int AutoLayoutColGap = 210;   // 列间距 = 节点宽 180 + 30 间隙（改宽必须同步）
 
         /// <summary>自动整理布局的列内行距（在节点实际高度之外再加这么多）。</summary>
         private const int AutoLayoutRowGap = 12;
@@ -534,13 +534,13 @@ namespace VisionPlatform.UI
             return Math.Max(NodeInputs(n).Count, NodeOutputs(n).Count);
         }
 
-        /// <summary>端子行高（一个端子一行）。</summary>
-        private const int PortLabelH = RowH;
+        /// <summary>端子名行高（上/下边缘各一行）。</summary>
+        private const int PortLabelH = 16;
 
         private static float NodeHeight(FlowNode n)
         {
-            // 回到最初的公式：标题 + 端子行（左右合计行数）+ 结果区
-            return TitleH + PortRowCount(n) * RowH + SummaryH + NodePadBottom;
+            // 上入下出：标题 + 输入名行 + 结果区 + 输出名行
+            return TitleH + PortLabelH + SummaryH + PortLabelH + NodePadBottom;
         }
 
         /// <summary>
@@ -550,8 +550,14 @@ namespace VisionPlatform.UI
         {
             // VisionPro 作业树式：输入端子沿【左边缘】、输出端子沿【右边缘】，一个端子一行。
             // 名字画在同一行的内侧，方块与名字严格对齐 —— 不会再出现"名字在上面、方块在别处"。
-            float y = n.Y + TitleH + index * RowH + RowH * 0.5f;
-            return new PointF(dir == FlowPortDir.In ? n.X : n.X + NodeW, y);
+            // 上入下出（用户明确要求）：输入沿上边、输出沿下边，按数量均分
+            int count = PortCount(n, dir);
+            if (count < 1) count = 1;
+
+            float step = NodeW / (count + 1f);
+            float x = n.X + step * (index + 1);
+            float y = dir == FlowPortDir.In ? n.Y : n.Y + NodeHeight(n);
+            return new PointF(x, y);
         }
 
         /// <summary>某方向的端子数量（用于沿边均分）。</summary>
@@ -675,7 +681,7 @@ namespace VisionPlatform.UI
 
                 PointF a, b;
                 if (!LinkEndPoints(l, out a, out b)) continue;
-                if (DistanceToPolyline(pt, OrthoHorizontal(a, b)) <= HitTol) return i;
+                if (DistanceToPolyline(pt, OrthoVertical(a, b)) <= HitTol) return i;
             }
             return -1;
         }
@@ -727,19 +733,19 @@ namespace VisionPlatform.UI
 
         /// <summary>把贝塞尔曲线采样成折线（连线命中测试用）。</summary>
         /// <summary>
-        /// 数据连线的正交折线（横向为主）：源右端子 → 水平 → 竖直 → 水平进目标左端子。
-        /// 与 VisionPro 的端子间连线一致；命中测试与绘制共用同一组点。
+        /// 数据连线的正交折线（<strong>上入下出</strong>）：源底部 → 竖直 → 水平 → 竖直进目标顶部。
+        /// 命中测试与绘制共用同一组点。
         /// </summary>
-        private static PointF[] OrthoHorizontal(PointF a, PointF b)
+        private static PointF[] OrthoVertical(PointF a, PointF b)
         {
-            float midX = (a.X + b.X) * 0.5f;
-            if (midX < a.X + 14f) midX = a.X + 14f;
+            float midY = (a.Y + b.Y) * 0.5f;
+            if (midY < a.Y + 14f) midY = a.Y + 14f;   // 太近时也给一段竖直，避免退化成斜线
 
             return new[]
             {
                 a,
-                new PointF(midX, a.Y),
-                new PointF(midX, b.Y),
+                new PointF(a.X, midY),
+                new PointF(b.X, midY),
                 b
             };
         }
@@ -1102,21 +1108,29 @@ namespace VisionPlatform.UI
                 return;
             }
 
+            // ---- 多入端子（脚本 / 结果输出的汇总口）：追加，不替换 ----
+            // 并行分支要能同时汇入同一个口（例如两个分支都接脚本汇总），
+            // 这与"换数据源"是两件事，靠 FlowPortDef.MultiIn 区分。
+            bool multiIn = toPort != null && toPort.MultiIn;
+
             // ---- 端口级唯一入边：替换旧边 ----
             // 理由：端口化后一个输入端子语义上只有一个数据来源（执行器按端子取唯一输入），
             // 端子上已有连线时再连新线，用户意图明确是「换数据源」——按 VisionPro 的行为
             // 用「替换」而不是「拒绝」，省去先删旧线再连新线的两步操作。
             // 被替换的旧边照常发 LinkRemoved，并额外发 LinkReplaced（让日志区能区分「删线」与「换线」）。
             var replaced = new List<FlowLink>();
-            for (int i = _flow.Links.Count - 1; i >= 0; i--)
+            if (!multiIn)
             {
-                FlowLink l = _flow.Links[i];
-                if (l == null) continue;
-                if (l.ToNodeId == toNode.Id && (l.ToPort ?? "") == toPort.Key)
+                for (int i = _flow.Links.Count - 1; i >= 0; i--)
                 {
-                    _flow.Links.RemoveAt(i);
-                    RaiseLinkRemoved(l);
-                    replaced.Add(l);
+                    FlowLink l = _flow.Links[i];
+                    if (l == null) continue;
+                    if (l.ToNodeId == toNode.Id && (l.ToPort ?? "") == toPort.Key)
+                    {
+                        _flow.Links.RemoveAt(i);
+                        RaiseLinkRemoved(l);
+                        replaced.Add(l);
+                    }
                 }
             }
 
@@ -1279,7 +1293,15 @@ namespace VisionPlatform.UI
             // 线色跟着"源端子的数据类型"走（图像=青、位姿=紫、数值=绿…），
             // 这样不用悬停也能看出这根线传的是图还是数。
             Color color = selected ? UiTheme.ColorWarn : LinkKindColor(link);
-            PointF[] pts = OrthoHorizontal(a, b);
+            // 同一个输入口有多条线（汇总口）时，沿端口左右错开，避免完全重叠成一条
+            float shift = IncomingShift(link);
+            if (Math.Abs(shift) > 0.01f)
+            {
+                a.X += shift;
+                b.X += shift;
+            }
+
+            PointF[] pts = OrthoVertical(a, b);
 
             using (Pen pen = new Pen(color, selected ? 2.8f : 2f))
             {
@@ -1289,6 +1311,28 @@ namespace VisionPlatform.UI
 
             // 箭头沿折线最后一段的方向（通常是从右往左进目标端子）
             DrawArrow(g, pts[pts.Length - 2], b, color, ArrowSize);
+        }
+
+        /// <summary>
+        /// 同一输入口上第几条线（0 起），换算成水平偏移：-6/0/+6，三条以内都能看清。
+        /// 只对多入端子生效；普通端子永远只有一条线。
+        /// </summary>
+        private float IncomingShift(FlowLink link)
+        {
+            if (_flow == null || _flow.Links == null || link == null) return 0f;
+
+            var peers = new List<FlowLink>();
+            foreach (FlowLink l in _flow.Links)
+            {
+                if (l == null) continue;
+                if (l.ToNodeId == link.ToNodeId && (l.ToPort ?? "") == (link.ToPort ?? "")) peers.Add(l);
+            }
+            if (peers.Count <= 1) return 0f;
+
+            int idx = peers.IndexOf(link);
+            if (idx < 0) return 0f;
+
+            return (idx - (peers.Count - 1) * 0.5f) * 6f;
         }
 
         /// <summary>在 <paramref name="tip"/> 处画一个朝 <paramref name="from"/>→tip 方向的箭头。</summary>
@@ -1366,9 +1410,9 @@ namespace VisionPlatform.UI
                 DrawPortGlyph(g, c, PortColor(n, ins[k], FlowPortDir.In, k, hovered));
 
                 // 端子名画在标题下方一行，以端口 x 为中心（用户要求"名称不要是空的"）
-                DrawPortLabel(g, ins[k].DisplayName, r.X + 10f, c.Y - RowH * 0.5f,
+                DrawPortLabel(g, ins[k].DisplayName, c.X, r.Y + TitleH,
                               r, hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
-                              r.Width - 20f, StringAlignment.Near);
+                              NodeW / (ins.Count + 1f) - 2f, StringAlignment.Center);
             }
 
             for (int k = 0; k < outs.Count; k++)
@@ -1379,9 +1423,9 @@ namespace VisionPlatform.UI
                     && _hoverPort.Dir == FlowPortDir.Out && _hoverPort.Index == k;
                 DrawPortGlyph(g, c, PortColor(n, outs[k], FlowPortDir.Out, k, hovered));
 
-                DrawPortLabel(g, outs[k].DisplayName, r.Right - 10f, c.Y - RowH * 0.5f,
+                DrawPortLabel(g, outs[k].DisplayName, c.X, r.Bottom - NodePadBottom - PortLabelH,
                               r, hovered ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary,
-                              r.Width - 20f, StringAlignment.Far);
+                              NodeW / (outs.Count + 1f) - 2f, StringAlignment.Center);
             }
 
             // 运行状态附加信息：节点下方「xx ms」+ 失败标记（纯文本，FR-ALG-23）
@@ -1399,7 +1443,8 @@ namespace VisionPlatform.UI
             if (string.IsNullOrEmpty(text)) return;
 
             float w = Math.Min(200f, Math.Max(24f, maxWidth));
-            float x = align == StringAlignment.Far ? anchorX - w : anchorX;
+            float x = align == StringAlignment.Far ? anchorX - w
+                    : (align == StringAlignment.Center ? anchorX - w * 0.5f : anchorX);
             var rect = new RectangleF(x, top, w, PortLabelH);
             using (Brush b = new SolidBrush(color))
             using (var sf = new StringFormat
@@ -1560,7 +1605,7 @@ namespace VisionPlatform.UI
             float x = r.X + 10f;
             float w = r.Width - 20f;
             // 端子逐行排在标题下方，摘要在它们之后（NodeHeight 已含行数）
-            float y1 = r.Bottom - NodePadBottom - SummaryRowH * 2f - 1f;
+            float y1 = r.Bottom - NodePadBottom - PortLabelH - SummaryRowH * 2f - 1f;
             float y2 = y1 + SummaryRowH;
 
             var sfNear = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center,
