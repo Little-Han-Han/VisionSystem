@@ -970,12 +970,10 @@ namespace VisionPlatform.UI
 
             if (_dragKind == DragKind.MoveNode && _dragNode != null)
             {
-                float nx = canvas.X - _dragOffset.X;
-                float ny = canvas.Y - _dragOffset.Y;
-                if (nx < 0f) nx = 0f;
-                if (ny < 0f) ny = 0f;
-                _dragNode.X = nx;
-                _dragNode.Y = ny;
+                // 不再 clamp 到 0：画布可以平移，负坐标照样能看到；
+                // 之前卡在 0 会让"往左/往上拖"完全没反应（用户描述为"拖不动"）。
+                _dragNode.X = canvas.X - _dragOffset.X;
+                _dragNode.Y = canvas.Y - _dragOffset.Y;
                 Invalidate();
             }
             else if (_dragKind == DragKind.DrawLink)
@@ -1177,10 +1175,37 @@ namespace VisionPlatform.UI
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+
             if (e.KeyCode == Keys.Delete)
             {
                 DeleteSelected();
                 e.Handled = true;
+                return;
+            }
+
+            // 方向键微调选中节点（1px，Shift 10px）：鼠标拖不动时的兜底手段
+            if (_selectedNodeId != null)
+            {
+                int step = e.Shift ? 10 : 1;
+                float dx = 0f, dy = 0f;
+                if (e.KeyCode == Keys.Left) dx = -step;
+                else if (e.KeyCode == Keys.Right) dx = step;
+                else if (e.KeyCode == Keys.Up) dy = -step;
+                else if (e.KeyCode == Keys.Down) dy = step;
+
+                if (Math.Abs(dx) > 0.01f || Math.Abs(dy) > 0.01f)
+                {
+                    FlowNode n = _flow != null ? _flow.FindNode(_selectedNodeId) : null;
+                    if (n != null)
+                    {
+                        n.X += dx;
+                        n.Y += dy;
+                        RaiseNodeMoved(n);
+                        RaiseChanged();
+                        Invalidate();
+                    }
+                    e.Handled = true;
+                }
             }
         }
 

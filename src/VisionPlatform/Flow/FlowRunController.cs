@@ -70,6 +70,17 @@ namespace VisionPlatform.Flow
         /// <summary>示教了基准的节点 Id（宿主据此刷新参数面板里的基准值）。</summary>
         public string BaselineNodeId = "";
 
+        /// <summary>
+        /// 本周期最慢的节点（名称）与耗时。
+        /// <para>
+        /// 【为什么要暴露它】用户问"CPU 为什么这么高"时，没有归因就只能猜"是不是形状匹配"。
+        /// 直接把最慢节点摆到状态栏，一眼看出瓶颈在哪。
+        /// </para>
+        /// </summary>
+        public string SlowestNodeName = "";
+        /// <summary>最慢节点耗时（毫秒）。</summary>
+        public int SlowestNodeMs = -1;
+
         /// <summary>整链结论（仅链尾快照有效）。</summary>
         public bool Passed;
 
@@ -708,6 +719,21 @@ namespace VisionPlatform.Flow
                 snap.BaselineTaught = res.BaselineTaught;
                 snap.BaselineNodeId = res.BaselineNodeId ?? "";
                 if (res.Shapes != null) snap.AllShapes = new List<IGeometryShape>(res.Shapes);
+
+                // 找本周期最慢的节点（瓶颈归因）
+                if (res.Progress != null)
+                {
+                    int maxMs = -1;
+                    string maxName = "";
+                    foreach (FlowNodeProgress np in res.Progress)
+                    {
+                        if (np == null || np.ElapsedMs <= maxMs) continue;
+                        maxMs = np.ElapsedMs;
+                        maxName = string.IsNullOrEmpty(np.NodeName) ? np.NodeId : np.NodeName;
+                    }
+                    snap.SlowestNodeMs = maxMs;
+                    snap.SlowestNodeName = maxName ?? "";
+                }
             }
 
             if (s != null && s.Progress.Count > 0)

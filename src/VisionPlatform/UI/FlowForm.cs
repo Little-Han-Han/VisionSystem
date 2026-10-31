@@ -808,6 +808,22 @@ namespace VisionPlatform.UI
 
         #region 画布与参数事件
 
+        /// <summary>
+        /// 构建配置提示：Debug 版算法比 Release 慢约 6 倍（形状匹配实测 154ms vs 24ms），
+        /// 现场看到"CPU 高、卡顿"时先把这条摆出来，省得去查算法。
+        /// </summary>
+        private static string BuildHint
+        {
+            get
+            {
+#if DEBUG
+                return "　|　Debug 构建（算法约慢 6 倍，产线请用 Release）";
+#else
+                return "";
+#endif
+            }
+        }
+
         private void OnCanvasNodeSelected(object sender, FlowNodeEventArgs e)
         {
             _selectedNode = (e != null) ? e.Node : null;
@@ -2467,11 +2483,19 @@ namespace VisionPlatform.UI
 
                     if (snap.IsChainEnd)
                     {
-                        SetStatus(string.Format("运行完成（{0} ms）：{1}　{2}{3}",
+                        // 状态栏带上"本周期最慢节点"：CPU 高时用户一眼看出瓶颈是谁，
+                        // 不用猜"是不是形状匹配"。
+                        string slow = "";
+                        if (snap.SlowestNodeMs > 0 && !string.IsNullOrEmpty(snap.SlowestNodeName))
+                            slow = string.Format("　|　瓶颈 {0} {1} ms", snap.SlowestNodeName, snap.SlowestNodeMs);
+
+                        SetStatus(string.Format("运行完成（{0} ms）：{1}　{2}{3}{4}{5}",
                             snap.CycleMs,
                             snap.Passed ? "OK" : "NG",
                             snap.ChainSummary,
-                            snap.Fps > 0.0 ? string.Format("　|　{0:F1} fps", snap.Fps) : ""));
+                            snap.Fps > 0.0 ? string.Format("　|　{0:F1} fps", snap.Fps) : "",
+                            slow,
+                            BuildHint));
                     }
                     else
                     {
