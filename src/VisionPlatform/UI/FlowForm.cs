@@ -2634,8 +2634,11 @@ namespace VisionPlatform.UI
 
             // 预览面板走独立快照路径（_pending / _nodeSlot 持有链尾克隆帧），此处只负责把最终结果
             // 桥接给主视图。主视图会克隆帧、故转发方不可重复释放——与 Publish 的返回值契约一致。
-            if (!FlowOutputChannel.Publish(e) && e.Frame != null)
-                e.Frame.Dispose();
+            if (!FlowOutputChannel.Publish(e))
+            {
+                if (e.Frame != null) e.Frame.Dispose();
+                if (e.DisplayFrame != null) e.DisplayFrame.Dispose();
+            }
         }
 
         #endregion

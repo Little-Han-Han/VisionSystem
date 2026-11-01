@@ -21,6 +21,16 @@ namespace VisionPlatform.Flow
         /// <summary>要显示的图像（<strong>所有权移交订阅者</strong>，订阅者用完后负责释放）。</summary>
         public Bitmap Frame { get; set; }
 
+        /// <summary>
+        /// 仅用于<strong>显示</strong>的合成帧（深度学习掩膜 / 深度伪彩叠在图上）。
+        /// <para>
+        /// 与 <see cref="Frame"/> 分开是硬要求：<c>Frame</c> 是"输出图像"（保存 / 下游 / 其他流程共用），
+        /// 一旦在上面画了掩膜就污染了原图（真实事故）。这里给显示端一份合成图，
+        /// 原图保持不动；为空时显示端退回用 <c>Frame</c>。
+        /// </para>
+        /// </summary>
+        public Bitmap DisplayFrame { get; set; }
+
         /// <summary>叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes { get; set; }
 

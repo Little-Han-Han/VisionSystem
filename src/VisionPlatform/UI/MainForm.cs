@@ -157,7 +157,8 @@ namespace VisionPlatform.UI
         /// <summary>某视图当前待显示的最新结果（覆盖式合帧用）。</summary>
         private sealed class PendingFlowOutput
         {
-            public Bitmap Frame;                 // 最新待显示帧（所有权在此，被替换时释放）
+            public Bitmap Frame;                 // 输出图像（原图；所有权在此，替换时释放）
+            public Bitmap DisplayFrame;          // 显示用合成帧（掩膜/伪彩）；为空则显示 Frame
             public List<IGeometryShape> Shapes;  // 最新叠加图形（引用，不克隆）
             public bool Passed;
             public string Summary = "";
@@ -2049,12 +2050,14 @@ namespace VisionPlatform.UI
                 }
 
                 if (e.Frame != null) e.Frame.Dispose();
+                if (e.DisplayFrame != null) e.DisplayFrame.Dispose();
                 return;
             }
 
             if (IsDisposed || !IsHandleCreated)
             {
                 if (e.Frame != null) e.Frame.Dispose();
+                if (e.DisplayFrame != null) e.DisplayFrame.Dispose();
                 return;
             }
 
@@ -2072,7 +2075,13 @@ namespace VisionPlatform.UI
                     _pendingOutputs[idx] = slot;
                 }
                 if (slot.Frame != null) slot.Frame.Dispose();   // 旧帧被替换，立即释放
+                if (slot.DisplayFrame != null) slot.DisplayFrame.Dispose();
+
+                // 显示用合成帧（深度学习掩膜/伪彩）；没有就用原图帧。
+                // 两者都接管所有权：Frame 是"输出图像"，DisplayFrame 只用于看。
+                slot.DisplayFrame = e.DisplayFrame;
                 slot.Frame = e.Frame;            // 取得帧所有权（原事件持有）
+                e.DisplayFrame = null;
                 slot.Shapes = e.Shapes;
                 slot.Passed = e.Passed;
                 slot.Summary = e.Summary ?? "";
@@ -2089,6 +2098,7 @@ namespace VisionPlatform.UI
                 {
                     PendingFlowOutput s;
                     Bitmap frame;
+                    Bitmap displayFrame;
                     List<IGeometryShape> shapes;
                     bool passed;
                     string summary;
@@ -2100,20 +2110,29 @@ namespace VisionPlatform.UI
                         System.Threading.Interlocked.Exchange(ref s.Posted, 0);   // 允许下次投递
                         // 取出最新快照后释放锁，再操作 UI
                         frame = s.Frame;
+                        displayFrame = s.DisplayFrame;
                         shapes = s.Shapes;
                         passed = s.Passed;
                         summary = s.Summary;
                         cameraName = s.CameraName;
                         s.Frame = null;   // 取出，下方交由视图或释放处理
+                        s.DisplayFrame = null;
                         s.Shapes = null;
                     }
 
-                    if (IsDisposed || !IsHandleCreated) { if (frame != null) frame.Dispose(); return; }
+                    if (IsDisposed || !IsHandleCreated)
+                    {
+                        if (frame != null) frame.Dispose();
+                        if (displayFrame != null) displayFrame.Dispose();
+                        return;
+                    }
 
                     try
                     {
                         ImageViewer view = _views[idx];
-                        Bitmap disp = frame != null ? (Bitmap)frame.Clone() : null;
+                        // 有合成帧就显示它（掩膜/伪彩），否则显示原图帧
+                        Bitmap srcForView = displayFrame ?? frame;
+                        Bitmap disp = srcForView != null ? (Bitmap)srcForView.Clone() : null;
                         if (disp != null) view.SetImage(disp, true);   // 克隆后由控件持有，原帧随后释放
 
                         if (idx < _captions.Count && _captions[idx] != null)
@@ -2144,6 +2163,7 @@ namespace VisionPlatform.UI
                     finally
                     {
                         if (frame != null) frame.Dispose();
+                        if (displayFrame != null) displayFrame.Dispose();
                     }
                 });
             }

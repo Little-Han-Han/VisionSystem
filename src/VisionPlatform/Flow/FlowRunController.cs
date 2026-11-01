@@ -480,7 +480,25 @@ namespace VisionPlatform.Flow
                     Bitmap outFrame = s.Current;
                     s.Current = null;
 
-                    PublishOutput(flow, camera, outFrame, res);
+                    // 显示帧：单独合成一份给主界面看，outFrame（输出/保存用）保持原图。
+                    Bitmap displayFrame = null;
+                    if (_cycleOverlay != null && outFrame != null)
+                    {
+                        try
+                        {
+                            displayFrame = new Bitmap(outFrame.Width, outFrame.Height,
+                                                      System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                            using (var g = Graphics.FromImage(displayFrame))
+                            {
+                                g.DrawImage(outFrame, 0, 0, displayFrame.Width, displayFrame.Height);
+                                g.DrawImage(_cycleOverlay, 0, 0, displayFrame.Width, displayFrame.Height);
+                            }
+                        }
+                        catch (Exception) { displayFrame = null; }
+                    }
+
+                    PublishOutput(flow, camera, outFrame, res, displayFrame);
+                    DropCycleOverlay();
                 }
             }
             finally
@@ -640,7 +658,25 @@ namespace VisionPlatform.Flow
                     {
                         Bitmap outFrame = s.Current;
                         s.Current = null;
-                        PublishOutput(flow, camera, outFrame, res);
+                        // 显示帧：单独合成一份给主界面看，outFrame（输出/保存用）保持原图。
+                    Bitmap displayFrame = null;
+                    if (_cycleOverlay != null && outFrame != null)
+                    {
+                        try
+                        {
+                            displayFrame = new Bitmap(outFrame.Width, outFrame.Height,
+                                                      System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                            using (var g = Graphics.FromImage(displayFrame))
+                            {
+                                g.DrawImage(outFrame, 0, 0, displayFrame.Width, displayFrame.Height);
+                                g.DrawImage(_cycleOverlay, 0, 0, displayFrame.Width, displayFrame.Height);
+                            }
+                        }
+                        catch (Exception) { displayFrame = null; }
+                    }
+
+                    PublishOutput(flow, camera, outFrame, res, displayFrame);
+                    DropCycleOverlay();
                     }
                 }
                 catch (Exception ex)
@@ -842,8 +878,6 @@ namespace VisionPlatform.Flow
                 }
                 catch (Exception) { }
             }
-            DropCycleOverlay();     // 用完即弃，下一周期重新收集
-
             snap.Frame = previewFrame;
             SnapOffsetInfo(snap, s);
             Push(snap);
@@ -952,12 +986,14 @@ namespace VisionPlatform.Flow
         /// <summary>
         /// 回传主界面（沿用既有链路字段）。有订阅者时帧所有权移交，无订阅者时本类释放。
         /// </summary>
-        private void PublishOutput(FlowDefinition flow, ICamera camera, Bitmap frame, FlowRunResult res)
+        private void PublishOutput(FlowDefinition flow, ICamera camera, Bitmap frame, FlowRunResult res,
+                                   Bitmap displayFrame = null)
         {
             var args = new FlowOutputEventArgs
             {
                 ViewIndex = flow != null ? flow.ViewIndex : 1,
                 Frame = frame,
+                DisplayFrame = displayFrame,
                 Shapes = res != null ? res.Shapes : null,
                 Passed = res != null && res.Success && res.Passed,
                 Summary = res != null ? (res.Summary ?? "") : "",
