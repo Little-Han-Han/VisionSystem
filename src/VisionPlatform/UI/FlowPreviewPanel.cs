@@ -1047,6 +1047,10 @@ namespace VisionPlatform.UI
             if (!string.IsNullOrEmpty(primary)) head += " · " + primary;
             if (snap.IsChainEnd && snap.Fps > 0.0)
                 head += string.Format("　|　{0:F1} fps　平均 {1:F0} ms", snap.Fps, snap.AvgCycleMs);
+
+            // 一眼看出"这帧带没带效果图"：没看到彩色时，先看这行有没有标记，
+            // 有标记=绘制问题、没标记=合成没发生，省一轮来回。
+            if (snap.KeepFrameForUi) head += "　|　含效果层";
             lblInfo.Text = head;
 
             // 左上角结论徽标 + 一行摘要：链尾显示整链结论，节点视图显示该节点自身的结论。

@@ -48,6 +48,16 @@ namespace VisionPlatform.Flow
         /// <summary>节点生成的位图叠加层（分割掩膜 / 深度伪彩）；与 Frame 同尺寸，带 alpha。</summary>
         public Bitmap Overlay;
 
+        /// <summary>
+        /// 该快照的帧必须留给 UI 异步使用（深度学习效果图）。
+        /// <para>
+        /// 默认快照广播后帧立即释放（内存只有 2 个快照的水位），但 UI 是 BeginInvoke 异步消费的，
+        /// 释放后再用就是"已销毁的 Bitmap"—— 表现正是效果图闪一下/画不出来。
+        /// 带合成帧的节点快照数量很少（每帧 1~2 个），保留它换正确显示是划算的。
+        /// </para>
+        /// </summary>
+        public bool KeepFrameForUi;
+
         /// <summary>该节点自身产出的叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes = new List<IGeometryShape>();
 
@@ -488,8 +498,8 @@ namespace VisionPlatform.Flow
                         }
                         catch (Exception) { }
                     }
-                    DropCycleOverlay();
-
+                    // 注意：这里不能 DropCycleOverlay —— 链尾快照已经用过它，
+                    // 但同一周期内可能还有订阅者在使用；统一放到下一周期开始时释放。
                     PublishOutput(flow, camera, outFrame, res);
                 }
             }
@@ -767,6 +777,7 @@ namespace VisionPlatform.Flow
 
                         if (snap.Frame != null) snap.Frame.Dispose();   // 原 p.Frame 已被替换
                         snap.Frame = composed;
+                        snap.KeepFrameForUi = true;   // UI 异步消费，不要广播后立刻释放
                     }
                     catch (Exception) { /* 合成失败就退回原帧，不影响其他显示 */ }
                 }
@@ -851,6 +862,26 @@ namespace VisionPlatform.Flow
                 }
             }
 
+            // 链尾帧同样叠加本周期的效果图：
+            // 否则「链尾结果」模式（或未选中任何节点时）会用纯原图把刚显示的掩膜/伪彩顶掉，
+            // 表现就是"效果图闪一下又被原图刷新"。
+            if (_cycleOverlay != null && previewFrame != null)
+            {
+                try
+                {
+                    var composed = new Bitmap(previewFrame.Width, previewFrame.Height,
+                                              System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    using (var g = Graphics.FromImage(composed))
+                    {
+                        g.DrawImage(previewFrame, 0, 0, composed.Width, composed.Height);
+                        g.DrawImage(_cycleOverlay, 0, 0, composed.Width, composed.Height);
+                    }
+                    previewFrame.Dispose();
+                    previewFrame = composed;
+                }
+                catch (Exception) { }
+            }
+
             snap.Frame = previewFrame;
             SnapOffsetInfo(snap, s);
             Push(snap);
@@ -888,7 +919,12 @@ namespace VisionPlatform.Flow
             if (snap == null) return;
 
             bool keep;
-            if (_selectedNodeId != "" && snap.NodeId == _selectedNodeId)
+            if (snap.KeepFrameForUi)
+            {
+                // 效果图快照：帧交给 UI（它在 BeginInvoke 里异步使用），这里不占 _nodeSlot
+                keep = true;
+            }
+            else if (_selectedNodeId != "" && snap.NodeId == _selectedNodeId)
             {
                 FlowProgressSnapshot old = Interlocked.Exchange(ref _nodeSlot, snap);
                 if (old != null) old.ReleaseFrame();
