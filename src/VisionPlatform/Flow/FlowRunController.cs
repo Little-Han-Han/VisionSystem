@@ -45,6 +45,9 @@ namespace VisionPlatform.Flow
         /// <summary>该节点的输出帧；可能为 null（无留帧时）。<strong>消费方负责释放</strong>。</summary>
         public Bitmap Frame;
 
+        /// <summary>节点生成的位图叠加层（分割掩膜 / 深度伪彩）；与 Frame 同尺寸，带 alpha。</summary>
+        public Bitmap Overlay;
+
         /// <summary>该节点自身产出的叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes = new List<IGeometryShape>();
 
@@ -116,6 +119,13 @@ namespace VisionPlatform.Flow
                 try { Frame.Dispose(); }
                 catch (Exception) { }
                 Frame = null;
+            }
+
+            if (Overlay != null)
+            {
+                try { Overlay.Dispose(); }
+                catch (Exception) { }
+                Overlay = null;
             }
         }
     }
@@ -685,6 +695,7 @@ namespace VisionPlatform.Flow
 
             // 帧所有权转移：从会话转移到快照，避免会话 Dispose 时连带释放预览正在显示的帧
             snap.Frame = p.Frame;
+            snap.Overlay = p.Overlay;      // 所有权随 p，p 不再复用
             p.Frame = null;
 
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);

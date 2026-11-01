@@ -244,7 +244,8 @@ int DetCreate(Context* ctx, const char* model_path, const char* device);
 // ---------------------- 深度学习（seg / pose / depth）---------------------
 int DlSegCreate(Context* ctx, const char* model_path, const char* device);
 int DlSegRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
-             VA_DlBox* out_boxes, int max_count, int* out_count);
+             VA_DlBox* out_boxes, int max_count, int* out_count,
+             unsigned char* out_label_map, int label_cap, int* label_w, int* label_h);
 
 int DlPoseCreate(Context* ctx, const char* model_path, const char* device);
 int DlPoseRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,

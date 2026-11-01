@@ -78,6 +78,7 @@
     <Compile Include="Flow\FlowRunContext.cs" />
     <Compile Include="Flow\ScriptEngine.cs" />
     <Compile Include="Flow\NodeOutputSchema.cs" />
+    <Compile Include="Flow\NodeOverlayFactory.cs" />
     <Compile Include="UI\ScriptEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>

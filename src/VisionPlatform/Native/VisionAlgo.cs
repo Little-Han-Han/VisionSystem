@@ -1215,34 +1215,57 @@ namespace VisionPlatform.Native
             return mp;
         }
 
-        /// <summary>语义分割 / 姿态估计（共用一套目标结构）。</summary>
-        public OpResult<List<NativeDl.DlTarget>> DlDetect(int task, Bitmap src,
-                                                          float scoreThresh, float iouThresh,
-                                                          int maxCount, string modelPath, string device)
+        /// <summary>分割/姿态的统一输出：目标列表 + 可选的分割标签图。</summary>
+        public sealed class DlResult
         {
-            if (src == null) return OpResult<List<NativeDl.DlTarget>>.Fail("输入图像为空");
+            public List<NativeDl.DlTarget> Targets = new List<NativeDl.DlTarget>();
+            public byte[] LabelMap;
+            public int MapW;
+            public int MapH;
+        }
+
+        /// <summary>语义分割 / 姿态估计（共用一套目标结构）。</summary>
+        public OpResult<DlResult> DlDetect(int task, Bitmap src,
+                                           float scoreThresh, float iouThresh,
+                                           int maxCount, string modelPath, string device)
+        {
+            if (src == null) return OpResult<DlResult>.Fail("输入图像为空");
 
             string err;
             string mp = DlEnsure(task, modelPath, device, out err);
-            if (mp == null) return OpResult<List<NativeDl.DlTarget>>.Fail(err);
+            if (mp == null) return OpResult<DlResult>.Fail(err);
 
             using (var ci = new ColorInput(src))
             {
                 try
                 {
                     VA_Image img = ci.Image;
-                    List<NativeDl.DlTarget> list = task == NativeDl.TaskSeg
-                        ? NativeDl.SegRun(_handle, ref img, scoreThresh, iouThresh, maxCount, out err)
-                        : NativeDl.PoseRun(_handle, ref img, scoreThresh, iouThresh, maxCount, out err);
+                    var output = new DlResult();
 
-                    if (!string.IsNullOrEmpty(err))
-                        return OpResult<List<NativeDl.DlTarget>>.Fail(err);
+                    if (task == NativeDl.TaskSeg)
+                    {
+                        NativeDl.SegResult seg = NativeDl.SegRun(_handle, ref img, scoreThresh, iouThresh,
+                                                                 maxCount, out err);
+                        if (!string.IsNullOrEmpty(err)) return OpResult<DlResult>.Fail(err);
 
-                    return OpResult<List<NativeDl.DlTarget>>.Ok(list);
+                        output.Targets = seg.Targets;
+                        output.LabelMap = seg.LabelMap;
+                        output.MapW = seg.MapW;
+                        output.MapH = seg.MapH;
+                    }
+                    else
+                    {
+                        List<NativeDl.DlTarget> pose = NativeDl.PoseRun(_handle, ref img, scoreThresh, iouThresh,
+                                                                        maxCount, out err);
+                        if (!string.IsNullOrEmpty(err)) return OpResult<DlResult>.Fail(err);
+                        output.Targets = pose;
+                    }
+
+                    return OpResult<DlResult>.Ok(output);
                 }
                 catch (Exception ex)
                 {
-                    return OpResult<List<NativeDl.DlTarget>>.Fail("推理异常：" + ex.Message);
+                    return OpResult<DlResult>.Fail("推理异常：" + ex.Message);
                 }
             }
         }
@@ -1251,12 +1274,11 @@ namespace VisionPlatform.Native
 
         private string _ocrDlKey = "";
 
-        /// <summary>加载 PaddleOCR 两个模型 + 字典（按 det|rec|dict|device 缓存）。</summary>
+        /// <summary>加载 PaddleOCR 两个模型 + 字典（按 det|rec|dict|device 缓存）。det 可为空。</summary>
         private string OcrDlEnsure(string det, string rec, string dict, string device, out string error)
         {
             error = "";
 
-            // det 允许为空：只给 rec 时走"整图识别"（一个模型就能出结果）
             string d1 = string.IsNullOrWhiteSpace(det) ? "" : ResolveModelPath(det);
             string d2 = ResolveModelPath(rec);
             string d3 = ResolveModelPath(dict);

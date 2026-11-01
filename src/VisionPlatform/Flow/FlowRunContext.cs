@@ -205,6 +205,13 @@ namespace VisionPlatform.Flow
         /// <summary>节点上报的逐个目标几何（Blob 每个区域 / 匹配每个目标）。</summary>
         public List<RegionInfo> Regions = new List<RegionInfo>();
 
+        /// <summary>
+        /// 节点生成的<strong>位图叠加层</strong>（与输入帧同尺寸、带透明通道）。
+        /// 分割掩膜上色、深度伪彩图这类"像素级效果"矢量图形画不出来，走这个通道；
+        /// 预览面板会把它与帧合成后显示，矢量层仍画在最上面。
+        /// </summary>
+        public Bitmap Overlay;
+
         /// <summary>节点 Id。</summary>
         public string NodeId { get; set; }
 

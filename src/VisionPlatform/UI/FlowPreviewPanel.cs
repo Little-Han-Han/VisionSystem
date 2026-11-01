@@ -1014,7 +1014,27 @@ namespace VisionPlatform.UI
             _curNodeId = snap.NodeId ?? "";
             _curNodeOwnShapes = !ReferenceEquals(shapes, snap.AllShapes);
 
-            ShowFrame(snap.Frame, shapes, aux);
+            // 位图叠加层（分割掩膜 / 深度伪彩）：先与帧合成再交给视图，
+            // 这样 ImageViewer 不用知道叠加层的存在，矢量图形仍画在最上面。
+            Bitmap frameToShow = snap.Frame;
+            if (frameToShow != null && snap.Overlay != null)
+            {
+                try
+                {
+                    var composed = new Bitmap(frameToShow.Width, frameToShow.Height,
+                                              System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    using (var g = Graphics.FromImage(composed))
+                    {
+                        g.DrawImage(frameToShow, 0, 0, frameToShow.Width, frameToShow.Height);
+                        g.DrawImage(snap.Overlay, 0, 0, frameToShow.Width, frameToShow.Height);
+                    }
+                    frameToShow.Dispose();
+                    frameToShow = composed;
+                }
+                catch (Exception) { /* 合成失败就用原帧，不影响其他显示 */ }
+            }
+
+            ShowFrame(frameToShow, shapes, aux);
             snap.Frame = null;      // 已交给视图持有（OwnsImage=true），此后不得再释放
 
             // 【三处文案同源（UI-R09）】顶条、覆盖层、状态栏都走 NodeResultText，

@@ -603,6 +603,11 @@ namespace VisionPlatform.Flow
                 p.Outputs.Add(new PortValue("Mean", "均值", FlowPortKind.Number, mean));
                 // mean 是**归一化后**（0~1）的均值，mn/mx 是**模型原始输出**；
                 // 混在一句话里会让人以为"均值怎么不在范围里"，这里分开写。
+                // 深度伪彩叠加层：没有它只能看到两行数字，看不到"哪里近哪里远"
+                p.Overlay = NodeOverlayFactory.DepthHeat(map, input.Width, input.Height,
+                                                         input.Width, input.Height);
+                DumpOverlay(p.Overlay, node.Name, task);
+
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "深度估计：原始范围 {0:F3}~{1:F3} · 归一化均值 {2:F3}", mn, mx, mean);
                 p.Summary += LoadHint(loadWatch) + DescribeHint(task, loadWatch.ElapsedMilliseconds);
@@ -620,7 +625,17 @@ namespace VisionPlatform.Flow
                 return false;
             }
 
-            List<NativeDl.DlTarget> targets = r.Value ?? new List<NativeDl.DlTarget>();
+            VisionAlgo.DlResult dl = r.Value ?? new VisionAlgo.DlResult();
+            List<NativeDl.DlTarget> targets = dl.Targets ?? new List<NativeDl.DlTarget>();
+
+            // 分割：把逐像素标签图上色成叠加层（这才是"像素级分割效果"，
+            // 光有矩形框看不出边界在哪）
+            if (task == NativeDl.TaskSeg && dl.LabelMap != null && dl.MapW > 0 && dl.MapH > 0)
+            {
+                p.Overlay = NodeOverlayFactory.SegMask(dl.LabelMap, dl.MapW, dl.MapH,
+                                                       input.Width, input.Height, targets.Count);
+                DumpOverlay(p.Overlay, node.Name, task);
+            }
             p.Metrics.TargetCount = targets.Count;
 
             double best = 0;
@@ -652,10 +667,30 @@ namespace VisionPlatform.Flow
                     p.Shapes.Add(FlowShapes.BlobRect(cx, cy, t.Width, t.Height,
                         string.Format(CultureInfo.InvariantCulture, "#{0} {1:F2}", i + 1, t.Score)));
 
+                    // 关键点：小方块；若关键点数正好 17（COCO 人体），再按骨架连接画线
+                    bool coco = NodeOverlayFactory.IsCoco17(t.KeyPoints.Count);
+                    Color skelColor = NodeOverlayFactory.ColorOf(i);
+
+                    if (coco)
+                    {
+                        for (int e = 0; e < NodeOverlayFactory.CocoSkeleton.GetLength(0); e++)
+                        {
+                            int a1 = NodeOverlayFactory.CocoSkeleton[e, 0];
+                            int b1 = NodeOverlayFactory.CocoSkeleton[e, 1];
+                            if (a1 >= t.KeyPoints.Count || b1 >= t.KeyPoints.Count) continue;
+                            if (t.KeyPointScores.Count > a1 && t.KeyPointScores[a1] < 0.3f) continue;
+                            if (t.KeyPointScores.Count > b1 && t.KeyPointScores[b1] < 0.3f) continue;
+
+                            p.Shapes.Add(FlowShapes.Line(t.KeyPoints[a1].X, t.KeyPoints[a1].Y,
+                                                         t.KeyPoints[b1].X, t.KeyPoints[b1].Y,
+                                                         skelColor, 2.5f, false));
+                        }
+                    }
+
                     for (int k = 0; k < t.KeyPoints.Count; k++)
                     {
                         if (t.KeyPointScores.Count > k && t.KeyPointScores[k] < 0.3f) continue;
-                        p.Shapes.Add(FlowShapes.BlobRect(t.KeyPoints[k].X, t.KeyPoints[k].Y, 4, 4, null));
+                        p.Shapes.Add(FlowShapes.BlobRect(t.KeyPoints[k].X, t.KeyPoints[k].Y, 5, 5, null));
                     }
                 }
             }
@@ -826,6 +861,26 @@ namespace VisionPlatform.Flow
             return (sw != null && sw.ElapsedMilliseconds > 1500)
                 ? string.Format(CultureInfo.InvariantCulture, "（首次加载 {0} ms）", sw.ElapsedMilliseconds)
                 : "";
+        }
+
+        /// <summary>
+        /// 调试用：把节点生成的效果图（掩膜/深度伪彩）存成 PNG。
+        /// 只有设了环境变量 <c>VA_DL_DUMP=&lt;目录&gt;</c> 才写，平时无开销。
+        /// </summary>
+        private static void DumpOverlay(Bitmap overlay, string nodeName, int task)
+        {
+            if (overlay == null) return;
+
+            try
+            {
+                string dir = Environment.GetEnvironmentVariable("VA_DL_DUMP");
+                if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir)) return;
+
+                string tag = task == NativeDl.TaskSeg ? "seg" : task == NativeDl.TaskPose ? "pose" : "depth";
+                string file = System.IO.Path.Combine(dir, "dl_" + tag + ".png");
+                overlay.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            catch (Exception) { }
         }
 
         /// <summary>models\&lt;任务&gt;\ 下第一个 .onnx（用户把模型丢进去即可用）。</summary>

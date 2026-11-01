@@ -53,10 +53,17 @@ typedef struct VA_DlKeyPoint {
 VA_API int VA_CALL va_dl_seg_create(void* handle, const char* model_path, const char* device);
 
 /* 推理一帧：输出每个目标的框 + 类别 + 分数 + 掩膜面积。
- *   max_count 为数组容量；超过时只写前 max_count 个并返回 VA_ERR_SIZE。 */
+ *   max_count 为数组容量；超过时只写前 max_count 个并返回 VA_ERR_SIZE。
+ *
+ *   out_label_map 可选（传 0 则不算逐像素掩膜，速度快）：
+ *     写入 proto 分辨率（通常 160×160）的 **标签图**，0 = 背景，i = 第 i 个目标（1 起），
+ *     与 out_boxes 的顺序一一对应。调用方负责按框尺寸缩放到原图后上色。
+ *     label_w / label_h 由本函数回填实际尺寸。 */
 VA_API int VA_CALL va_dl_seg_run(void* handle, const VA_Image* img,
                                  float score_thresh, float iou_thresh,
-                                 VA_DlBox* out_boxes, int max_count, int* out_count);
+                                 VA_DlBox* out_boxes, int max_count, int* out_count,
+                                 unsigned char* out_label_map, int label_cap,
+                                 int* label_w, int* label_h);
 
 /* ---------------- 姿态估计 ---------------- */
 

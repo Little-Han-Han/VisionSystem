@@ -384,10 +384,13 @@ int VA_CALL va_dl_seg_create(void* handle, const char* model_path, const char* d
 }
 
 int VA_CALL va_dl_seg_run(void* handle, const VA_Image* img, float score_thresh, float iou_thresh,
-                          VA_DlBox* out_boxes, int max_count, int* out_count)
+                          VA_DlBox* out_boxes, int max_count, int* out_count,
+                          unsigned char* out_label_map, int label_cap,
+                          int* label_w, int* label_h)
 {
     VA_CTX();
-    return va::DlSegRun(ctx, img, score_thresh, iou_thresh, out_boxes, max_count, out_count);
+    return va::DlSegRun(ctx, img, score_thresh, iou_thresh, out_boxes, max_count, out_count,
+                        out_label_map, label_cap, label_w, label_h);
 }
 
 int VA_CALL va_dl_pose_create(void* handle, const char* model_path, const char* device)

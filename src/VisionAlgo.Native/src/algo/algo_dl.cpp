@@ -248,10 +248,13 @@ int DlSegCreate(Context* ctx, const char* model_path, const char* device)
 }
 
 int DlSegRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
-             VA_DlBox* out_boxes, int max_count, int* out_count)
+             VA_DlBox* out_boxes, int max_count, int* out_count,
+             unsigned char* out_label_map, int label_cap, int* label_w, int* label_h)
 {
     if (out_boxes == 0 || out_count == 0 || max_count <= 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
     *out_count = 0;
+    if (label_w) *label_w = 0;
+    if (label_h) *label_h = 0;
 
     DlState& st = ctx->seg;
     std::vector<float> blob;
@@ -308,7 +311,8 @@ int DlSegRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_th
         std::vector<DlBox> kept;
         NMS(cands, iou_thresh, kept);
 
-        // 掩膜面积：sigmoid(coef · proto) > 0.5 的像素数（在框内、按 2px 步长抽样，够用且省时）
+        // 掩膜：sigmoid(coef · proto) > 0 的像素属于该目标。
+        // 同时写"标签图"（0=背景，i=第 i 个目标的序号），前端据此上色画出像素级分割效果。
         if (!kept.empty() && st.compiled.outputs().size() > 1)
         {
             auto proto = st.infer.get_output_tensor(1);
@@ -317,24 +321,31 @@ int DlSegRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_th
             {
                 const float* pd = proto.data<float>();
                 int ph = (int)ps[2], pw = (int)ps[3];
-                float sx = (float)pw / (float)st.input_w;
-                float sy = (float)ph / (float)st.input_h;
+
+                bool wantMap = (out_label_map != 0 && label_cap >= ph * pw);
+                if (wantMap) std::memset(out_label_map, 0, (size_t)ph * pw);
+                if (label_w) *label_w = pw;
+                if (label_h) *label_h = ph;
 
                 for (size_t i = 0; i < kept.size(); ++i)
                 {
                     DlBox& b = kept[i];
-                    int x0 = std::max(0, (int)((b.x * scale + padX) * sx));
-                    int y0 = std::max(0, (int)((b.y * scale + padY) * sy));
-                    int x1 = std::min(pw - 1, (int)(((b.x + b.w) * scale + padX) * sx));
-                    int y1 = std::min(ph - 1, (int)(((b.y + b.h) * scale + padY) * sy));
 
                     int count = 0;
-                    for (int py = y0; py <= y1; py += 2) {
-                        for (int px = x0; px <= x1; px += 2) {
+                    for (int py = 0; py < ph; ++py)
+                    {
+                        for (int px = 0; px < pw; ++px)
+                        {
                             float acc = 0.0f;
                             for (int k = 0; k < coefCount; ++k)
                                 acc += b.coef[k] * pd[(size_t)k * ph * pw + (size_t)py * pw + px];
-                            if (acc > 0.0f) count += 4;   // 2×2 抽样折算
+                            if (acc > 0.0f)
+                            {
+                                count++;
+                                // 后写的目标覆盖先写的（NMS 后按分数降序，大目标通常在前，
+                                // 这里让后面的小目标盖住它，视觉上边界更清楚）
+                                if (wantMap) out_label_map[(size_t)py * pw + px] = (unsigned char)(i + 1);
+                            }
                         }
                     }
                     b.maskArea = count;

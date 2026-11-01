@@ -52,7 +52,9 @@ namespace VisionPlatform.Native
         private static extern int va_dl_seg_run(IntPtr handle, ref VA_Image img,
                                                 float score_thresh, float iou_thresh,
                                                 [In, Out] VA_DlBox[] out_boxes,
-                                                int max_count, out int out_count);
+                                                int max_count, out int out_count,
+                                                [In, Out] byte[] label_map, int label_cap,
+                                                out int label_w, out int label_h);
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         private static extern int va_dl_pose_create(IntPtr handle, byte[] model_path, byte[] device);
@@ -141,28 +143,42 @@ namespace VisionPlatform.Native
             return va_dl_seg_create(handle, Utf8Z(modelPath), Utf8Z(device));
         }
 
-        /// <summary>分割推理：返回目标列表；err 非空表示失败原因。</summary>
-        public static List<DlTarget> SegRun(IntPtr handle, ref VA_Image img,
-                                            float scoreThresh, float iouThresh, int maxCount,
-                                            out string err)
+        /// <summary>分割结果：目标列表 + 逐像素标签图（0=背景，i=第 i 个目标，1 起）。</summary>
+        public sealed class SegResult
+        {
+            public List<DlTarget> Targets = new List<DlTarget>();
+            /// <summary>标签图（长 = MapW × MapH），null = 没算掩膜。</summary>
+            public byte[] LabelMap;
+            public int MapW;
+            public int MapH;
+        }
+
+        /// <summary>分割推理：返回目标列表 + 逐像素标签图；err 非空表示失败原因。</summary>
+        public static SegResult SegRun(IntPtr handle, ref VA_Image img,
+                                       float scoreThresh, float iouThresh, int maxCount,
+                                       out string err)
         {
             err = "";
-            var list = new List<DlTarget>();
+            var result = new SegResult();
             if (maxCount <= 0) maxCount = 100;
 
             var buf = new VA_DlBox[maxCount];
-            int count;
-            int rc = va_dl_seg_run(handle, ref img, scoreThresh, iouThresh, buf, maxCount, out count);
+            // 标签图按 proto 分辨率（通常是输入的 1/4）预留：640 输入 → 160×160
+            var labels = new byte[256 * 256];
+            int count, mapW, mapH;
+
+            int rc = va_dl_seg_run(handle, ref img, scoreThresh, iouThresh, buf, maxCount, out count,
+                                   labels, labels.Length, out mapW, out mapH);
 
             if (rc != 0 && rc != ErrSize)
             {
                 err = "原生返回码 " + rc;
-                return list;
+                return result;
             }
 
             for (int i = 0; i < count; i++)
             {
-                list.Add(new DlTarget
+                result.Targets.Add(new DlTarget
                 {
                     X = buf[i].x, Y = buf[i].y,
                     Width = buf[i].w, Height = buf[i].h,
@@ -171,7 +187,15 @@ namespace VisionPlatform.Native
                     MaskArea = buf[i].mask_area
                 });
             }
-            return list;
+
+            if (mapW > 0 && mapH > 0 && mapW * mapH <= labels.Length)
+            {
+                result.LabelMap = new byte[mapW * mapH];
+                Array.Copy(labels, result.LabelMap, result.LabelMap.Length);
+                result.MapW = mapW;
+                result.MapH = mapH;
+            }
+            return result;
         }
 
         /// <summary>加载姿态模型。</summary>
