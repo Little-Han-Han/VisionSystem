@@ -695,8 +695,40 @@ namespace VisionPlatform.Flow
 
             // 帧所有权转移：从会话转移到快照，避免会话 Dispose 时连带释放预览正在显示的帧
             snap.Frame = p.Frame;
-            snap.Overlay = p.Overlay;      // 所有权随 p，p 不再复用
             p.Frame = null;
+
+            // ---- 位图叠加层（分割掩膜 / 深度伪彩）立即合成进帧 ----
+            // 【为什么在这里合成】连续运行不保留逐节点帧（p.Frame 为空），预览面板拿不到底图，
+            // 点击节点就只剩空白或上一帧 —— 表现为"点了没效果图 / 被原图刷掉"。
+            // 这里用「节点自己的帧」或「当前工作帧」作底图，合成成一张新帧交给 UI，
+            // UI 端就只需要正常显示 snap.Frame，不必关心叠加层的存在。
+            if (p.Overlay != null)
+            {
+                Bitmap baseFrame = snap.Frame;
+                if (baseFrame == null && s != null) baseFrame = s.Current;
+
+                if (baseFrame != null)
+                {
+                    try
+                    {
+                        var composed = new Bitmap(baseFrame.Width, baseFrame.Height,
+                                                  System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                        using (var g = Graphics.FromImage(composed))
+                        {
+                            g.DrawImage(baseFrame, 0, 0, composed.Width, composed.Height);
+                            g.DrawImage(p.Overlay, 0, 0, composed.Width, composed.Height);
+                        }
+
+                        if (snap.Frame != null) snap.Frame.Dispose();   // 原 p.Frame 已被替换
+                        snap.Frame = composed;
+                    }
+                    catch (Exception) { /* 合成失败就退回原帧，不影响其他显示 */ }
+                }
+
+                try { p.Overlay.Dispose(); }
+                catch (Exception) { }
+                p.Overlay = null;
+            }
 
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);
             if (p.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(p.AuxShapes);
