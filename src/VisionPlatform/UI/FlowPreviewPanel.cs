@@ -1032,6 +1032,11 @@ namespace VisionPlatform.UI
                     frameToShow = composed;
                 }
                 catch (Exception) { /* 合成失败就用原帧，不影响其他显示 */ }
+
+                // 合成完就把叠加层释放掉，否则每帧泄漏一张 32bpp 图
+                try { snap.Overlay.Dispose(); }
+                catch (Exception) { }
+                snap.Overlay = null;
             }
 
             ShowFrame(frameToShow, shapes, aux);

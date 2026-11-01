@@ -480,26 +480,6 @@ namespace VisionPlatform.Flow
                     Bitmap outFrame = s.Current;
                     s.Current = null;
 
-                    // 主界面看的也是"结果画面"：把本周期的分割掩膜 / 深度伪彩叠上去，
-                    // 否则主界面永远只有原图（用户反馈"两个界面都看不到效果图"）。
-                    if (_cycleOverlay != null && outFrame != null)
-                    {
-                        try
-                        {
-                            var composed = new Bitmap(outFrame.Width, outFrame.Height,
-                                                      System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                            using (var g = Graphics.FromImage(composed))
-                            {
-                                g.DrawImage(outFrame, 0, 0, composed.Width, composed.Height);
-                                g.DrawImage(_cycleOverlay, 0, 0, composed.Width, composed.Height);
-                            }
-                            outFrame.Dispose();
-                            outFrame = composed;
-                        }
-                        catch (Exception) { }
-                    }
-                    // 注意：这里不能 DropCycleOverlay —— 链尾快照已经用过它，
-                    // 但同一周期内可能还有订阅者在使用；统一放到下一周期开始时释放。
                     PublishOutput(flow, camera, outFrame, res);
                 }
             }
@@ -613,8 +593,6 @@ namespace VisionPlatform.Flow
                 try
                 {
                     // 连续运行关掉逐节点留帧：避免每周期 N 份 Bitmap 堆积
-                    DropCycleOverlay();     // 上一周期的叠加层作废
-
                     // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）
                     s = _runner.Begin(flow, camera, false, false);
 
@@ -719,23 +697,6 @@ namespace VisionPlatform.Flow
             return FlowNodeType.ResultOutput;
         }
 
-        /// <summary>
-        /// 本周期最后一个带叠加层的节点产物（分割掩膜 / 深度伪彩）。
-        /// 主界面显示的是"输出帧"，它不经过节点快照 —— 要让它也有效果图，
-        /// 就得把这一份叠加上去。每周期开始时释放上一份。
-        /// </summary>
-        private Bitmap _cycleOverlay;
-
-        private void DropCycleOverlay()
-        {
-            if (_cycleOverlay != null)
-            {
-                try { _cycleOverlay.Dispose(); }
-                catch (Exception) { }
-                _cycleOverlay = null;
-            }
-        }
-
         private void PublishNode(FlowRunSession s, FlowNodeProgress p, bool chainEnd, double fps, double avgMs)
         {            var snap = new FlowProgressSnapshot();
             snap.NodeId = p.NodeId ?? "";
@@ -753,39 +714,14 @@ namespace VisionPlatform.Flow
             snap.Frame = p.Frame;
             p.Frame = null;
 
-            // ---- 位图叠加层（分割掩膜 / 深度伪彩）立即合成进帧 ----
-            // 【为什么在这里合成】连续运行不保留逐节点帧（p.Frame 为空），预览面板拿不到底图，
-            // 点击节点就只剩空白或上一帧 —— 表现为"点了没效果图 / 被原图刷掉"。
-            // 这里用「节点自己的帧」或「当前工作帧」作底图，合成成一张新帧交给 UI，
-            // UI 端就只需要正常显示 snap.Frame，不必关心叠加层的存在。
+            // 位图叠加层（分割掩膜 / 深度伪彩）交给快照，由预览面板与**节点自己的帧**合成。
+            // ⚠️ 绝不能在这里拿 s.Current 当底图：连续运行时 s.Current 是"最后处理完的那帧"，
+            //    拿它合成会把图像源/上游节点的画面也变成下游处理后的图（真实踩过的坑）。
             if (p.Overlay != null)
             {
-                Bitmap baseFrame = snap.Frame;
-                if (baseFrame == null && s != null) baseFrame = s.Current;
-
-                if (baseFrame != null)
-                {
-                    try
-                    {
-                        var composed = new Bitmap(baseFrame.Width, baseFrame.Height,
-                                                  System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                        using (var g = Graphics.FromImage(composed))
-                        {
-                            g.DrawImage(baseFrame, 0, 0, composed.Width, composed.Height);
-                            g.DrawImage(p.Overlay, 0, 0, composed.Width, composed.Height);
-                        }
-
-                        if (snap.Frame != null) snap.Frame.Dispose();   // 原 p.Frame 已被替换
-                        snap.Frame = composed;
-                        snap.KeepFrameForUi = true;   // UI 异步消费，不要广播后立刻释放
-                    }
-                    catch (Exception) { /* 合成失败就退回原帧，不影响其他显示 */ }
-                }
-
-                // 保留一份给主界面的输出帧用（同周期内有效，下一周期开始前释放）
-                DropCycleOverlay();
-                _cycleOverlay = p.Overlay;
+                snap.Overlay = p.Overlay;
                 p.Overlay = null;
+                snap.KeepFrameForUi = true;   // UI 异步消费，广播后别立刻释放
             }
 
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);
@@ -860,26 +796,6 @@ namespace VisionPlatform.Flow
                     if (snap.Shapes.Count == 0 && last.Shapes != null)
                         snap.Shapes = new List<IGeometryShape>(last.Shapes);
                 }
-            }
-
-            // 链尾帧同样叠加本周期的效果图：
-            // 否则「链尾结果」模式（或未选中任何节点时）会用纯原图把刚显示的掩膜/伪彩顶掉，
-            // 表现就是"效果图闪一下又被原图刷新"。
-            if (_cycleOverlay != null && previewFrame != null)
-            {
-                try
-                {
-                    var composed = new Bitmap(previewFrame.Width, previewFrame.Height,
-                                              System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                    using (var g = Graphics.FromImage(composed))
-                    {
-                        g.DrawImage(previewFrame, 0, 0, composed.Width, composed.Height);
-                        g.DrawImage(_cycleOverlay, 0, 0, composed.Width, composed.Height);
-                    }
-                    previewFrame.Dispose();
-                    previewFrame = composed;
-                }
-                catch (Exception) { }
             }
 
             snap.Frame = previewFrame;

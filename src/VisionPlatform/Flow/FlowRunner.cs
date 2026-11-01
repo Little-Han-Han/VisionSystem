@@ -606,6 +606,7 @@ namespace VisionPlatform.Flow
                 // 深度伪彩叠加层：没有它只能看到两行数字，看不到"哪里近哪里远"
                 p.Overlay = NodeOverlayFactory.DepthHeat(map, input.Width, input.Height,
                                                          input.Width, input.Height);
+                EnsureNodeFrame(s, p);
                 DumpOverlay(p.Overlay, node.Name, task);
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
@@ -634,6 +635,7 @@ namespace VisionPlatform.Flow
             {
                 p.Overlay = NodeOverlayFactory.SegMask(dl.LabelMap, dl.MapW, dl.MapH,
                                                        input.Width, input.Height, targets.Count);
+                EnsureNodeFrame(s, p);      // 该节点自己的帧（不是 s.Current 的引用）
                 DumpOverlay(p.Overlay, node.Name, task);
             }
             p.Metrics.TargetCount = targets.Count;
@@ -694,6 +696,8 @@ namespace VisionPlatform.Flow
                     }
                 }
             }
+
+            EnsureNodeFrame(s, p);          // 姿态没有位图叠加，但点开也该看到当时的画面
 
             int kps = task == NativeDl.TaskPose ? _algo.DlPoseKeypoints() : 0;
             p.Outputs.Add(new PortValue("Count", "目标数", FlowPortKind.Number, (double)targets.Count));
@@ -855,6 +859,21 @@ namespace VisionPlatform.Flow
             return string.IsNullOrEmpty(d) ? "" : "（" + d + "）";
         }
 
+        /// <summary>
+        /// 让节点留下一份<strong>属于自己的帧</strong>（连续运行默认不留帧）。
+        /// <para>
+        /// 用途：点开该节点时能看到"它当时处理的画面"。
+        /// ⚠️ 必须克隆，绝不能把 <c>s.Current</c> 直接交出去 —— 那是会话的工作帧，
+        ///    后续节点会继续改写它，交出去等于把"处理后的图"当成该节点的画面（踩过的坑）。
+        /// </para>
+        /// </summary>
+        private static void EnsureNodeFrame(FlowRunSession s, FlowNodeProgress p)
+        {
+            if (p == null || p.Frame != null || s == null || s.Current == null) return;
+            try { p.Frame = (Bitmap)s.Current.Clone(); }
+            catch (Exception) { p.Frame = null; }
+        }
+
         /// <summary>首次加载（编译模型）超过 1.5 秒时在摘要里注明，避免误判成卡死。</summary>
         private static string LoadHint(Stopwatch sw)
         {
@@ -908,6 +927,7 @@ namespace VisionPlatform.Flow
         private bool RunImageSource(FlowRunSession s, FlowNode node, FlowNodeProgress p)
         {
             string source = node.GetString("Source", "Camera");
+
 
             // 文件夹模式要写进摘要的「第 i/N 张 · 文件名」；其它模式为空
             string frameNote = "";
@@ -1053,6 +1073,10 @@ namespace VisionPlatform.Flow
                     ? string.Format(CultureInfo.InvariantCulture, "取图 {0}x{1}", work.Width, work.Height)
                     : string.Format(CultureInfo.InvariantCulture, "{0} · 取图 {1}x{2}",
                                     frameNote, work.Width, work.Height);
+
+                // 留一份"刚采进来的原图"：点开图像源必须看到原图。
+                // ⚠️ 克隆，不能把 s.Current 交出去（后续节点会改写它）。
+                EnsureNodeFrame(s, p);
                 return true;
             }
             catch
