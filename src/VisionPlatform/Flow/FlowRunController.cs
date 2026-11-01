@@ -593,6 +593,8 @@ namespace VisionPlatform.Flow
                 try
                 {
                     // 连续运行关掉逐节点留帧：避免每周期 N 份 Bitmap 堆积
+                    DropCycleOverlay();     // 上一周期残留的效果层作废
+
                     // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）
                     s = _runner.Begin(flow, camera, false, false);
 
@@ -697,6 +699,25 @@ namespace VisionPlatform.Flow
             return FlowNodeType.ResultOutput;
         }
 
+        /// <summary>
+        /// 本周期最后一个效果层（分割掩膜 / 深度伪彩）的<strong>克隆</strong>。
+        /// 只用于「链尾结果」视图：否则链尾帧是纯原图，会把刚看到的掩膜顶掉。
+        /// <para>
+        /// ⚠️ 只克隆叠加层，绝不碰输出帧：输出（PublishOutput）与主界面必须保持原图语义。
+        /// </para>
+        /// </summary>
+        private Bitmap _cycleOverlay;
+
+        private void DropCycleOverlay()
+        {
+            if (_cycleOverlay != null)
+            {
+                try { _cycleOverlay.Dispose(); }
+                catch (Exception) { }
+                _cycleOverlay = null;
+            }
+        }
+
         private void PublishNode(FlowRunSession s, FlowNodeProgress p, bool chainEnd, double fps, double avgMs)
         {            var snap = new FlowProgressSnapshot();
             snap.NodeId = p.NodeId ?? "";
@@ -719,6 +740,11 @@ namespace VisionPlatform.Flow
             //    拿它合成会把图像源/上游节点的画面也变成下游处理后的图（真实踩过的坑）。
             if (p.Overlay != null)
             {
+                // 克隆一份留给链尾视图（snap 自己那份会随节点视图显示被释放）
+                DropCycleOverlay();
+                try { _cycleOverlay = (Bitmap)p.Overlay.Clone(); }
+                catch (Exception) { _cycleOverlay = null; }
+
                 snap.Overlay = p.Overlay;
                 p.Overlay = null;
                 snap.KeepFrameForUi = true;   // UI 异步消费，广播后别立刻释放
@@ -798,6 +824,26 @@ namespace VisionPlatform.Flow
                 }
             }
 
+            // 链尾帧原本是纯原图，「链尾结果」视图会把刚看到的掩膜/伪彩顶掉。
+            // previewFrame 本身是 s.Current 的克隆，在这里叠加不会影响会话与输出。
+            if (_cycleOverlay != null && previewFrame != null)
+            {
+                try
+                {
+                    var composed = new Bitmap(previewFrame.Width, previewFrame.Height,
+                                              System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    using (var g = Graphics.FromImage(composed))
+                    {
+                        g.DrawImage(previewFrame, 0, 0, composed.Width, composed.Height);
+                        g.DrawImage(_cycleOverlay, 0, 0, composed.Width, composed.Height);
+                    }
+                    previewFrame.Dispose();
+                    previewFrame = composed;
+                }
+                catch (Exception) { }
+            }
+            DropCycleOverlay();     // 用完即弃，下一周期重新收集
+
             snap.Frame = previewFrame;
             SnapOffsetInfo(snap, s);
             Push(snap);
@@ -834,16 +880,27 @@ namespace VisionPlatform.Flow
         {
             if (snap == null) return;
 
-            bool keep;
-            if (snap.KeepFrameForUi)
-            {
-                // 效果图快照：帧交给 UI（它在 BeginInvoke 里异步使用），这里不占 _nodeSlot
-                keep = true;
-            }
-            else if (_selectedNodeId != "" && snap.NodeId == _selectedNodeId)
+            // 【槽位优先】先按"是否选中该节点"决定进不进 _nodeSlot —— 预览面板是从槽里取的
+            // （TryTakePending），不进槽就等于没发。曾经把"保留帧"分支放在最前面，
+            // 结果效果图快照永远进不了槽，界面一直不显示。
+            bool keep = false;
+            if (_selectedNodeId != "" && snap.NodeId == _selectedNodeId)
             {
                 FlowProgressSnapshot old = Interlocked.Exchange(ref _nodeSlot, snap);
                 if (old != null) old.ReleaseFrame();
+                keep = true;
+            }
+            else if (snap.IsChainEnd)
+            {
+                // 链尾快照进 _pending 槽（注释里一直说它是"链尾槽"，但实际没人写，
+                // 导致「链尾结果」模式取不到帧）。覆盖式：旧的立即释放。
+                FlowProgressSnapshot oldP = Interlocked.Exchange(ref _pending, snap);
+                if (oldP != null) oldP.ReleaseFrame();
+                keep = true;
+            }
+            else if (snap.KeepFrameForUi)
+            {
+                // 没进槽但帧要给 UI 异步用（效果图快照）：只保留帧，不占槽
                 keep = true;
             }
             else
