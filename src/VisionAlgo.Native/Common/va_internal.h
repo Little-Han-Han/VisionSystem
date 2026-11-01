@@ -30,6 +30,7 @@
 // YOLO 目标检测的参数 / 结果结构体（VA_DetectResult）声明在对外头文件里
 #include "algo/va_detect.h"
 #include "algo/va_dl.h"
+#include "algo/va_ocrdl.h"
 
 namespace va {
 
@@ -98,6 +99,20 @@ struct DlState {
     DlState() : input_w(0), input_h(0), num_classes(0), task(0), keypoints(0), created(false) {}
 };
 
+// 深度学习 OCR（PaddleOCR）：DB 检测 + CRNN 识别，两个模型 + 字典
+struct OcrDlState {
+    ov::CompiledModel        det_compiled;
+    ov::CompiledModel        rec_compiled;
+    ov::InferRequest         det_infer;
+    ov::InferRequest         rec_infer;
+    int                      det_w, det_h;
+    int                      rec_w, rec_h;
+    std::vector<std::string> chars;      // 字典（索引 0 由 CTC blank 占用）
+    bool                     created;
+
+    OcrDlState() : det_w(0), det_h(0), rec_w(0), rec_h(0), created(false) {}
+};
+
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
@@ -110,6 +125,7 @@ struct Context {
     DlState         seg;             // YOLO 语义分割
     DlState         pose;            // YOLO 姿态估计
     DlState         depth;           // 深度估计
+    OcrDlState      ocrdl;           // 深度学习 OCR（PaddleOCR）
 
     Context() : hasTemplate(false) {}
 };
@@ -239,6 +255,14 @@ int DlDepthRun(Context* ctx, const VA_Image* img, float* out_map, int width, int
                float* out_min, float* out_max);
 
 int DlClear(Context* ctx, int task);
+
+// ---------------------- 深度学习 OCR（PaddleOCR）---------------------
+int OcrDlCreate(Context* ctx, const char* det_model, const char* rec_model,
+                const char* dict_path, const char* device);
+int OcrDlRun(Context* ctx, const VA_Image* img, float box_thresh, float unclip_ratio,
+             VA_OcrDlLine* out_lines, int max_count, int* out_count,
+             char* out_text, int text_cap, int* out_text_len);
+int OcrDlClear(Context* ctx);
 int DlBackendAvailable(int backend);
 int DetRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
            VA_DetectResult* out_results, int max_count, int* out_count);

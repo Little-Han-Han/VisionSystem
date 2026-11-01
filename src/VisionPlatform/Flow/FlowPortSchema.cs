@@ -302,6 +302,20 @@ namespace VisionPlatform.Flow
                     P("Max", "最大值", FlowPortKind.Number, false)
                 });
 
+            // 深度学习 OCR：图像进，文本 + 行数出
+            Register(FlowNodeType.OcrDl,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Any", "任意输入", FlowPortKind.Any, false, "", true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false),
+                    P("Text", "文本", FlowPortKind.Text, false),
+                    P("Count", "行数", FlowPortKind.Number, false)
+                });
+
             Register(FlowNodeType.ResultOutput,
                 new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true, "", true) },
                 new List<FlowPortDef>());

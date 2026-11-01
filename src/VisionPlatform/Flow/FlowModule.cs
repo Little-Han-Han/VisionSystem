@@ -447,7 +447,7 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("PositionCorrect",  "位置修正",        FlowNodeType.PositionCorrect,  CatLocation),
             new FlowModuleInfo("ShapeMatch",       "形状匹配",        FlowNodeType.ShapeMatch,       CatLocation),
             new FlowModuleInfo("TemplateMatch",    "模板匹配(NCC)",   FlowNodeType.TemplateMatch,    CatLocation),
-            new FlowModuleInfo("ObjectDetect",     "目标识别",        FlowNodeType.ObjectDetect,     CatLocation),
+            new FlowModuleInfo("ObjectDetect",     "目标识别(YOLO)",  FlowNodeType.ObjectDetect,     CatDeepLearning),
             new FlowModuleInfo("Ocr",              "字符识别(OCR)",   FlowNodeType.Ocr,              CatRecognition),
             new FlowModuleInfo("Blob",             "Blob 分析",       FlowNodeType.Blob,             CatSegmentation),
             new FlowModuleInfo("LineCaliper",      "直线卡尺",        FlowNodeType.LineCaliper,      CatCaliper),
@@ -461,6 +461,7 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("DlSeg",            "目标语义分割",    FlowNodeType.DlSeg,            CatDeepLearning),
             new FlowModuleInfo("DlPose",           "目标姿态估计",    FlowNodeType.DlPose,           CatDeepLearning),
             new FlowModuleInfo("DlDepth",          "目标深度估计",    FlowNodeType.DlDepth,          CatDeepLearning),
+            new FlowModuleInfo("OcrDl",            "OCR(深度学习)",   FlowNodeType.OcrDl,            CatDeepLearning),
             new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput)
         };
 

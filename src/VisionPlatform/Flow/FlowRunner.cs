@@ -389,6 +389,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.DlSeg:         return RunDl(s, node, p, NativeDl.TaskSeg);
                 case FlowNodeType.DlPose:        return RunDl(s, node, p, NativeDl.TaskPose);
                 case FlowNodeType.DlDepth:       return RunDl(s, node, p, NativeDl.TaskDepth);
+                case FlowNodeType.OcrDl:         return RunOcrDl(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -664,6 +665,136 @@ namespace VisionPlatform.Flow
                 task == NativeDl.TaskSeg ? "语义分割" : "姿态估计", targets.Count, best)
                 + (task == NativeDl.TaskPose && kps > 0 ? "（" + kps + " 关键点）" : "");
             return targets.Count > 0 || node.GetInt("MinCount", 0) <= 0;
+        }
+
+        /// <summary>
+        /// 深度学习 OCR（PaddleOCR）：DB 检测 + CRNN 识别。
+        /// 两个模型 + 字典都留空时，按 models/ocr/ 下的约定名自动找（det.onnx / rec.onnx / ppocr_keys.txt）。
+        /// </summary>
+        private bool RunOcrDl(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "OCR(深度学习)：没有输入图像（请接在图像源之后）";
+                return true;
+            }
+
+            string det = node.GetString("DetModel", "");
+            string rec = node.GetString("RecModel", "");
+            string dict = node.GetString("DictPath", "");
+            OcrDlDefaults(ref det, ref rec, ref dict);
+
+            if (string.IsNullOrEmpty(det) || string.IsNullOrEmpty(rec) || string.IsNullOrEmpty(dict))
+            {
+                p.Summary = "OCR(深度学习)：缺少模型或字典（models/ocr 下需 det.onnx / rec.onnx / ppocr_keys.txt）";
+                return false;
+            }
+
+            string device = node.GetString("Device", "CPU");
+            if (string.Equals(node.GetString("Backend", "OpenVINO"), "CUDA", StringComparison.OrdinalIgnoreCase))
+                device = "CUDA";
+
+            Bitmap input = s.ColorInput != null ? s.ColorInput : s.Current;
+
+            float boxThresh = (float)node.GetDouble("BoxThresh", 0.3);
+            float unclip = (float)node.GetDouble("UnclipRatio", 1.5);
+            int maxLines = node.GetInt("MaxLines", 100);
+
+            string fullText;
+            var r = _algo.OcrDl(input, det, rec, dict, device, boxThresh, unclip, maxLines, out fullText);
+            if (!r.Success)
+            {
+                p.Summary = "OCR(深度学习)：" + r.Message;   // 不用 Tail：会把"检测模型不存在："截掉
+                return false;
+            }
+
+            List<NativeDl.OcrDlLine> lines = r.Value ?? new List<NativeDl.OcrDlLine>();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                NativeDl.OcrDlLine l = lines[i];
+                p.Shapes.Add(FlowShapes.BlobRect(l.X + l.Width / 2, l.Y + l.Height / 2,
+                                                 l.Width, l.Height, l.Text));
+            }
+
+            p.Metrics.TargetCount = lines.Count;
+            p.Metrics.CharCount = fullText != null ? fullText.Length : 0;
+            p.Metrics.Text = fullText ?? "";
+
+            p.Outputs.Add(new PortValue("Count", "文本行", FlowPortKind.Number, (double)lines.Count));
+            p.Outputs.Add(new PortValue("Text", "识别文本", FlowPortKind.Text, fullText ?? ""));
+            if (lines.Count > 0)
+                p.Outputs.Add(new PortValue("FirstBox", "首行位置", FlowPortKind.Point,
+                    new PointF((float)lines[0].X, (float)lines[0].Y)));
+
+            // 行文本也进 Regions，脚本可逐行取（Text 放进去）
+            for (int i = 0; i < lines.Count; i++)
+            {
+                p.Regions.Add(new RegionInfo
+                {
+                    Index = i + 1,
+                    Cx = lines[i].X + lines[i].Width / 2,
+                    Cy = lines[i].Y + lines[i].Height / 2,
+                    Width = lines[i].Width,
+                    Height = lines[i].Height,
+                    Text = lines[i].Text ?? ""
+                });
+            }
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "OCR(深度学习)：{0} 行 · {1} 字 · \"{2}\"",
+                lines.Count,
+                p.Metrics.CharCount,
+                OneLineText(Shorten(fullText, 40)));
+            return lines.Count > 0 || node.GetInt("MinLines", 0) <= 0;
+        }
+
+        /// <summary>models/ocr 下的约定名（节点没填时用）。</summary>
+        private static void OcrDlDefaults(ref string det, ref string rec, ref string dict)
+        {
+            try
+            {
+                string dir = System.IO.Path.Combine(Core.AppPaths.Root, "models", "ocr");
+                if (!System.IO.Directory.Exists(dir)) return;
+
+                if (string.IsNullOrWhiteSpace(det))
+                {
+                    string f = System.IO.Path.Combine(dir, "det.onnx");
+                    if (!System.IO.File.Exists(f))
+                    {
+                        string[] c = System.IO.Directory.GetFiles(dir, "*det*.onnx");
+                        if (c.Length > 0) f = c[0];
+                    }
+                    if (System.IO.File.Exists(f)) det = f;
+                }
+                if (string.IsNullOrWhiteSpace(rec))
+                {
+                    string f = System.IO.Path.Combine(dir, "rec.onnx");
+                    if (!System.IO.File.Exists(f))
+                    {
+                        string[] c = System.IO.Directory.GetFiles(dir, "*rec*.onnx");
+                        if (c.Length > 0) f = c[0];
+                    }
+                    if (System.IO.File.Exists(f)) rec = f;
+                }
+                if (string.IsNullOrWhiteSpace(dict))
+                {
+                    string f = System.IO.Path.Combine(dir, "ppocr_keys.txt");
+                    if (!System.IO.File.Exists(f))
+                    {
+                        string[] c = System.IO.Directory.GetFiles(dir, "*.txt");
+                        if (c.Length > 0) f = c[0];
+                    }
+                    if (System.IO.File.Exists(f)) dict = f;
+                }
+            }
+            catch (Exception) { }
+        }
+
+        private static string Shorten(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Length <= max ? s : s.Substring(0, max) + "…";
         }
 
         /// <summary>models\&lt;任务&gt;\ 下第一个 .onnx（用户把模型丢进去即可用）。</summary>

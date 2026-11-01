@@ -252,5 +252,100 @@ namespace VisionPlatform.Native
         {
             return va_dl_clear(handle, task);
         }
+
+        // ---------------------- 深度学习 OCR（PaddleOCR）---------------------
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct VA_OcrDlLine
+        {
+            public float x, y, w, h;
+            public float score;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 192)]
+            public byte[] text;
+        }
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        private static extern int va_ocrdl_create(IntPtr handle, byte[] det_model, byte[] rec_model,
+                                                  byte[] dict_path, byte[] device);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        private static extern int va_ocrdl_run(IntPtr handle, ref VA_Image img,
+                                               float box_thresh, float unclip_ratio,
+                                               [In, Out] VA_OcrDlLine[] out_lines,
+                                               int max_count, out int out_count,
+                                               byte[] out_text, int text_cap, out int out_text_len);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        private static extern int va_ocrdl_clear(IntPtr handle);
+
+        /// <summary>一行深度学习 OCR 结果。</summary>
+        public sealed class OcrDlLine
+        {
+            public double X, Y, Width, Height;
+            public double Score;
+            public string Text = "";
+        }
+
+        /// <summary>加载 PaddleOCR 两个模型 + 字典。</summary>
+        public static int OcrDlCreate(IntPtr handle, string detModel, string recModel,
+                                      string dictPath, string device)
+        {
+            return va_ocrdl_create(handle, Utf8Z(detModel), Utf8Z(recModel),
+                                   Utf8Z(dictPath), Utf8Z(device));
+        }
+
+        /// <summary>OCR 推理：返回每行文本 + 整段文本。</summary>
+        public static List<OcrDlLine> OcrDlRun(IntPtr handle, ref VA_Image img,
+                                               float boxThresh, float unclipRatio, int maxCount,
+                                               out string fullText, out string err)
+        {
+            fullText = "";
+            err = "";
+            var list = new List<OcrDlLine>();
+            if (maxCount <= 0) maxCount = 200;
+
+            var buf = new VA_OcrDlLine[maxCount];
+            for (int i = 0; i < buf.Length; i++) buf[i].text = new byte[192];
+
+            byte[] text = new byte[4096];
+            int count, textLen;
+
+            int rc = va_ocrdl_run(handle, ref img, boxThresh, unclipRatio, buf, maxCount,
+                                  out count, text, text.Length, out textLen);
+
+            if (rc != 0 && rc != ErrSize)
+            {
+                err = "原生返回码 " + rc;
+                return list;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                list.Add(new OcrDlLine
+                {
+                    X = buf[i].x, Y = buf[i].y,
+                    Width = buf[i].w, Height = buf[i].h,
+                    Score = buf[i].score,
+                    Text = Utf8Str(buf[i].text)
+                });
+            }
+
+            if (textLen > 0) fullText = System.Text.Encoding.UTF8.GetString(text, 0, textLen);
+            return list;
+        }
+
+        /// <summary>释放 OCR-DL 的两个模型。</summary>
+        public static int OcrDlClear(IntPtr handle)
+        {
+            return va_ocrdl_clear(handle);
+        }
+
+        private static string Utf8Str(byte[] raw)
+        {
+            if (raw == null) return "";
+            int n = Array.IndexOf(raw, (byte)0);
+            if (n < 0) n = raw.Length;
+            return System.Text.Encoding.UTF8.GetString(raw, 0, n);
+        }
     }
 }

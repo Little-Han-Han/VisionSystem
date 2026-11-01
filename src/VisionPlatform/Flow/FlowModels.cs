@@ -78,6 +78,12 @@ namespace VisionPlatform.Flow
 
         /// <summary>深度学习：深度估计，输出 0~1 归一化深度图。</summary>
         DlDepth,
+
+        /// <summary>
+        /// 深度学习 OCR（PaddleOCR）：DB 文本检测 + CRNN 识别，两阶段。
+        /// <para>与传统 OCR（模板匹配，<see cref="Ocr"/>）是两套东西，互不影响。</para>
+        /// </summary>
+        OcrDl,
 }
 
     /// <summary>

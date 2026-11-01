@@ -1247,6 +1247,71 @@ namespace VisionPlatform.Native
             }
         }
 
+        // ---------------------- 深度学习 OCR（PaddleOCR）---------------------
+
+        private string _ocrDlKey = "";
+
+        /// <summary>加载 PaddleOCR 两个模型 + 字典（按 det|rec|dict|device 缓存）。</summary>
+        private string OcrDlEnsure(string det, string rec, string dict, string device, out string error)
+        {
+            error = "";
+
+            string d1 = ResolveModelPath(det);
+            string d2 = ResolveModelPath(rec);
+            string d3 = ResolveModelPath(dict);
+            if (string.IsNullOrWhiteSpace(d1) || !System.IO.File.Exists(d1)) { error = "检测模型不存在：" + d1; return null; }
+            if (string.IsNullOrWhiteSpace(d2) || !System.IO.File.Exists(d2)) { error = "识别模型不存在：" + d2; return null; }
+            if (string.IsNullOrWhiteSpace(d3) || !System.IO.File.Exists(d3)) { error = "字典文件不存在：" + d3; return null; }
+
+            string dev = string.IsNullOrEmpty(device) ? "CPU" : device;
+            string key = d1 + "|" + d2 + "|" + d3 + "|" + dev;
+            if (string.Equals(key, _ocrDlKey, StringComparison.Ordinal)) return d1;
+
+            int rc = NativeDl.OcrDlCreate(_handle, d1, d2, d3, dev);
+            if (rc != 0)
+            {
+                error = string.Equals(dev, "CUDA", StringComparison.OrdinalIgnoreCase)
+                    ? "CUDA 推理尚未实现（接口已预留），请先用 CPU/GPU"
+                    : VaResult.ToString(rc) + "：" + LastError;
+                return null;
+            }
+
+            _ocrDlKey = key;
+            return d1;
+        }
+
+        /// <summary>深度学习 OCR：返回每行文本；fullText 为整段（按阅读顺序空格连接）。</summary>
+        public OpResult<List<NativeDl.OcrDlLine>> OcrDl(Bitmap src, string detModel, string recModel,
+                                                        string dictPath, string device,
+                                                        float boxThresh, float unclipRatio, int maxCount,
+                                                        out string fullText)
+        {
+            fullText = "";
+            if (src == null) return OpResult<List<NativeDl.OcrDlLine>>.Fail("输入图像为空");
+
+            string err;
+            string det = OcrDlEnsure(detModel, recModel, dictPath, device, out err);
+            if (det == null) return OpResult<List<NativeDl.OcrDlLine>>.Fail(err);
+
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    List<NativeDl.OcrDlLine> lines =
+                        NativeDl.OcrDlRun(_handle, ref img, boxThresh, unclipRatio, maxCount,
+                                          out fullText, out err);
+                    if (!string.IsNullOrEmpty(err))
+                        return OpResult<List<NativeDl.OcrDlLine>>.Fail(err);
+                    return OpResult<List<NativeDl.OcrDlLine>>.Ok(lines);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<NativeDl.OcrDlLine>>.Fail("推理异常：" + ex.Message);
+                }
+            }
+        }
+
         /// <summary>姿态关键点数（未加载时 0）。</summary>
         public int DlPoseKeypoints()
         {

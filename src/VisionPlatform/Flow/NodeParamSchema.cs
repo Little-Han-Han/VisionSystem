@@ -346,6 +346,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.DlSeg:           return DlTable(FlowNodeType.DlSeg, "目标语义分割");
                 case FlowNodeType.DlPose:          return DlTable(FlowNodeType.DlPose, "目标姿态估计");
                 case FlowNodeType.DlDepth:         return DlTable(FlowNodeType.DlDepth, "目标深度估计");
+                case FlowNodeType.OcrDl:           return OcrDlTable();
                 default:                           return null;
             }
         }
@@ -466,6 +467,34 @@ namespace VisionPlatform.Flow
                 : type == FlowNodeType.DlPose
                     ? "输出每个目标的框 + 关键点（关键点以 4px 小方块叠加显示）"
                     : "深度图按 0~1 归一化输出，同时给出原始值域（Min/Max）";
+            return t;
+        }
+
+        /// <summary>
+        /// 深度学习 OCR（PaddleOCR）：两个模型 + 字典。
+        /// 三个路径都留空时，运行期自动找 models/ocr 下的 det.onnx / rec.onnx / ppocr_keys.txt。
+        /// </summary>
+        private static NodeParamTable OcrDlTable()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.OcrDl, Title = "OCR(深度学习)" };
+
+            t.Fields.Add(Group("模型（留空自动用 models\\ocr\\）"));
+            t.Fields.Add(File("DetModel", "检测模型(.onnx)", "PaddleOCR DB 检测模型；留空用 models\\ocr\\det.onnx"));
+            t.Fields.Add(File("RecModel", "识别模型(.onnx)", "PaddleOCR 识别模型；留空用 models\\ocr\\rec.onnx"));
+            t.Fields.Add(File("DictPath", "字符字典(.txt)", "ppocr_keys.txt；留空用 models\\ocr\\ppocr_keys.txt"));
+            t.Fields.Add(Enum("Backend", "推理后端", "OpenVINO",
+                new[] { "OpenVINO", "CUDA（预留）" }, new[] { "OpenVINO", "CUDA" }, ""));
+            t.Fields.Add(Enum("Device", "推理设备", "CPU",
+                new[] { "CPU", "GPU", "NPU" }, new[] { "CPU", "GPU", "NPU" }, ""));
+
+            t.Fields.Add(Group("识别参数"));
+            t.Fields.Add(Dbl("BoxThresh", "文本框阈值", 0, 1, 2, 0.05m, "0.30", "概率图二值化阈值"));
+            t.Fields.Add(Dbl("UnclipRatio", "外扩比例", 0.5m, 5m, 1, 0.1m, "1.5", "文本框按短边外扩，越大框越松"));
+            t.Fields.Add(Int("MaxLines", "最多文本行", 1, 1000, "100"));
+            t.Fields.Add(Int("MinLines", "最少文本行", 0, 1000, "0", "少于此数判 NG；0 = 不判"));
+
+            t.FooterNote = "与「识别」分类里的传统 OCR（模板匹配）是两套东西："
+                         + "这里给的是自然场景/多字体文本，不需要建字符模板。";
             return t;
         }
 

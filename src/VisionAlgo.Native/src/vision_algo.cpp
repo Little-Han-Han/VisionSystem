@@ -436,6 +436,30 @@ int VA_CALL va_dl_backend_available(int backend)
     return va::DlBackendAvailable(backend);
 }
 
+// ---------------------- 深度学习 OCR（PaddleOCR）---------------------
+
+int VA_CALL va_ocrdl_create(void* handle, const char* det_model, const char* rec_model,
+                            const char* dict_path, const char* device)
+{
+    VA_CTX();
+    return va::OcrDlCreate(ctx, det_model, rec_model, dict_path, device);
+}
+
+int VA_CALL va_ocrdl_run(void* handle, const VA_Image* img, float box_thresh, float unclip_ratio,
+                         VA_OcrDlLine* out_lines, int max_count, int* out_count,
+                         char* out_text, int text_cap, int* out_text_len)
+{
+    VA_CTX();
+    return va::OcrDlRun(ctx, img, box_thresh, unclip_ratio, out_lines, max_count, out_count,
+                        out_text, text_cap, out_text_len);
+}
+
+int VA_CALL va_ocrdl_clear(void* handle)
+{
+    VA_CTX();
+    return va::OcrDlClear(ctx);
+}
+
 // ---------------------- 摄像头（独立句柄，平行于算法 Context）----------------------
 
 /* 相机句柄取用：空句柄直接返回 VA_ERR_HANDLE */
