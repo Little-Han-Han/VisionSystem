@@ -479,9 +479,10 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.OcrDl, Title = "OCR(深度学习)" };
 
             t.Fields.Add(Group("模型（留空自动用 models\\ocr\\）"));
-            t.Fields.Add(File("DetModel", "检测模型(.onnx)", "PaddleOCR DB 检测模型；留空用 models\\ocr\\det.onnx"));
-            t.Fields.Add(File("RecModel", "识别模型(.onnx)", "PaddleOCR 识别模型；留空用 models\\ocr\\rec.onnx"));
-            t.Fields.Add(File("DictPath", "字符字典(.txt)", "ppocr_keys.txt；留空用 models\\ocr\\ppocr_keys.txt"));
+            t.Fields.Add(File("DetModel", "检测模型(.onnx)（可选）",
+                "PaddleOCR DB 检测模型；留空用 models\\ocr\\det.onnx，若目录里没有则退化为「整图识别」（只用一个 rec 模型）"));
+            t.Fields.Add(File("RecModel", "识别模型(.onnx)（必填）", "PaddleOCR 识别模型；留空用 models\\ocr\\rec.onnx"));
+            t.Fields.Add(File("DictPath", "字符字典(.txt)（必填）", "ppocr_keys.txt；留空用 models\\ocr\\ppocr_keys.txt"));
             t.Fields.Add(Enum("Backend", "推理后端", "OpenVINO",
                 new[] { "OpenVINO", "CUDA（预留）" }, new[] { "OpenVINO", "CUDA" }, ""));
             t.Fields.Add(Enum("Device", "推理设备", "CPU",

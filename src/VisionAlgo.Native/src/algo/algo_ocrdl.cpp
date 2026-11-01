@@ -103,10 +103,12 @@ bool LoadDict(const char* path, std::vector<std::string>& chars)
 int OcrDlCreate(Context* ctx, const char* det_model, const char* rec_model,
                 const char* dict_path, const char* device)
 {
-    if (det_model == 0 || det_model[0] == '\0' || rec_model == 0 || rec_model[0] == '\0') {
-        SetError(ctx, "det_model / rec_model path empty");
+    // det 允许为空：此时退化成"整图识别"（一个 rec 模型即可，适合一行文本 / 铭牌）
+    if (rec_model == 0 || rec_model[0] == '\0') {
+        SetError(ctx, "rec_model path empty");
         return VA_ERR_ARG;
     }
+    bool hasDet = (det_model != 0 && det_model[0] != '\0');
     if (dict_path == 0 || dict_path[0] == '\0') {
         SetError(ctx, "dict path empty");
         return VA_ERR_ARG;
@@ -127,28 +129,34 @@ int OcrDlCreate(Context* ctx, const char* det_model, const char* rec_model,
         }
 
         ov::Core core;
-        std::shared_ptr<ov::Model> det = core.read_model(det_model);
         std::shared_ptr<ov::Model> rec = core.read_model(rec_model);
 
-        auto ds = det->input().get_shape();
         auto rs = rec->input().get_shape();
-        int detW = (int)ds[3], detH = (int)ds[2];
         int recW = (int)rs[3], recH = (int)rs[2];
 
-        // 动态形状：按常用值固定（det 960×960 / rec 48 高、320 宽），保证可推理
-        if (detW <= 0 || detH <= 0) {
-            detW = detH = 960;
-            det->reshape(ov::PartialShape({ 1, 3, 960, 960 }));
-        }
+        // 动态形状：按常用值固定（rec 48 高、320 宽），保证可推理
         if (recW <= 0 || recH <= 0) {
             recW = 320; recH = 48;
             rec->reshape(ov::PartialShape({ 1, 3, 48, 320 }));
         }
 
-        ctx->ocrdl.det_compiled = core.compile_model(det, dev);
+        int detW = 0, detH = 0;
+        if (hasDet)
+        {
+            std::shared_ptr<ov::Model> det = core.read_model(det_model);
+            auto ds = det->input().get_shape();
+            detW = (int)ds[3]; detH = (int)ds[2];
+            if (detW <= 0 || detH <= 0) {
+                detW = detH = 960;
+                det->reshape(ov::PartialShape({ 1, 3, 960, 960 }));
+            }
+            ctx->ocrdl.det_compiled = core.compile_model(det, dev);
+            ctx->ocrdl.det_infer = ctx->ocrdl.det_compiled.create_infer_request();
+        }
+
         ctx->ocrdl.rec_compiled = core.compile_model(rec, dev);
-        ctx->ocrdl.det_infer = ctx->ocrdl.det_compiled.create_infer_request();
         ctx->ocrdl.rec_infer = ctx->ocrdl.rec_compiled.create_infer_request();
+        ctx->ocrdl.has_det = hasDet;
         ctx->ocrdl.det_w = detW;
         ctx->ocrdl.det_h = detH;
         ctx->ocrdl.rec_w = recW;
@@ -179,7 +187,19 @@ int OcrDlRun(Context* ctx, const VA_Image* img, float box_thresh, float unclip_r
         if (bgr.channels() == 1)      cv::cvtColor(bgr, bgr, cv::COLOR_GRAY2BGR);
         else if (bgr.channels() == 4) cv::cvtColor(bgr, bgr, cv::COLOR_BGRA2BGR);
 
-        // ---------- 1) 文本检测（DB） ----------
+        std::vector<OcrDlLineBox> boxes;
+
+        // ---------- 1) 文本检测（DB）----------
+        // 没有检测模型时跳过：整张图当成一个文本行（铭牌 / 单行标签场景，只用一个 rec 模型）
+        if (!ctx->ocrdl.has_det)
+        {
+            OcrDlLineBox whole;
+            whole.rect = cv::Rect2f(0, 0, (float)bgr.cols, (float)bgr.rows);
+            whole.score = 1.0f;
+            boxes.push_back(whole);
+        }
+        else
+        {
         std::vector<float> blob;
         DetPreprocess(bgr, ctx->ocrdl.det_w, ctx->ocrdl.det_h, blob);
 
@@ -207,7 +227,6 @@ int OcrDlRun(Context* ctx, const VA_Image* img, float box_thresh, float unclip_r
         float sx = (float)bgr.cols / (float)pw;
         float sy = (float)bgr.rows / (float)ph;
 
-        std::vector<OcrDlLineBox> boxes;
         for (size_t i = 0; i < contours.size(); ++i)
         {
             cv::RotatedRect rr = cv::minAreaRect(contours[i]);
@@ -236,6 +255,7 @@ int OcrDlRun(Context* ctx, const VA_Image* img, float box_thresh, float unclip_r
             if (std::abs(a.rect.y - b.rect.y) > a.rect.height * 0.5f) return a.rect.y < b.rect.y;
             return a.rect.x < b.rect.x;
         });
+        }   // end if (has_det)
 
         // ---------- 2) 逐行识别（CRNN + CTC） ----------
         std::string allText;
@@ -321,6 +341,7 @@ int OcrDlClear(Context* ctx)
     ctx->ocrdl.det_compiled = ov::CompiledModel();
     ctx->ocrdl.rec_compiled = ov::CompiledModel();
     ctx->ocrdl.chars.clear();
+    ctx->ocrdl.has_det = false;
     ctx->ocrdl.created = false;
     return VA_OK;
 }

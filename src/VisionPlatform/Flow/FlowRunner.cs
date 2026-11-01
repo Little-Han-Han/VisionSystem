@@ -685,11 +685,14 @@ namespace VisionPlatform.Flow
             string dict = node.GetString("DictPath", "");
             OcrDlDefaults(ref det, ref rec, ref dict);
 
-            if (string.IsNullOrEmpty(det) || string.IsNullOrEmpty(rec) || string.IsNullOrEmpty(dict))
+            // 检测模型可选：没有 det 时整图当一个文本行识别（一个 rec 模型即可）
+            if (string.IsNullOrEmpty(rec) || string.IsNullOrEmpty(dict))
             {
-                p.Summary = "OCR(深度学习)：缺少模型或字典（models/ocr 下需 det.onnx / rec.onnx / ppocr_keys.txt）";
+                p.Summary = "OCR(深度学习)：缺少识别模型或字典（models/ocr 下需 rec.onnx / ppocr_keys.txt；"
+                          + "det.onnx 可选）";
                 return false;
             }
+            bool wholeImage = string.IsNullOrEmpty(det);
 
             string device = node.GetString("Device", "CPU");
             if (string.Equals(node.GetString("Backend", "OpenVINO"), "CUDA", StringComparison.OrdinalIgnoreCase))
@@ -742,10 +745,11 @@ namespace VisionPlatform.Flow
             }
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
-                "OCR(深度学习)：{0} 行 · {1} 字 · \"{2}\"",
+                "OCR(深度学习){3}：{0} 行 · {1} 字 · \"{2}\"",
                 lines.Count,
                 p.Metrics.CharCount,
-                OneLineText(Shorten(fullText, 40)));
+                OneLineText(Shorten(fullText, 40)),
+                wholeImage ? "（整图识别）" : "");
             return lines.Count > 0 || node.GetInt("MinLines", 0) <= 0;
         }
 

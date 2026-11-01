@@ -108,9 +108,10 @@ struct OcrDlState {
     int                      det_w, det_h;
     int                      rec_w, rec_h;
     std::vector<std::string> chars;      // 字典（索引 0 由 CTC blank 占用）
+    bool                     has_det;    // false = 只有识别模型（整图识别，跳过检测）
     bool                     created;
 
-    OcrDlState() : det_w(0), det_h(0), rec_w(0), rec_h(0), created(false) {}
+    OcrDlState() : det_w(0), det_h(0), rec_w(0), rec_h(0), has_det(false), created(false) {}
 };
 
 // 每个句柄对应一个上下文，模板等状态保存在这里

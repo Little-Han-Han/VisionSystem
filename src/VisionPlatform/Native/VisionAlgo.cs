@@ -1256,10 +1256,11 @@ namespace VisionPlatform.Native
         {
             error = "";
 
-            string d1 = ResolveModelPath(det);
+            // det 允许为空：只给 rec 时走"整图识别"（一个模型就能出结果）
+            string d1 = string.IsNullOrWhiteSpace(det) ? "" : ResolveModelPath(det);
             string d2 = ResolveModelPath(rec);
             string d3 = ResolveModelPath(dict);
-            if (string.IsNullOrWhiteSpace(d1) || !System.IO.File.Exists(d1)) { error = "检测模型不存在：" + d1; return null; }
+            if (!string.IsNullOrWhiteSpace(d1) && !System.IO.File.Exists(d1)) { error = "检测模型不存在：" + d1; return null; }
             if (string.IsNullOrWhiteSpace(d2) || !System.IO.File.Exists(d2)) { error = "识别模型不存在：" + d2; return null; }
             if (string.IsNullOrWhiteSpace(d3) || !System.IO.File.Exists(d3)) { error = "字典文件不存在：" + d3; return null; }
 
