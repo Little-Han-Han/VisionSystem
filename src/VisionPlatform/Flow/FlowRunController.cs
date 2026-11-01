@@ -469,6 +469,27 @@ namespace VisionPlatform.Flow
                 {
                     Bitmap outFrame = s.Current;
                     s.Current = null;
+
+                    // 主界面看的也是"结果画面"：把本周期的分割掩膜 / 深度伪彩叠上去，
+                    // 否则主界面永远只有原图（用户反馈"两个界面都看不到效果图"）。
+                    if (_cycleOverlay != null && outFrame != null)
+                    {
+                        try
+                        {
+                            var composed = new Bitmap(outFrame.Width, outFrame.Height,
+                                                      System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                            using (var g = Graphics.FromImage(composed))
+                            {
+                                g.DrawImage(outFrame, 0, 0, composed.Width, composed.Height);
+                                g.DrawImage(_cycleOverlay, 0, 0, composed.Width, composed.Height);
+                            }
+                            outFrame.Dispose();
+                            outFrame = composed;
+                        }
+                        catch (Exception) { }
+                    }
+                    DropCycleOverlay();
+
                     PublishOutput(flow, camera, outFrame, res);
                 }
             }
@@ -582,6 +603,8 @@ namespace VisionPlatform.Flow
                 try
                 {
                     // 连续运行关掉逐节点留帧：避免每周期 N 份 Bitmap 堆积
+                    DropCycleOverlay();     // 上一周期的叠加层作废
+
                     // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）
                     s = _runner.Begin(flow, camera, false, false);
 
@@ -591,8 +614,14 @@ namespace VisionPlatform.Flow
                         break;
                     }
 
-                    while (_runner.StepNext(s) != null)
+                    // 【必须发节点快照】连续运行原来只发链尾快照，导致"点节点看不到该节点结果"：
+                    // 预览面板在「选中节点」模式下会把链尾快照过滤掉，于是画面停在上一次内容。
+                    // 这里只对**带位图叠加层**的节点（分割/深度）发快照，其余节点跳过 ——
+                    // 既能让用户点开看到效果图，又不会每帧刷 N 次 UI。
+                    FlowNodeProgress step;
+                    while ((step = _runner.StepNext(s)) != null)
                     {
+                        if (step.Overlay != null) PublishNode(s, step, false, 0.0, 0.0);
                         if (_stop) break;
                     }
                     if (_stop) break;      // 半途停止：本周期不投递、不回传
@@ -680,6 +709,23 @@ namespace VisionPlatform.Flow
             return FlowNodeType.ResultOutput;
         }
 
+        /// <summary>
+        /// 本周期最后一个带叠加层的节点产物（分割掩膜 / 深度伪彩）。
+        /// 主界面显示的是"输出帧"，它不经过节点快照 —— 要让它也有效果图，
+        /// 就得把这一份叠加上去。每周期开始时释放上一份。
+        /// </summary>
+        private Bitmap _cycleOverlay;
+
+        private void DropCycleOverlay()
+        {
+            if (_cycleOverlay != null)
+            {
+                try { _cycleOverlay.Dispose(); }
+                catch (Exception) { }
+                _cycleOverlay = null;
+            }
+        }
+
         private void PublishNode(FlowRunSession s, FlowNodeProgress p, bool chainEnd, double fps, double avgMs)
         {            var snap = new FlowProgressSnapshot();
             snap.NodeId = p.NodeId ?? "";
@@ -725,8 +771,9 @@ namespace VisionPlatform.Flow
                     catch (Exception) { /* 合成失败就退回原帧，不影响其他显示 */ }
                 }
 
-                try { p.Overlay.Dispose(); }
-                catch (Exception) { }
+                // 保留一份给主界面的输出帧用（同周期内有效，下一周期开始前释放）
+                DropCycleOverlay();
+                _cycleOverlay = p.Overlay;
                 p.Overlay = null;
             }
 
