@@ -93,10 +93,12 @@ struct DlState {
     int                       num_classes;
     int                       task;          // VA_DL_TASK_*（1=seg 2=pose 3=depth）
     int                       keypoints;     // pose：关键点数
+    int                       out_channels;  // 模型输出通道数（4+nc[+32|+3k]），排查解析用
     std::vector<std::string>  class_names;
     bool                      created;
 
-    DlState() : input_w(0), input_h(0), num_classes(0), task(0), keypoints(0), created(false) {}
+    DlState() : input_w(0), input_h(0), num_classes(0), task(0), keypoints(0),
+                out_channels(0), created(false) {}
 };
 
 // 深度学习 OCR（PaddleOCR）：DB 检测 + CRNN 识别，两个模型 + 字典
@@ -265,6 +267,7 @@ int OcrDlRun(Context* ctx, const VA_Image* img, float box_thresh, float unclip_r
              char* out_text, int text_cap, int* out_text_len);
 int OcrDlClear(Context* ctx);
 int DlBackendAvailable(int backend);
+int DlDescribe(Context* ctx, int task, char* buf, int cap);
 int DetRun(Context* ctx, const VA_Image* img, float score_thresh, float iou_thresh,
            VA_DetectResult* out_results, int max_count, int* out_count);
 int DetClassCount(Context* ctx, int* out_count);

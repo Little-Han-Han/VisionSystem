@@ -88,6 +88,11 @@ VA_API int VA_CALL va_dl_depth_run(void* handle, const VA_Image* img,
 /* 释放指定任务的模型（task 取 VA_DL_TASK_*） */
 VA_API int VA_CALL va_dl_clear(void* handle, int task);
 
+/* 取模型解析结果（写 ASCII 摘要：输入尺寸、输出通道、类别数、关键点数）。
+ * 用于现场排查"为什么解析不对"——把模型实际 I/O 形状摆出来，比猜快。
+ *   buf 容量不足时截断；返回写入长度。未创建返回 0。 */
+VA_API int VA_CALL va_dl_describe(void* handle, int task, char* buf, int cap);
+
 /* 后端能力查询：backend 未实现时返回 0。
  * 供 UI 在"推理后端"下拉里只列出可用项（CUDA 目前恒为 0）。 */
 VA_API int VA_CALL va_dl_backend_available(int backend);

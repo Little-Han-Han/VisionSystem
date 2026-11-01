@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -182,6 +183,8 @@ int CreateCommon(Context* ctx, DlState& st, int task, const char* model_path, co
                 return VA_ERR_ARG;
             }
 
+            st.out_channels = C;
+
             std::vector<std::string> names;
             if (!LoadNames(model_path, names)) {
                 if (st.num_classes == 80) names = Coco80();
@@ -189,6 +192,15 @@ int CreateCommon(Context* ctx, DlState& st, int task, const char* model_path, co
             while ((int)names.size() < st.num_classes)
                 names.push_back("class_" + std::to_string(names.size()));
             st.class_names = std::move(names);
+        }
+
+        // depth：输出可能是 [1,1,H,W] / [1,H,W] / [H,W]，通道数按 rank 取
+        if (task == VA_DL_TASK_DEPTH)
+        {
+            auto os = st.compiled.output(0).get_shape();
+            if (os.size() == 4)      st.out_channels = (int)os[1];
+            else if (os.size() == 3) st.out_channels = (int)os[0];
+            else                     st.out_channels = 1;
         }
 
         st.created = true;
@@ -540,6 +552,36 @@ int DlClear(Context* ctx, int task)
     st->compiled = ov::CompiledModel();
     st->created = false;
     return VA_OK;
+}
+
+int DlDescribe(Context* ctx, int task, char* buf, int cap)
+{
+    if (buf == 0 || cap <= 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+
+    DlState* st = 0;
+    if (task == VA_DL_TASK_SEG) st = &ctx->seg;
+    else if (task == VA_DL_TASK_POSE) st = &ctx->pose;
+    else if (task == VA_DL_TASK_DEPTH) st = &ctx->depth;
+    else { SetError(ctx, "unknown dl task"); return VA_ERR_ARG; }
+
+    if (!st->created) { buf[0] = '\0'; return 0; }
+
+    char tmp[256];
+    if (task == VA_DL_TASK_DEPTH)
+        std::snprintf(tmp, sizeof(tmp), "in=%dx%d out=%dch", st->input_w, st->input_h, st->out_channels);
+    else if (task == VA_DL_TASK_POSE)
+        std::snprintf(tmp, sizeof(tmp), "in=%dx%d C=%d (4+%d+3*%d) k=%d",
+                      st->input_w, st->input_h, st->out_channels,
+                      st->num_classes, st->keypoints, st->keypoints);
+    else
+        std::snprintf(tmp, sizeof(tmp), "in=%dx%d C=%d (4+%d+32)",
+                      st->input_w, st->input_h, st->out_channels, st->num_classes);
+
+    int n = (int)std::strlen(tmp);
+    if (n > cap - 1) n = cap - 1;
+    std::memcpy(buf, tmp, (size_t)n);
+    buf[n] = '\0';
+    return n;
 }
 
 int DlBackendAvailable(int backend)

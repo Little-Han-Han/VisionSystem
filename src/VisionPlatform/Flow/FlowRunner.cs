@@ -579,6 +579,9 @@ namespace VisionPlatform.Flow
             if (string.Equals(node.GetString("Backend", "OpenVINO"), "CUDA", StringComparison.OrdinalIgnoreCase))
                 device = "CUDA";
 
+            // 首次加载要编译模型（本机实测 3~5 秒），不说明会被当成"卡死"
+            var loadWatch = Stopwatch.StartNew();
+
             // 彩色输入优先（与目标识别一致）
             Bitmap input = s.ColorInput != null ? s.ColorInput : s.Current;
 
@@ -598,8 +601,11 @@ namespace VisionPlatform.Flow
                 p.Outputs.Add(new PortValue("Min", "最小值", FlowPortKind.Number, (double)mn));
                 p.Outputs.Add(new PortValue("Max", "最大值", FlowPortKind.Number, (double)mx));
                 p.Outputs.Add(new PortValue("Mean", "均值", FlowPortKind.Number, mean));
+                // mean 是**归一化后**（0~1）的均值，mn/mx 是**模型原始输出**；
+                // 混在一句话里会让人以为"均值怎么不在范围里"，这里分开写。
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "深度估计：范围 {0:F3}~{1:F3} 均值 {2:F3}", mn, mx, mean);
+                    "深度估计：原始范围 {0:F3}~{1:F3} · 归一化均值 {2:F3}", mn, mx, mean);
+                p.Summary += LoadHint(loadWatch) + DescribeHint(task, loadWatch.ElapsedMilliseconds);
                 return true;
             }
 
@@ -663,7 +669,9 @@ namespace VisionPlatform.Flow
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "{0}：{1} 个目标 · 最高分 {2:F3}",
                 task == NativeDl.TaskSeg ? "语义分割" : "姿态估计", targets.Count, best)
-                + (task == NativeDl.TaskPose && kps > 0 ? "（" + kps + " 关键点）" : "");
+                + (task == NativeDl.TaskPose && kps > 0 ? "（" + kps + " 关键点）" : "")
+                + LoadHint(loadWatch)
+                + DescribeHint(task, loadWatch.ElapsedMilliseconds);
             return targets.Count > 0 || node.GetInt("MinCount", 0) <= 0;
         }
 
@@ -799,6 +807,25 @@ namespace VisionPlatform.Flow
         {
             if (string.IsNullOrEmpty(s)) return "";
             return s.Length <= max ? s : s.Substring(0, max) + "…";
+        }
+
+        /// <summary>
+        /// 模型解析摘要（只在首次加载那一帧附上，避免每帧刷屏）：
+        /// 现场"框位置不对/识别乱"时，先看模型实际 I/O 形状与程序的理解是否一致。
+        /// </summary>
+        private string DescribeHint(int task, long loadMs)
+        {
+            if (loadMs <= 1500) return "";
+            string d = _algo.DlDescribe(task);
+            return string.IsNullOrEmpty(d) ? "" : "（" + d + "）";
+        }
+
+        /// <summary>首次加载（编译模型）超过 1.5 秒时在摘要里注明，避免误判成卡死。</summary>
+        private static string LoadHint(Stopwatch sw)
+        {
+            return (sw != null && sw.ElapsedMilliseconds > 1500)
+                ? string.Format(CultureInfo.InvariantCulture, "（首次加载 {0} ms）", sw.ElapsedMilliseconds)
+                : "";
         }
 
         /// <summary>models\&lt;任务&gt;\ 下第一个 .onnx（用户把模型丢进去即可用）。</summary>

@@ -797,6 +797,57 @@ namespace VisionPlatform.UI
             RaiseParamsChanged();
         }
 
+        /// <summary>按字段 Key 判断该弹什么过滤器（模型 / 字典 / 图片 / 任意）。</summary>
+        private static string FileDialogKind(NodeParamField f)
+        {
+            if (f == null || string.IsNullOrEmpty(f.Key)) return "any";
+
+            string k = f.Key.ToLowerInvariant();
+            if (k.Contains("model") || k.Contains("onnx")) return "model";
+            if (k.Contains("dict") || k.Contains("label") || k.Contains("keys") || k.Contains("txt"))
+                return "text";
+            if (k.Contains("path") || k.Contains("file") || k.Contains("image") || k.Contains("template"))
+                return "image";
+            return "any";
+        }
+
+        private static string FileDialogTitle(NodeParamField f)
+        {
+            switch (FileDialogKind(f))
+            {
+                case "model": return "选择模型文件（.onnx）";
+                case "text": return "选择文本文件（字典 / 标签）";
+                case "image": return "选择图片文件";
+                default: return "选择文件";
+            }
+        }
+
+        private static string FileDialogFilter(NodeParamField f)
+        {
+            switch (FileDialogKind(f))
+            {
+                case "model":
+                    return "ONNX 模型|*.onnx|OpenVINO IR|*.xml|所有文件|*.*";
+                case "text":
+                    return "文本文件|*.txt;*.yml;*.yaml;*.vocab|所有文件|*.*";
+                case "image":
+                    return "图片文件|*.bmp;*.png;*.jpg;*.jpeg;*.tif;*.tiff|所有文件|*.*";
+                default:
+                    return "所有文件|*.*";
+            }
+        }
+
+        private static string FileDialogDefaultExt(NodeParamField f)
+        {
+            switch (FileDialogKind(f))
+            {
+                case "model": return "onnx";
+                case "text": return "txt";
+                case "image": return "bmp";
+                default: return "";
+            }
+        }
+
         private void OnBrowseClick(object sender, EventArgs e)
         {
             var btn = sender as Button;
@@ -805,10 +856,15 @@ namespace VisionPlatform.UI
             var txt = btn.Tag as TextBox;
             if (txt == null) return;
 
+            var field = txt.Tag as NodeParamField;
+
             using (var dlg = new OpenFileDialog())
             {
-                dlg.Title = "选择图片文件";
-                dlg.Filter = "图片文件|*.bmp;*.png;*.jpg;*.jpeg;*.tif;*.tiff|所有文件|*.*";
+                // 过滤器跟着字段类型走：模型字段只能选 .onnx，字典只能选 .txt，
+                // 否则用户面对"图片文件"过滤器根本选不到模型（曾经的真实问题）。
+                dlg.Title = FileDialogTitle(field);
+                dlg.Filter = FileDialogFilter(field);
+                dlg.DefaultExt = FileDialogDefaultExt(field);
                 dlg.CheckFileExists = true;
 
                 if (!string.IsNullOrEmpty(txt.Text)) dlg.FileName = txt.Text;

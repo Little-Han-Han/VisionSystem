@@ -1313,6 +1313,13 @@ namespace VisionPlatform.Native
             }
         }
 
+        /// <summary>模型解析摘要（输入尺寸 / 输出通道 / 类别数 / 关键点数）。</summary>
+        public string DlDescribe(int task)
+        {
+            try { return NativeDl.Describe(_handle, task); }
+            catch (Exception) { return ""; }
+        }
+
         /// <summary>姿态关键点数（未加载时 0）。</summary>
         public int DlPoseKeypoints()
         {

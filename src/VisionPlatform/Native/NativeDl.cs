@@ -81,7 +81,25 @@ namespace VisionPlatform.Native
         private static extern int va_dl_clear(IntPtr handle, int task);
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        private static extern int va_dl_describe(IntPtr handle, int task, byte[] buf, int cap);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         private static extern int va_dl_backend_available(int backend);
+
+        /// <summary>
+        /// 取模型解析结果（输入尺寸 / 输出通道 / 类别数 / 关键点数）。
+        /// 排查"为什么解析不对"时先看这个，比猜快。
+        /// </summary>
+        public static string Describe(IntPtr handle, int task)
+        {
+            try
+            {
+                var buf = new byte[256];
+                int n = va_dl_describe(handle, task, buf, buf.Length);
+                return n > 0 ? System.Text.Encoding.ASCII.GetString(buf, 0, n) : "";
+            }
+            catch (Exception) { return ""; }
+        }
 
         /// <summary>该后端是否可用（CUDA 现在恒为 false，UI 据此只列可用项）。</summary>
         public static bool BackendAvailable(int backend)

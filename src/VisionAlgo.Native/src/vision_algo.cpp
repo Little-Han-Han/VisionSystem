@@ -431,6 +431,12 @@ int VA_CALL va_dl_clear(void* handle, int task)
     return va::DlClear(ctx, task);
 }
 
+int VA_CALL va_dl_describe(void* handle, int task, char* buf, int cap)
+{
+    VA_CTX();
+    return va::DlDescribe(ctx, task, buf, cap);
+}
+
 int VA_CALL va_dl_backend_available(int backend)
 {
     return va::DlBackendAvailable(backend);
