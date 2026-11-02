@@ -20,9 +20,20 @@ namespace VisionPlatform.Recipe
             try
             {
                 AppPaths.Ensure();
-                string[] files = Directory.GetFiles(AppPaths.RecipeDir, "*.json");
-                foreach (string f in files)
-                    names.Add(Path.GetFileNameWithoutExtension(f));
+
+                // 方案目录（新布局）：<配方目录>\<方案名>\recipe.json
+                foreach (string dir in Directory.GetDirectories(AppPaths.RecipeDir))
+                {
+                    if (File.Exists(Path.Combine(dir, "recipe.json")))
+                        names.Add(Path.GetFileName(dir));
+                }
+
+                // 平铺 json（旧布局）：<配方目录>\<方案名>.json —— 兼容未迁移的老数据
+                foreach (string f in Directory.GetFiles(AppPaths.RecipeDir, "*.json"))
+                {
+                    string name = Path.GetFileNameWithoutExtension(f);
+                    if (!names.Contains(name)) names.Add(name);
+                }
             }
             catch (Exception ex)
             {
@@ -39,7 +50,7 @@ namespace VisionPlatform.Recipe
 
             try
             {
-                string path = Path.Combine(AppPaths.RecipeDir, name + ".json");
+                string path = BodyPath(name);
                 if (!File.Exists(path)) return OpResult<Recipe>.Fail("配方不存在：" + name);
 
                 Recipe r = Json.LoadFromFile<Recipe>(path);
@@ -56,6 +67,29 @@ namespace VisionPlatform.Recipe
             }
         }
 
+        /// <summary>方案配置文件路径：新布局 <c>Recipes\&lt;名&gt;\recipe.json</c>，旧布局回落到 <c>Recipes\&lt;名&gt;.json</c>。</summary>
+        private static string BodyPath(string name)
+        {
+            string inDir = Path.Combine(AppPaths.RecipePath(name), "recipe.json");
+            if (File.Exists(inDir)) return inDir;
+
+            string flat = Path.Combine(AppPaths.RecipeDir, name + ".json");
+            return File.Exists(flat) ? flat : inDir;   // 都不存在时返回新布局路径（Save 会建）
+        }
+
+        /// <summary>方案目录下的资产子目录（模板 / OCR 字符库 / 深度学习模型 / 采集图）。</summary>
+        public static readonly string[] RecipeSubDirs = { "Templates", "OCRModel", "Models", "Images" };
+
+        private static void EnsureRecipeSubdirs(string recipeDir)
+        {
+            try
+            {
+                for (int i = 0; i < RecipeSubDirs.Length; i++)
+                    Directory.CreateDirectory(Path.Combine(recipeDir, RecipeSubDirs[i]));
+            }
+            catch (Exception) { }
+        }
+
         public static OpResult Save(Recipe recipe)
         {
             if (recipe == null) return OpResult.Fail("配方为空");
@@ -66,7 +100,11 @@ namespace VisionPlatform.Recipe
                 AppPaths.Ensure();
                 recipe.Modified = DateTime.Now;
 
-                string path = Path.Combine(AppPaths.RecipeDir, recipe.Name + ".json");
+                string dir = AppPaths.RecipePath(recipe.Name);
+                Directory.CreateDirectory(dir);
+                EnsureRecipeSubdirs(dir);
+
+                string path = Path.Combine(dir, "recipe.json");
                 Json.SaveToFile(path, recipe);
 
                 Logger.Info("已保存配方：" + recipe.Name);
@@ -82,10 +120,22 @@ namespace VisionPlatform.Recipe
         {
             try
             {
-                string path = Path.Combine(AppPaths.RecipeDir, name + ".json");
+                string path = BodyPath(name);
                 if (!File.Exists(path)) return OpResult.Fail("配方不存在：" + name);
 
-                File.Delete(path);
+                // 方案目录里装的就是该方案的全部资产（配方 + 模板 + 模型），删方案即删资产
+                string dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)
+                    && !string.Equals(Path.GetFullPath(dir).TrimEnd('\\'),
+                                      Path.GetFullPath(AppPaths.RecipeDir).TrimEnd('\\'),
+                                      StringComparison.OrdinalIgnoreCase))
+                {
+                    Directory.Delete(dir, true);
+                }
+                else
+                {
+                    File.Delete(path);   // 旧平铺布局：只删 json
+                }
                 if (Current != null && string.Equals(Current.Name, name, StringComparison.OrdinalIgnoreCase))
                     SetCurrent(null);
 

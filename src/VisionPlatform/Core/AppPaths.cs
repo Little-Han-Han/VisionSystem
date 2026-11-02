@@ -38,8 +38,15 @@ namespace VisionPlatform.Core
         public static string RecipeDir { get { return Path.Combine(Root, "Recipes"); } }
 
         /// <summary>日志目录。</summary>
-        // 日志刻意留在 %AppData%：它属于运行产物，不该跟着程序目录被打包/覆盖
-        public static string LogDir { get { return Path.Combine(LegacyRoot, "Logs"); } }
+        /// <summary>日志目录：直接在程序目录下（用户要求，便于现场直接看）。</summary>
+        public static string LogDir { get { return Path.Combine(Root, "Logs"); } }
+
+        /// <summary>单个方案的根目录：<c>Recipes\&lt;方案名&gt;</c>。</summary>
+        public static string RecipePath(string recipeName)
+        {
+            string name = string.IsNullOrWhiteSpace(recipeName) ? "未命名方案" : recipeName.Trim();
+            return Path.Combine(RecipeDir, name);
+        }
 
         /// <summary>当日日志文件。</summary>
         public static string LogFile
