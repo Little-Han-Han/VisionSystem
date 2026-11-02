@@ -10,6 +10,8 @@ namespace VisionPlatform.UI
     /// <summary>配方管理：新建 / 加载 / 保存 / 删除，并编辑基本信息。</summary>
     public partial class RecipeForm : Form
     {
+        private CheckedListBox clbFlows;
+
         public RecipeForm()
         {
             InitializeComponent();
@@ -18,6 +20,7 @@ namespace VisionPlatform.UI
             ShowCurrent();
             RecipeStore.CurrentChanged += (s, e) => ShowCurrent();
 
+            BuildFlowBinding();
             UiStyle.ApplyForm(this);
 
             // 自绘深色标题栏：与顶部工具栏同色，系统原生标题栏不再出现
@@ -79,6 +82,86 @@ namespace VisionPlatform.UI
             Logger.Info("加载配方：" + name);
         }
 
+        /// <summary>「绑定流程」列表框的条目：显示流程名，回存流程 Id。</summary>
+        private sealed class FlowItem
+        {
+            public readonly string Id;
+            public readonly string Name;
+
+            public FlowItem(string id, string name) { Id = id ?? ""; Name = name ?? ""; }
+
+            public override string ToString()
+            {
+                return string.IsNullOrEmpty(Name) ? Id : Name + "  (" + Id.Substring(0, Math.Min(8, Id.Length)) + ")";
+            }
+        }
+
+        /// <summary>
+        /// 右侧底部：勾选该方案使用哪些流程。
+        /// <para>
+        /// 有了这层绑定，模板/字符库/模型才能按「方案 → 流程 → 节点」归档；
+        /// 不勾选（空）时资产仍走全局目录，与升级前行为一致。
+        /// </para>
+        /// </summary>
+        private void BuildFlowBinding()
+        {
+            var grp = new GroupBox
+            {
+                Text = "绑定流程（该方案用哪些流程）",
+                Dock = DockStyle.Bottom,
+                Height = 150,
+                ForeColor = UiTheme.ColorTextSecondary,
+                Padding = new Padding(8, 6, 8, 8)
+            };
+
+            clbFlows = new CheckedListBox
+            {
+                Dock = DockStyle.Fill,
+                CheckOnClick = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = UiTheme.ColorPanelBg,
+                ForeColor = UiTheme.ColorTextPrimary,
+                Font = UiTheme.FontSmall,
+                IntegralHeight = false
+            };
+
+            grp.Controls.Add(clbFlows);
+            panelRight.Controls.Add(grp);
+        }
+
+        /// <summary>把配置里的全部流程填进勾选列表，并按配方当前绑定勾上。</summary>
+        private void ReloadFlowChoices(RecipeModel recipe)
+        {
+            if (clbFlows == null) return;
+
+            clbFlows.ItemCheck -= OnFlowItemCheck;
+            clbFlows.Items.Clear();
+
+            List<VisionPlatform.Flow.FlowDefinition> flows = null;
+            try { flows = ConfigStore.Current.Flows.Flows; }
+            catch (Exception) { }
+
+            if (flows != null)
+            {
+                for (int i = 0; i < flows.Count; i++)
+                {
+                    VisionPlatform.Flow.FlowDefinition f = flows[i];
+                    if (f == null) continue;
+
+                    bool bound = recipe != null && recipe.FlowIds != null
+                                 && recipe.FlowIds.Contains(f.Id);
+                    clbFlows.Items.Add(new FlowItem(f.Id, f.Name), bound);
+                }
+            }
+
+            clbFlows.ItemCheck += OnFlowItemCheck;
+        }
+
+        private void OnFlowItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            // 勾选状态变化本身不需要做什么：保存时统一读 CheckedItems
+        }
+
         private void OnSave(object sender, EventArgs e)
         {
             RecipeModel r = RecipeStore.Current;
@@ -92,6 +175,17 @@ namespace VisionPlatform.UI
             r.Product = txtProduct.Text;
             r.Note = txtNote.Text;
             r.CameraId = txtCamera.Text;
+
+            // 绑定流程：勾了哪些就存哪些 Id
+            r.FlowIds = new List<string>();
+            if (clbFlows != null)
+            {
+                for (int i = 0; i < clbFlows.CheckedItems.Count; i++)
+                {
+                    FlowItem item = clbFlows.CheckedItems[i] as FlowItem;
+                    if (item != null && !string.IsNullOrEmpty(item.Id)) r.FlowIds.Add(item.Id);
+                }
+            }
 
             if (string.IsNullOrEmpty(r.Name))
             {
@@ -125,6 +219,7 @@ namespace VisionPlatform.UI
             if (r == null)
             {
                 lblInfo.Text = "当前配方：无";
+                ReloadFlowChoices(null);
                 return;
             }
 
@@ -132,6 +227,8 @@ namespace VisionPlatform.UI
             txtProduct.Text = r.Product;
             txtNote.Text = r.Note;
             txtCamera.Text = r.CameraId;
+
+            ReloadFlowChoices(r);
 
             lblInfo.Text = string.Format(
                 "当前配方：{0}" + Environment.NewLine +

@@ -1491,10 +1491,24 @@ namespace VisionPlatform.Flow
                 bool showRegionBox = node.GetBool("ShowRegionBox", true);
                 bool showStringBox = node.GetBool("ShowStringBox", true);
 
-                // ③ 模板目录（相对程序基目录，默认 bin/x64/Release/OCRModel）
+                // ③ 模板目录：
+                //    默认值（"OCRModel"）→ 优先用「方案\OCRModel\流程名\节点名」（同一流程里的
+                //    不同 OCR 节点各用各的字库）；方案没绑定该流程时自动回落到全局 OCRModel。
+                //    用户显式填了别的目录 → 原样尊重，不动。
                 string dirName = node.GetString("TemplateDir", "OCRModel");
                 if (string.IsNullOrWhiteSpace(dirName)) dirName = "OCRModel";
-                string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dirName);
+
+                string dir;
+                if (string.Equals(dirName.Trim(), "OCRModel", StringComparison.OrdinalIgnoreCase))
+                {
+                    string global = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel");
+                    string scoped = Core.AssetPaths.OcrDirOf(s.Flow, node);
+                    dir = Core.AssetPaths.Ensure(scoped, global);
+                }
+                else
+                {
+                    dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dirName);
+                }
 
                 OpResult<OcrTemplateLoadResult> tpl = EnsureOcrTemplates(dir);
                 if (!tpl.Success)

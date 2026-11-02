@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using VisionPlatform.Vision;
 
 namespace VisionPlatform.Recipe
@@ -18,6 +19,16 @@ namespace VisionPlatform.Recipe
 
         public DateTime Modified { get; set; }
 
+        /// <summary>
+        /// 该方案绑定的流程 Id 列表（可空）。
+        /// <para>
+        /// 【为什么需要】模板/字符库/模型按"方案 → 流程 → 节点"归档，
+        /// 而配方本身不含流程信息；不建立这层绑定就永远回答不了"这个方案的模型放哪"。
+        /// 空列表 = 未绑定（资产退回全局目录，行为与升级前一致）。
+        /// </para>
+        /// </summary>
+        public List<string> FlowIds { get; set; }
+
         /// <summary>使用的相机 Id。</summary>
         public string CameraId { get; set; }
 
@@ -33,6 +44,7 @@ namespace VisionPlatform.Recipe
         public Recipe()
         {
             Inspection = new InspectionConfig();
+            FlowIds = new List<string>();
             Modified = DateTime.Now;
         }
 

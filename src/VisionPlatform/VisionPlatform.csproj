@@ -64,6 +64,7 @@
     <Compile Include="Communication\TcpClientSession.cs" />
     <Compile Include="Communication\TcpServerSession.cs" />
     <Compile Include="Core\AppPaths.cs" />
+    <Compile Include="Core\AssetPaths.cs" />
     <Compile Include="Core\AppSettings.cs" />
     <Compile Include="Core\ImageStore.cs" />
     <Compile Include="Core\Json.cs" />
