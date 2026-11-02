@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Globalization;
 using System.Windows.Forms;
 using VisionPlatform.Calibration;
@@ -55,6 +56,9 @@ namespace VisionPlatform.UI
         /// <summary>N 点表格的列数（像素X / 像素Y / 机械X / 机械Y）。</summary>
         private const int PointColumnCount = 4;
 
+        /// <summary>序号列占 1 列，业务列（像素X/Y、机械X/Y）整体右移这么多。</summary>
+        private const int PointColOffset = 1;
+
         /// <summary>实时预览定时器（Tick 在 UI 线程；未开启实时时停止）。</summary>
         private Timer _liveTimer;
 
@@ -65,6 +69,9 @@ namespace VisionPlatform.UI
         private bool _loading;
         private DataGridView gridRecords;
         private UiButton btnRotationCenter;
+        private TextBox txtGridSize;
+        private UiButton btnDistort;
+        private VisionPlatform.Native.VisionAlgo _algo;
 
         /// <summary>标定配置段（与 <see cref="ConfigStore"/> 里的对象同一个引用）。</summary>
         private CalibSettings _settings;
@@ -94,6 +101,7 @@ namespace VisionPlatform.UI
             BuildRecordGrid();
             BuildRotationCenterButton();
             BuildPointIndexColumn();
+            BuildDistortionUi();
             UiStyle.ApplyForm(this);
 
             // 主题扫过一遍之后**必须**重设：DataGridView 的控件级 ForeColor 对单元格不完全生效，
@@ -133,23 +141,27 @@ namespace VisionPlatform.UI
         {
             gridPoints.Columns.Clear();
 
-            gridPoints.Columns.Add(NewPointColumn("colPixelX", "像素X (px)"));
-            gridPoints.Columns.Add(NewPointColumn("colPixelY", "像素Y (px)"));
-            gridPoints.Columns.Add(NewPointColumn("colMachineX", "机械X (mm)"));
-            gridPoints.Columns.Add(NewPointColumn("colMachineY", "机械Y (mm)"));
+            // 序号列固定窄；业务列给固定宽度 —— 全用 Fill/权重的话列会一直挤压填满，
+            // 永远不出现横向滚动条（用户反馈"不能左右移动"的真因）。
+            gridPoints.Columns.Add(NewPointColumn("colPointIndex", "#", 44));
+            gridPoints.Columns.Add(NewPointColumn("colPixelX", "像素X (px)", 122));
+            gridPoints.Columns.Add(NewPointColumn("colPixelY", "像素Y (px)", 122));
+            gridPoints.Columns.Add(NewPointColumn("colMachineX", "机械X (mm)", 130));
+            gridPoints.Columns.Add(NewPointColumn("colMachineY", "机械Y (mm)", 130));
 
             gridPoints.AllowUserToAddRows = false;
         }
 
         /// <summary>造一列等宽数值列（四列 FillWeight 相同，缩放时同步变宽）。</summary>
-        private static DataGridViewTextBoxColumn NewPointColumn(string name, string header)
+        private static DataGridViewTextBoxColumn NewPointColumn(string name, string header, int width)
         {
             return new DataGridViewTextBoxColumn
             {
                 Name = name,
                 HeaderText = header,
-                FillWeight = 25F,
-                MinimumWidth = 72,
+                Width = width,
+                MinimumWidth = 44,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                 SortMode = DataGridViewColumnSortMode.NotSortable,
                 ValueType = typeof(string)
             };
@@ -514,7 +526,8 @@ namespace VisionPlatform.UI
                 // Designer 里有些列是 AutoSizeMode=Fill（会跟着窗口压缩），统一改成固定宽度
                 if (col.AutoSizeMode != DataGridViewAutoSizeColumnMode.None)
                     col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                if (col.Width < 70) col.Width = 110;
+                if (!string.Equals(col.Name, "colPointIndex", StringComparison.Ordinal) && col.Width < 70)
+                    col.Width = 110;
             }
         }
 
@@ -530,21 +543,27 @@ namespace VisionPlatform.UI
         {
             if (gridPoints == null) return;
 
-            gridPoints.RowHeadersVisible = true;
-            gridPoints.RowHeadersWidth = 46;
-            gridPoints.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
-            gridPoints.RowPostPaint += OnPointGridRowPostPaint;
+            gridPoints.RowHeadersVisible = false;      // 序号在列里，不要行头
+            if (gridPoints.Columns.Count > 0 && gridPoints.Columns[0].Name == "colPointIndex")
+                gridPoints.Columns[0].ReadOnly = true;
+
+            gridPoints.RowsAdded += delegate { RenumberPointRows(); };
+            gridPoints.RowsRemoved += delegate { RenumberPointRows(); };
         }
 
-        private void OnPointGridRowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
+        private void RenumberPointRows()
         {
-            if (e.RowIndex < 0) return;
+            if (gridPoints == null || gridPoints.Columns.Count == 0) return;
+            if (gridPoints.Columns[0].Name != "colPointIndex") return;
 
-            Rectangle rect = new Rectangle(e.RowBounds.Left, e.RowBounds.Top,
-                                           gridPoints.RowHeadersWidth - 6, e.RowBounds.Height);
-            TextRenderer.DrawText(e.Graphics, (e.RowIndex + 1).ToString(),
-                                  gridPoints.Font, rect, Color.Black,
-                                  TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+            for (int i = 0; i < gridPoints.Rows.Count; i++)
+            {
+                DataGridViewRow row = gridPoints.Rows[i];
+                if (row.IsNewRow) { row.Cells[0].Value = ""; continue; }
+
+                string want = (i + 1).ToString();
+                if (Convert.ToString(row.Cells[0].Value) != want) row.Cells[0].Value = want;
+            }
         }
 
         private void AddRecordColumn(string header, int width, bool readOnly)
@@ -640,8 +659,8 @@ namespace VisionPlatform.UI
 
             for (int i = 0; i < gridPoints.Rows.Count; i++)
             {
-                string sx = Convert.ToString(gridPoints.Rows[i].Cells[2].Value ?? "").Trim();
-                string sy = Convert.ToString(gridPoints.Rows[i].Cells[3].Value ?? "").Trim();
+                string sx = Convert.ToString(gridPoints.Rows[i].Cells[2 + PointColOffset].Value ?? "").Trim();
+                string sy = Convert.ToString(gridPoints.Rows[i].Cells[3 + PointColOffset].Value ?? "").Trim();
                 if (sx.Length == 0 || sy.Length == 0) continue;
 
                 double x, y;
@@ -699,6 +718,212 @@ namespace VisionPlatform.UI
             Log(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "旋转中心：({0:F4}, {1:F4}) 半径 {2:F4} RMS {3:F4}",
                 r.CenterX, r.CenterY, r.Radius, r.Rms));
+        }
+
+        /// <summary>
+        /// 「畸变矫正」区：内角点行列数 + 选图批量标定。
+        /// <para>
+        /// 为什么用"选图文件夹"而不是一帧帧采集：标定要 8~15 张不同姿态的棋盘图，
+        /// 现场通常是先拍好一批再回来算，选目录比逐张按快门快得多。
+        /// </para>
+        /// </summary>
+        private void BuildDistortionUi()
+        {
+            if (groupTodo == null || lblTodo == null) return;
+
+            groupTodo.Text = "相机畸变矫正（棋盘格）";
+            lblTodo.Dock = DockStyle.Top;
+            lblTodo.Height = 24;
+            lblTodo.Text = "棋盘格内角点（列×行），例如 8x5：";
+
+            var bar = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 2, 0, 0) };
+
+            txtGridSize = new TextBox
+            {
+                Text = "8x5",
+                Width = 70,
+                Left = 0,
+                Top = 4,
+                Font = UiTheme.FontBody
+            };
+
+            btnDistort = new UiButton
+            {
+                Text = "选图并标定",
+                Left = 80,
+                Top = 2,
+                Width = 120,
+                Height = 28,
+                Kind = UiButtonKind.Grab
+            };
+            btnDistort.Click += OnDistortCalibrate;
+
+            bar.Controls.Add(txtGridSize);
+            bar.Controls.Add(btnDistort);
+
+            groupTodo.Controls.Add(bar);
+            bar.BringToFront();
+        }
+
+        private void OnDistortCalibrate(object sender, EventArgs e)
+        {
+            try
+            {
+                DoDistortCalibrate();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("畸变标定失败：" + ex);
+                Log("畸变标定失败：" + ex.Message);
+            }
+        }
+
+        private void DoDistortCalibrate()
+        {
+            int cols, rows;
+            if (!ParseGridSize(txtGridSize.Text, out cols, out rows))
+            {
+                MessageBox.Show(this, "内角点格式应为 列x行，例如 8x5。", "畸变矫正",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string dir;
+            using (var dlg = new FolderBrowserDialog())
+            {
+                dlg.Description = "选择存放棋盘格标定图的文件夹（建议 8~15 张不同姿态）";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                dir = dlg.SelectedPath;
+            }
+
+            string[] files = Directory.GetFiles(dir, "*.*", SearchOption.TopDirectoryOnly);
+            var images = new List<string>();
+            for (int i = 0; i < files.Length; i++)
+            {
+                string ext = Path.GetExtension(files[i]).ToLowerInvariant();
+                if (ext == ".bmp" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tif" || ext == ".tiff")
+                    images.Add(files[i]);
+            }
+            images.Sort(StringComparer.OrdinalIgnoreCase);
+
+            if (images.Count < 3)
+            {
+                MessageBox.Show(this, "该文件夹里的图片少于 3 张，无法标定。", "畸变矫正");
+                return;
+            }
+
+            if (_algo == null) _algo = new VisionPlatform.Native.VisionAlgo();
+
+            var all = new List<double>();
+            var counts = new List<int>();
+            int width = 0, height = 0;
+            int failed = 0;
+
+            for (int i = 0; i < images.Count; i++)
+            {
+                Bitmap bmp = null;
+                try { bmp = new Bitmap(images[i]); }
+                catch (Exception) { failed++; continue; }
+
+                try
+                {
+                    if (width == 0) { width = bmp.Width; height = bmp.Height; }
+
+                    double[] pts;
+                    string err;
+                    if (!_algo.CalibFindChessboard(bmp, cols, rows, out pts, out err) || pts == null)
+                    {
+                        failed++;
+                        Logger.Info("[标定] 跳过 " + Path.GetFileName(images[i]) + "：" + err);
+                        continue;
+                    }
+
+                    all.AddRange(pts);
+                    counts.Add(pts.Length / 2);
+                }
+                finally
+                {
+                    bmp.Dispose();
+                }
+            }
+
+            if (counts.Count < 3)
+            {
+                string msg = "有效标定图不足 3 张（共 " + images.Count + " 张，失败 " + failed + " 张）。"
+                           + Environment.NewLine + "请检查：内角点行列数是否正确、棋盘格是否完整入画、对比度是否足够。";
+                Log(msg);
+                MessageBox.Show(this, msg, "畸变矫正", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            double[] k, dist;
+            double rms;
+            string error;
+            if (!_algo.CalibCalibrate(all.ToArray(), counts.ToArray(), cols, rows, width, height,
+                                      out k, out dist, out rms, out error))
+            {
+                Log("畸变标定失败：" + error);
+                MessageBox.Show(this, "标定失败：" + error, "畸变矫正");
+                return;
+            }
+
+            // 存成一条标定记录（Kind=Distortion），K/dist 放 ExtraJson
+            if (_settings != null && !string.IsNullOrEmpty(_cameraId))
+            {
+                CalibRecord rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.Distortion);
+                rec.Kind = CalibKind.Distortion;
+                rec.PointCount = counts.Count;
+                rec.RmsError = rms;
+                rec.MeanOffset = rms;
+                rec.MaxOffset = rms;
+                rec.Precision = rms;
+                rec.ExtraJson = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"cols\":{0},\"rows\":{1},\"width\":{2},\"height\":{3}," +
+                    "\"fx\":{4:F6},\"fy\":{5:F6},\"cx\":{6:F6},\"cy\":{7:F6}," +
+                    "\"k1\":{8:F8},\"k2\":{9:F8},\"p1\":{10:F8},\"p2\":{11:F8},\"k3\":{12:F8}}}",
+                    cols, rows, width, height,
+                    k[0], k[4], k[2], k[5],
+                    dist[0], dist[1], dist[2], dist[3], dist[4]);
+
+                _settings.Records.Add(rec);
+                _settings.SetCurrent(rec);
+                _currentRecordId = rec.Id;
+                SaveSettings();
+                RefreshRecordList();
+            }
+
+            string report = string.Format(CultureInfo.InvariantCulture,
+                "畸变标定完成（{0} 张有效 / 共 {1} 张）" + Environment.NewLine +
+                "内角点：{2} x {3}　分辨率：{4} x {5}" + Environment.NewLine +
+                "fx = {6:F3}　fy = {7:F3}" + Environment.NewLine +
+                "cx = {8:F3}　cy = {9:F3}" + Environment.NewLine +
+                "k1 = {10:F6}　k2 = {11:F6}" + Environment.NewLine +
+                "p1 = {12:F6}　p2 = {13:F6}　k3 = {14:F6}" + Environment.NewLine +
+                "重投影 RMS = {15:F4} px",
+                counts.Count, images.Count, cols, rows, width, height,
+                k[0], k[4], k[2], k[5],
+                dist[0], dist[1], dist[2], dist[3], dist[4], rms);
+
+            txtResult.Text = report;
+            Log(string.Format(CultureInfo.InvariantCulture, "畸变标定：{0} 张，RMS {1:F4} px", counts.Count, rms));
+
+            MessageBox.Show(this, report, "畸变矫正结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>解析 "8x5" / "8*5" / "8,5" 三种写法。</summary>
+        private static bool ParseGridSize(string text, out int cols, out int rows)
+        {
+            cols = rows = 0;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            string t = text.Trim().ToLowerInvariant().Replace('*', 'x').Replace(',', 'x').Replace('×', 'x');
+            string[] parts = t.Split('x');
+            if (parts.Length != 2) return false;
+
+            if (!int.TryParse(parts[0].Trim(), out cols)) return false;
+            if (!int.TryParse(parts[1].Trim(), out rows)) return false;
+
+            return cols >= 2 && rows >= 2 && cols <= 30 && rows <= 30;
         }
 
         private void OnNewRecord(object sender, EventArgs e)
@@ -863,7 +1088,9 @@ namespace VisionPlatform.UI
             {
                 for (int i = 0; i < points.Count; i++)
                 {
+                    // 第 0 列是序号，由 RenumberPointRows 统一填，这里占位空串
                     gridPoints.Rows.Add(
+                        "",
                         FormatNumber(points[i].PixelX),
                         FormatNumber(points[i].PixelY),
                         FormatNumber(points[i].MachineX),
@@ -905,7 +1132,7 @@ namespace VisionPlatform.UI
                 bool allEmpty = true;
                 for (int c = 0; c < PointColumnCount; c++)
                 {
-                    texts[c] = CellText(row, c);
+                    texts[c] = CellText(row, c + PointColOffset);
                     if (texts[c].Length > 0) allEmpty = false;
                 }
                 if (allEmpty) continue;
@@ -1160,11 +1387,11 @@ namespace VisionPlatform.UI
                     row = gridPoints.Rows[index];
                 }
 
-                row.Cells[2].Value = FormatNumber(coord.X);
-                row.Cells[3].Value = FormatNumber(coord.Y);
+                row.Cells[2 + PointColOffset].Value = FormatNumber(coord.X);
+                row.Cells[3 + PointColOffset].Value = FormatNumber(coord.Y);
 
-                if (row.Cells[2].OwningColumn != null)
-                    gridPoints.CurrentCell = row.Cells[2];
+                if (row.Cells[2 + PointColOffset].OwningColumn != null)
+                    gridPoints.CurrentCell = row.Cells[2 + PointColOffset];
 
                 Log("已读取 " + name + " 的坐标：" + coord.Display + "（像素坐标请手工填写另一侧）");
             }

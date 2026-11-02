@@ -129,6 +129,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClInclude Include="include\algo\va_match.h" />
     <ClInclude Include="include\algo\va_shape.h" />
     <ClInclude Include="include\algo\va_measure.h" />
+    <ClInclude Include="include\algo\va_calib.h" />
     <ClInclude Include="include\algo\va_camera.h" />
     <ClInclude Include="include\algo\va_caliper.h" />
     <ClInclude Include="include\algo\va_filter.h" />
@@ -144,6 +145,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClCompile Include="src\vision_algo.cpp" />
     <ClCompile Include="src\algo\algo_preprocess.cpp" />
     <ClCompile Include="src\algo\algo_blob.cpp" />
+    <ClCompile Include="src\algo\algo_calib.cpp" />
     <ClCompile Include="src\algo\algo_fit.cpp" />
     <ClCompile Include="src\algo\algo_match.cpp" />
     <ClCompile Include="src\algo\algo_shape.cpp" />

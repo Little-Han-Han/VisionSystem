@@ -33,6 +33,7 @@
 #include "va_types.h"
 #include "va_lifecycle.h"
 
+#include "algo/va_calib.h"
 #include "algo/va_preprocess.h"
 #include "algo/va_blob.h"
 #include "algo/va_fit.h"

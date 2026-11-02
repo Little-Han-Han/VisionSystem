@@ -1335,6 +1335,33 @@ namespace VisionPlatform.Native
             }
         }
 
+        // ---------------------- 相机标定（棋盘格） ----------------------
+
+        /// <summary>在单张图上找棋盘格内角点，返回 [x0,y0,x1,y1,...]（图像坐标）。</summary>
+        public bool CalibFindChessboard(Bitmap src, int cols, int rows,
+                                        out double[] points, out string error)
+        {
+            points = null;
+            error = "输入图像为空";
+            if (src == null) return false;
+
+            using (var ci = new ColorInput(src))
+            {
+                VA_Image img = ci.Image;
+                points = NativeCalib.FindChessboard(_handle, ref img, cols, rows, out error);
+                return points != null;
+            }
+        }
+
+        /// <summary>用多张图的角点标定内参与畸变系数。</summary>
+        public bool CalibCalibrate(double[] allPoints, int[] counts, int cols, int rows,
+                                   int width, int height,
+                                   out double[] k, out double[] dist, out double rms, out string error)
+        {
+            return NativeCalib.Calibrate(_handle, allPoints, counts, cols, rows, width, height,
+                                         out k, out dist, out rms, out error);
+        }
+
         /// <summary>模型解析摘要（输入尺寸 / 输出通道 / 类别数 / 关键点数）。</summary>
         public string DlDescribe(int task)
         {

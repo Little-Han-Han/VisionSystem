@@ -434,6 +434,22 @@ int VA_CALL va_dl_clear(void* handle, int task)
     return va::DlClear(ctx, task);
 }
 
+int VA_CALL va_calib_find_chessboard(void* handle, const VA_Image* gray, int cols, int rows,
+                                      double* outXY, int cap, int* outCount)
+{
+    VA_CTX();
+    return va::CalibFindChessboard(ctx, gray, cols, rows, outXY, cap, outCount);
+}
+
+int VA_CALL va_calib_calibrate(void* handle, const double* xy, const int* counts, int nImages,
+                               int cols, int rows, int width, int height, int flags,
+                               double* outK, double* outDist, double* outRms)
+{
+    VA_CTX();
+    return va::CalibCalibrate(ctx, xy, counts, nImages, cols, rows, width, height, flags,
+                              outK, outDist, outRms);
+}
+
 int VA_CALL va_dl_describe(void* handle, int task, char* buf, int cap)
 {
     VA_CTX();

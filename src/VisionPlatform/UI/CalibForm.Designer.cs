@@ -40,6 +40,7 @@ namespace VisionPlatform.UI
             this.panelStatus = new System.Windows.Forms.Panel();
             this.lblStatus = new System.Windows.Forms.Label();
 
+            this.splitLeft = new System.Windows.Forms.Splitter();
             this.panelLeft = new System.Windows.Forms.Panel();
             this.tableLeft = new System.Windows.Forms.TableLayoutPanel();
             this.groupList = new System.Windows.Forms.GroupBox();
@@ -161,6 +162,17 @@ namespace VisionPlatform.UI
 
             // ---------- panelLeft：左侧参数区 ----------
             this.panelLeft.Controls.Add(this.tableLeft);
+            // 左栏可拖动改宽（右栏 Dock=Fill 会自动跟上）
+            this.splitLeft.BackColor = System.Drawing.Color.FromArgb(70, 70, 78);
+            this.splitLeft.Dock = System.Windows.Forms.DockStyle.Left;
+            this.splitLeft.Location = new System.Drawing.Point(440, 46);
+            this.splitLeft.MinExtra = 380;
+            this.splitLeft.MinSize = 320;
+            this.splitLeft.Name = "splitLeft";
+            this.splitLeft.Size = new System.Drawing.Size(6, 648);
+            this.splitLeft.TabIndex = 3;
+            this.splitLeft.TabStop = false;
+
             this.panelLeft.Dock = System.Windows.Forms.DockStyle.Left;
             this.panelLeft.Location = new System.Drawing.Point(0, 46);
             this.panelLeft.Name = "panelLeft";
@@ -427,6 +439,7 @@ namespace VisionPlatform.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1180, 720);
             this.Controls.Add(this.panelRight);
+            this.Controls.Add(this.splitLeft);
             this.Controls.Add(this.panelLeft);
             this.Controls.Add(this.panelStatus);
             this.Controls.Add(this.panelTop);
@@ -465,6 +478,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Panel panelStatus;
         private System.Windows.Forms.Label lblStatus;
 
+        private System.Windows.Forms.Splitter splitLeft;
         private System.Windows.Forms.Panel panelLeft;
         private System.Windows.Forms.TableLayoutPanel tableLeft;
 
