@@ -6,8 +6,25 @@ namespace VisionPlatform.Core
     /// <summary>应用程序数据目录与文件路径。</summary>
     public static class AppPaths
     {
-        /// <summary>数据根目录（%AppData%\VisionPlatform）。</summary>
+        /// <summary>
+        /// 用户数据根目录 = <strong>程序所在目录</strong>（如 <c>bin\x64\Release</c>）。
+        /// <para>
+        /// 【为什么从 %AppData% 挪到程序目录】现场是"整个 bin 目录拷走即部署"，
+        /// 配置/配方/模板/模型跟着程序走才不用二次搬运；模型本来就放在 <c>models\</c> 下，
+        /// 之前 Root 指向 AppData 导致深度学习节点去 AppData 找 models 而找不到。
+        /// </para>
+        /// <para>
+        /// 日志仍留在 %AppData%（见 <see cref="LogDir"/>）：日志是运行产物，
+        /// 不该混进要打包拷贝的程序目录。
+        /// </para>
+        /// </summary>
         public static string Root
+        {
+            get { return AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        }
+
+        /// <summary>用户配置的旧位置（仅日志与兼容迁移用）：<c>%AppData%\VisionPlatform</c>。</summary>
+        public static string LegacyRoot
         {
             get
             {
@@ -21,7 +38,8 @@ namespace VisionPlatform.Core
         public static string RecipeDir { get { return Path.Combine(Root, "Recipes"); } }
 
         /// <summary>日志目录。</summary>
-        public static string LogDir { get { return Path.Combine(Root, "Logs"); } }
+        // 日志刻意留在 %AppData%：它属于运行产物，不该跟着程序目录被打包/覆盖
+        public static string LogDir { get { return Path.Combine(LegacyRoot, "Logs"); } }
 
         /// <summary>当日日志文件。</summary>
         public static string LogFile
