@@ -55,6 +55,7 @@
     <Compile Include="Camera\SimCamera.cs" />
     <Compile Include="Calibration\CalibCoordReply.cs" />
     <Compile Include="Calibration\CalibModels.cs" />
+    <Compile Include="Calibration\CalibStore.cs" />
     <Compile Include="Calibration\CalibSolver.cs" />
     <Compile Include="Communication\CommQuery.cs" />
     <Compile Include="Communication\CommRegistry.cs" />

@@ -63,6 +63,7 @@ namespace VisionPlatform.UI
 
         /// <summary>正在回填界面（抑制由此引发的选中 / 保存事件）。</summary>
         private bool _loading;
+        private DataGridView gridRecords;
 
         /// <summary>标定配置段（与 <see cref="ConfigStore"/> 里的对象同一个引用）。</summary>
         private CalibSettings _settings;
@@ -89,6 +90,7 @@ namespace VisionPlatform.UI
             InitializeComponent();
 
             // 整窗体统一深色主题（必须在 InitializeComponent 之后、语义色之前）
+            BuildRecordGrid();
             UiStyle.ApplyForm(this);
 
             // 自绘深色标题栏（与其余子窗体一致；幂等、内部已 try/catch）
@@ -117,9 +119,6 @@ namespace VisionPlatform.UI
         /// <summary>标定列表外观（<see cref="UiStyle"/> 不处理 ListView，这里手工对齐主题）。</summary>
         private void InitRecordList()
         {
-            listRecords.BackColor = UiTheme.ColorViewBg;
-            listRecords.ForeColor = UiTheme.ColorTextPrimary;
-            listRecords.Font = UiTheme.FontSmall;
         }
 
         /// <summary>N 点表格的四列。</summary>
@@ -315,10 +314,11 @@ namespace VisionPlatform.UI
             // 【必须】清空/重选会触发 SelectedIndexChanged → SyncFromSelection → 又去刷列表，
             // 用户点「新建」时直接递归到 StackOverflow（进程崩溃）。这里用 _loading 切断。
             _loading = true;
-            listRecords.BeginUpdate();
             try
             {
-                listRecords.Items.Clear();
+                if (gridRecords == null) return;
+
+                gridRecords.Rows.Clear();
 
                 List<CalibRecord> records = _settings.RecordsFor(_cameraId);
                 string currentId = _settings.CurrentIdFor(_cameraId);
@@ -328,32 +328,32 @@ namespace VisionPlatform.UI
                     CalibRecord rec = records[i];
                     bool isCurrent = string.Equals(rec.Id, currentId, StringComparison.Ordinal);
 
-                    ListViewItem item = new ListViewItem((isCurrent ? "★ " : "") + (rec.Name ?? ""));
-                    item.SubItems.Add(rec.KindDisplay);
-                    item.SubItems.Add(rec.HasResult
-                        ? rec.RmsError.ToString("F4", CultureInfo.InvariantCulture)
-                        : "-");
-                    item.SubItems.Add(rec.CreatedAt > DateTime.MinValue
-                        ? rec.CreatedAt.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture)
-                        : "-");
-                    item.Tag = rec.Id;
+                    int idx = gridRecords.Rows.Add(
+                        (isCurrent ? "★ " : "") + (i + 1).ToString(CultureInfo.InvariantCulture),
+                        rec.Name ?? "",
+                        rec.KindDisplay,
+                        rec.HasResult ? rec.RmsError.ToString("F4", CultureInfo.InvariantCulture) : "-",
+                        rec.CreatedAt > DateTime.MinValue
+                            ? rec.CreatedAt.ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                            : "-",
+                        rec.CameraId ?? "",
+                        string.IsNullOrEmpty(rec.FilePath) ? "（未落盘）" : rec.FilePath);
 
-                    listRecords.Items.Add(item);
-                    if (string.Equals(rec.Id, keep, StringComparison.Ordinal)) select = i;
+                    gridRecords.Rows[idx].Tag = rec.Id;
+                    if (string.Equals(rec.Id, keep, StringComparison.Ordinal)) select = idx;
                 }
 
-                if (select < 0 && listRecords.Items.Count > 0) select = 0;
+                if (select < 0 && gridRecords.Rows.Count > 0) select = 0;
 
-                listRecords.SelectedIndices.Clear();
-                if (select >= 0)
+                gridRecords.ClearSelection();
+                if (select >= 0 && select < gridRecords.Rows.Count)
                 {
-                    listRecords.Items[select].Selected = true;
-                    listRecords.Items[select].Focused = true;
+                    gridRecords.Rows[select].Selected = true;
+                    gridRecords.CurrentCell = gridRecords.Rows[select].Cells[1];
                 }
             }
             finally
             {
-                listRecords.EndUpdate();
                 _loading = false;
             }
 
@@ -364,8 +364,9 @@ namespace VisionPlatform.UI
         /// <summary>把列表选中项同步到「当前记录 / 点表 / 结果区」。</summary>
         private void SyncFromSelection()
         {
-            ListViewItem item = listRecords.SelectedItems.Count > 0 ? listRecords.SelectedItems[0] : null;
-            string id = (item != null && item.Tag is string) ? (string)item.Tag : "";
+            DataGridViewRow row = (gridRecords != null && gridRecords.SelectedRows.Count > 0)
+                ? gridRecords.SelectedRows[0] : null;
+            string id = (row != null && row.Tag is string) ? (string)row.Tag : "";
 
             bool changed = !string.Equals(id, _currentRecordId, StringComparison.Ordinal);
             if (!changed)
@@ -387,6 +388,110 @@ namespace VisionPlatform.UI
         {
             if (_loading) return;
             SyncFromSelection();
+        }
+
+        /// <summary>
+        /// 标定记录表：序号 / 名称（可双击改）/ 类型 / RMS / 时间 / 相机 / 路径。
+        /// <para>
+        /// 【为什么换掉 ListView】ListView 不能原地编辑、列宽不合适时无法横向滚动查看，
+        /// 用户看不到"路径"这种长字段。DataGridView 两样都支持。
+        /// 原来那个 ListView 在 Designer 里，这里直接把它从容器移除（不留孤儿控件）。
+        /// </para>
+        /// </summary>
+        private void BuildRecordGrid()
+        {
+            if (listRecords != null)
+            {
+                listRecords.Visible = false;
+                if (listRecords.Parent != null) listRecords.Parent.Controls.Remove(listRecords);
+            }
+
+            gridRecords = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                Name = "gridRecords",
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                RowHeadersVisible = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                ScrollBars = ScrollBars.Both,          // 列放不下时能左右拖
+                BorderStyle = BorderStyle.FixedSingle,
+                BackgroundColor = UiTheme.ColorViewBg,
+                GridColor = UiTheme.ColorCardBg,
+                Font = UiTheme.FontSmall,
+                ColumnHeadersHeight = 30
+            };
+
+            gridRecords.DefaultCellStyle.BackColor = UiTheme.ColorViewBg;
+            gridRecords.DefaultCellStyle.ForeColor = UiTheme.ColorTextPrimary;
+            gridRecords.DefaultCellStyle.SelectionBackColor = UiTheme.ColorHeaderBg;
+            gridRecords.DefaultCellStyle.SelectionForeColor = UiTheme.ColorTextPrimary;
+            gridRecords.ColumnHeadersDefaultCellStyle.BackColor = UiTheme.ColorHeaderBg;
+            gridRecords.ColumnHeadersDefaultCellStyle.ForeColor = UiTheme.ColorTextSecondary;
+            gridRecords.EnableHeadersVisualStyles = false;
+
+            AddRecordColumn("#", 46, true);
+            AddRecordColumn("名称", 150, false);      // 只有名称可编辑
+            AddRecordColumn("类型", 78, true);
+            AddRecordColumn("RMS", 70, true);
+            AddRecordColumn("时间", 132, true);
+            AddRecordColumn("相机", 96, true);
+            AddRecordColumn("路径", 320, true);
+
+            gridRecords.SelectionChanged += OnRecordGridSelectionChanged;
+            gridRecords.CellEndEdit += OnRecordGridCellEndEdit;
+
+            if (listRecords != null && listRecords.Parent != null)
+                listRecords.Parent.Controls.Add(gridRecords);
+        }
+
+        private void AddRecordColumn(string header, int width, bool readOnly)
+        {
+            var col = new DataGridViewTextBoxColumn
+            {
+                HeaderText = header,
+                Width = width,
+                ReadOnly = readOnly,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                Resizable = DataGridViewTriState.True
+            };
+            if (readOnly) col.DefaultCellStyle.ForeColor = UiTheme.ColorTextSecondary;
+            gridRecords.Columns.Add(col);
+        }
+
+        private void OnRecordGridSelectionChanged(object sender, EventArgs e)
+        {
+            if (_loading) return;
+            SyncFromSelection();
+        }
+
+        /// <summary>双击名称列改名：直接落盘，不用再点「重命名」。</summary>
+        private void OnRecordGridCellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_loading || e.RowIndex < 0 || e.ColumnIndex != 1) return;
+            if (gridRecords.Rows[e.RowIndex].Tag == null) return;
+
+            string id = (string)gridRecords.Rows[e.RowIndex].Tag;
+            string newName = Convert.ToString(gridRecords.Rows[e.RowIndex].Cells[1].Value ?? "").Trim();
+
+            CalibRecord rec = _settings != null ? _settings.Find(id) : null;
+            if (rec == null) return;
+
+            if (string.IsNullOrEmpty(newName))
+            {
+                Log("名称不能为空，已还原。");
+                RefreshRecordList();
+                return;
+            }
+            if (string.Equals(rec.Name, newName, StringComparison.Ordinal)) return;
+
+            rec.Name = newName;
+            SaveSettings();
+            RefreshRecordList();
+            Log("已重命名为：" + newName);
         }
 
         private void OnNewRecord(object sender, EventArgs e)
@@ -465,6 +570,7 @@ namespace VisionPlatform.UI
                 "删除标定", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
             if (confirm != DialogResult.Yes) return;
 
+            CalibStore.Delete(rec);          // 记录删了，它的标定文件也别留
             _settings.RemoveRecord(rec.Id);
             _pointCache.Remove(rec.Id);
             _currentRecordId = "";
@@ -516,6 +622,21 @@ namespace VisionPlatform.UI
             if (_settings == null) return;
 
             CalibSettings.Normalize(_settings);
+
+            // 每条标定单独落一个文件：appconfig 里只留索引与相对路径，
+            // 单条标定能整个拷给别人，标定变多也不撑大主配置。
+            if (_settings.Records != null)
+            {
+                for (int i = 0; i < _settings.Records.Count; i++)
+                {
+                    CalibRecord rec = _settings.Records[i];
+                    if (rec == null || !rec.HasResult) continue;
+
+                    OpResult wr = CalibStore.Save(rec);
+                    if (!wr.Success) Log("标定文件保存失败：" + wr.Message);
+                }
+            }
+
             AppConfig cfg = ConfigStore.Current;
             cfg.Calibrations = _settings;
             ConfigStore.Save();

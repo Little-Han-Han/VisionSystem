@@ -103,6 +103,16 @@ namespace VisionPlatform.Calibration
         [DataMember]
         public string ExtraJson { get; set; }
 
+        /// <summary>
+        /// 该标定落盘的文件路径（相对程序目录）。
+        /// <para>
+        /// 【为什么要单独存文件】appconfig.json 只当索引（名称/时间/相机/路径），
+        /// 单条标定能整个拷给别人；标定记录变多也不会把主配置撑大。
+        /// </para>
+        /// </summary>
+        [DataMember]
+        public string FilePath { get; set; }
+
         /// <summary>创建一条空记录（结果字段全 0，等待「计算」填入）。</summary>
         /// <param name="cameraId">所属相机 Id，可为空串。</param>
         /// <param name="name">显示名。</param>
@@ -131,6 +141,7 @@ namespace VisionPlatform.Calibration
             if (CameraId == null) CameraId = "";
             if (Name == null) Name = "";
             if (ExtraJson == null) ExtraJson = "";
+            if (FilePath == null) FilePath = "";
 
             if (Affine == null || Affine.Length != AffineLength)
             {
