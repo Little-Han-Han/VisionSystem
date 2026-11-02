@@ -312,6 +312,9 @@ namespace VisionPlatform.UI
             string keep = _currentRecordId;
             int select = -1;
 
+            // 【必须】清空/重选会触发 SelectedIndexChanged → SyncFromSelection → 又去刷列表，
+            // 用户点「新建」时直接递归到 StackOverflow（进程崩溃）。这里用 _loading 切断。
+            _loading = true;
             listRecords.BeginUpdate();
             try
             {
@@ -351,6 +354,7 @@ namespace VisionPlatform.UI
             finally
             {
                 listRecords.EndUpdate();
+                _loading = false;
             }
 
             // BeginUpdate 期间选中事件可能不触发，这里显式同步一次界面状态
@@ -386,6 +390,19 @@ namespace VisionPlatform.UI
         }
 
         private void OnNewRecord(object sender, EventArgs e)
+        {
+            try
+            {
+                DoNewRecord();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("新建标定记录失败：" + ex);
+                Log("新建失败：" + ex.Message);
+            }
+        }
+
+        private void DoNewRecord()
         {
             if (_settings == null) return;
             if (string.IsNullOrEmpty(_cameraId))
@@ -499,7 +516,8 @@ namespace VisionPlatform.UI
             if (_settings == null) return;
 
             CalibSettings.Normalize(_settings);
-            ConfigStore.Current.Calibrations = _settings;
+            AppConfig cfg = ConfigStore.Current;
+            cfg.Calibrations = _settings;
             ConfigStore.Save();
         }
 

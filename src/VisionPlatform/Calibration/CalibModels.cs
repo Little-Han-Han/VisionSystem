@@ -201,6 +201,19 @@ namespace VisionPlatform.Calibration
     /// 一律由 <see cref="Normalize"/> 补齐，绝不让界面拿到 null。
     /// </para>
     /// </summary>
+    /// <summary>「某台相机当前生效的标定记录」一条映射（用 List 存，见 CalibSettings 的说明）。</summary>
+    [DataContract]
+    public sealed class CalibCurrent
+    {
+        [DataMember]
+        public string CameraId { get; set; }
+
+        [DataMember]
+        public string RecordId { get; set; }
+
+        public CalibCurrent() { CameraId = ""; RecordId = ""; }
+    }
+
     [DataContract]
     public sealed class CalibSettings
     {
@@ -209,8 +222,16 @@ namespace VisionPlatform.Calibration
         public List<CalibRecord> Records { get; set; }
 
         /// <summary>相机 Id → 当前生效记录 Id（键区分大小写，取自 <c>CameraInfo.Id</c>）。</summary>
+        /// <summary>
+        /// 「每台相机当前生效的标定记录」。
+        /// <para>
+        /// 【为什么不是 Dictionary】<c>DataContractJsonSerializer</c> 对 <c>Dictionary&lt;K,V&gt;</c>
+        /// 要求集合契约，直接用会在序列化时抛异常（表现为"点新建就崩"）。
+        /// 换成 List + 小结构体，序列化稳定，查找量也极小（相机数量个位数）。
+        /// </para>
+        /// </summary>
         [DataMember]
-        public Dictionary<string, string> CurrentByCamera { get; set; }
+        public List<CalibCurrent> CurrentByCamera { get; set; }
 
         /// <summary>默认空配置。</summary>
         public static CalibSettings CreateDefault()
@@ -218,7 +239,7 @@ namespace VisionPlatform.Calibration
             return new CalibSettings
             {
                 Records = new List<CalibRecord>(),
-                CurrentByCamera = new Dictionary<string, string>(StringComparer.Ordinal)
+                CurrentByCamera = new List<CalibCurrent>()
             };
         }
 
@@ -232,7 +253,7 @@ namespace VisionPlatform.Calibration
 
             if (settings.Records == null) settings.Records = new List<CalibRecord>();
             if (settings.CurrentByCamera == null)
-                settings.CurrentByCamera = new Dictionary<string, string>(StringComparer.Ordinal);
+                settings.CurrentByCamera = new List<CalibCurrent>();
 
             // 逐条记录补字段；顺带剔掉反序列化出来的 null 元素（手改配置可能出现）
             for (int i = settings.Records.Count - 1; i >= 0; i--)
@@ -243,16 +264,16 @@ namespace VisionPlatform.Calibration
             }
 
             // 「当前」映射里指向不存在的记录 → 直接删除，避免界面每帧都要判空
-            List<string> deadKeys = new List<string>();
-            foreach (KeyValuePair<string, string> kv in settings.CurrentByCamera)
+            for (int i = settings.CurrentByCamera.Count - 1; i >= 0; i--)
             {
-                if (string.IsNullOrEmpty(kv.Key) || string.IsNullOrEmpty(kv.Value)
-                    || settings.Find(kv.Value) == null)
+                CalibCurrent cur = settings.CurrentByCamera[i];
+                // 内联判存在，别再走 Find（Find 里若调 Normalize 就是死循环）
+                if (cur == null || string.IsNullOrEmpty(cur.CameraId) || string.IsNullOrEmpty(cur.RecordId)
+                    || !ContainsRecord(settings, cur.RecordId))
                 {
-                    deadKeys.Add(kv.Key);
+                    settings.CurrentByCamera.RemoveAt(i);
                 }
             }
-            for (int i = 0; i < deadKeys.Count; i++) settings.CurrentByCamera.Remove(deadKeys[i]);
         }
 
         /// <summary>某台相机的全部记录（按创建时间倒序，最新的在最上面）。</summary>
@@ -280,7 +301,11 @@ namespace VisionPlatform.Calibration
         public CalibRecord Find(string recordId)
         {
             if (string.IsNullOrEmpty(recordId)) return null;
-            Normalize(this);
+
+            // 【不要在这里调 Normalize】Normalize 清理「当前映射」时会回调本方法，
+            // 形成 Normalize → Find → Normalize 的死循环（实测直接 StackOverflow 崩进程）。
+            // Normalize 自己保证容器非 null，这里只做查找。
+            if (Records == null) return null;
 
             for (int i = 0; i < Records.Count; i++)
             {
@@ -296,7 +321,8 @@ namespace VisionPlatform.Calibration
             Normalize(this);
 
             string recordId;
-            if (!CurrentByCamera.TryGetValue(cameraId ?? "", out recordId)) return null;
+            recordId = LookupCurrent(cameraId);
+            if (string.IsNullOrEmpty(recordId)) return null;
             return Find(recordId);
         }
 
@@ -306,16 +332,58 @@ namespace VisionPlatform.Calibration
             Normalize(this);
 
             string recordId;
-            return CurrentByCamera.TryGetValue(cameraId ?? "", out recordId) ? (recordId ?? "") : "";
+            return LookupCurrent(cameraId);
         }
 
         /// <summary>把某条记录设为它所属相机的当前记录；传 null 表示清除该相机的当前标记。</summary>
+        /// <summary>是否存在指定 Id 的记录（Normalize 内部用，刻意不回调 Find）。</summary>
+        private static bool ContainsRecord(CalibSettings settings, string recordId)
+        {
+            if (settings == null || settings.Records == null || string.IsNullOrEmpty(recordId)) return false;
+
+            for (int i = 0; i < settings.Records.Count; i++)
+            {
+                CalibRecord rec = settings.Records[i];
+                if (rec != null && string.Equals(rec.Id, recordId, StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>取某相机"当前记录 Id"（找不到返回空串）。</summary>
+        private string LookupCurrent(string cameraId)
+        {
+            string key = cameraId ?? "";
+            for (int i = 0; i < CurrentByCamera.Count; i++)
+            {
+                CalibCurrent cur = CurrentByCamera[i];
+                if (cur != null && string.Equals(cur.CameraId, key, StringComparison.Ordinal))
+                    return cur.RecordId ?? "";
+            }
+            return "";
+        }
+
+        /// <summary>写某相机的"当前记录 Id"（存在则覆盖，不存在则追加）。</summary>
+        private void SetCurrentId(string cameraId, string recordId)
+        {
+            string key = cameraId ?? "";
+            for (int i = 0; i < CurrentByCamera.Count; i++)
+            {
+                CalibCurrent cur = CurrentByCamera[i];
+                if (cur != null && string.Equals(cur.CameraId, key, StringComparison.Ordinal))
+                {
+                    cur.RecordId = recordId ?? "";
+                    return;
+                }
+            }
+            CurrentByCamera.Add(new CalibCurrent { CameraId = key, RecordId = recordId ?? "" });
+        }
+
         public void SetCurrent(CalibRecord record)
         {
             Normalize(this);
 
             if (record == null) return;
-            CurrentByCamera[record.CameraId ?? ""] = record.Id ?? "";
+            SetCurrentId(record.CameraId, record.Id);
         }
 
         /// <summary>删除一条记录，并清理指向它的「当前」映射。</summary>
@@ -331,12 +399,12 @@ namespace VisionPlatform.Calibration
                     Records.RemoveAt(i);
             }
 
-            List<string> deadKeys = new List<string>();
-            foreach (KeyValuePair<string, string> kv in CurrentByCamera)
+            for (int i = CurrentByCamera.Count - 1; i >= 0; i--)
             {
-                if (string.Equals(kv.Value, recordId, StringComparison.Ordinal)) deadKeys.Add(kv.Key);
+                CalibCurrent cur = CurrentByCamera[i];
+                if (cur != null && string.Equals(cur.RecordId, recordId, StringComparison.Ordinal))
+                    CurrentByCamera.RemoveAt(i);
             }
-            for (int i = 0; i < deadKeys.Count; i++) CurrentByCamera.Remove(deadKeys[i]);
         }
 
         /// <summary>为一台相机生成下一个不重名的默认名：「标定 1」「标定 2」…。</summary>
