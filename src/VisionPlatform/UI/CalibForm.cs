@@ -64,6 +64,7 @@ namespace VisionPlatform.UI
         /// <summary>正在回填界面（抑制由此引发的选中 / 保存事件）。</summary>
         private bool _loading;
         private DataGridView gridRecords;
+        private UiButton btnRotationCenter;
 
         /// <summary>标定配置段（与 <see cref="ConfigStore"/> 里的对象同一个引用）。</summary>
         private CalibSettings _settings;
@@ -91,6 +92,7 @@ namespace VisionPlatform.UI
 
             // 整窗体统一深色主题（必须在 InitializeComponent 之后、语义色之前）
             BuildRecordGrid();
+            BuildRotationCenterButton();
             UiStyle.ApplyForm(this);
 
             // 自绘深色标题栏（与其余子窗体一致；幂等、内部已 try/catch）
@@ -492,6 +494,114 @@ namespace VisionPlatform.UI
             SaveSettings();
             RefreshRecordList();
             Log("已重命名为：" + newName);
+        }
+
+        /// <summary>
+        /// 「旋转中心」按钮：放在「计算」旁边，用点表里的<strong>机械 X/Y</strong> 拟合回转中心。
+        /// <para>
+        /// 复用同一张点表：N 点标定用 4 列（像素+机械），旋转中心只用机械两列。
+        /// 这样不用再挤一个表出来，采点方式对现场也更一致（转一个角度采一个点，直接填机械坐标）。
+        /// </para>
+        /// </summary>
+        private void BuildRotationCenterButton()
+        {
+            if (btnCalc == null || btnCalc.Parent == null) return;
+
+            btnRotationCenter = new UiButton
+            {
+                Text = "旋转中心",
+                Location = new System.Drawing.Point(btnCalc.Left + btnCalc.Width + 8, btnCalc.Top),
+                Size = new System.Drawing.Size(96, btnCalc.Height),
+                Kind = UiButtonKind.Grab
+            };
+            btnRotationCenter.Click += OnCalcRotationCenter;
+
+            btnCalc.Parent.Controls.Add(btnRotationCenter);
+        }
+
+        private void OnCalcRotationCenter(object sender, EventArgs e)
+        {
+            try
+            {
+                DoCalcRotationCenter();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("计算旋转中心失败：" + ex);
+                Log("计算旋转中心失败：" + ex.Message);
+            }
+        }
+
+        private void DoCalcRotationCenter()
+        {
+            if (_settings == null) return;
+            if (string.IsNullOrEmpty(_cameraId)) { Log("请先选择相机。"); return; }
+
+            // 取点表里"机械 X/Y"两列（第 3、4 列），空行跳过
+            var xs = new List<double>();
+            var ys = new List<double>();
+
+            for (int i = 0; i < gridPoints.Rows.Count; i++)
+            {
+                string sx = Convert.ToString(gridPoints.Rows[i].Cells[2].Value ?? "").Trim();
+                string sy = Convert.ToString(gridPoints.Rows[i].Cells[3].Value ?? "").Trim();
+                if (sx.Length == 0 || sy.Length == 0) continue;
+
+                double x, y;
+                if (!double.TryParse(sx, System.Globalization.NumberStyles.Float,
+                                     System.Globalization.CultureInfo.InvariantCulture, out x)) continue;
+                if (!double.TryParse(sy, System.Globalization.NumberStyles.Float,
+                                     System.Globalization.CultureInfo.InvariantCulture, out y)) continue;
+
+                xs.Add(x); ys.Add(y);
+            }
+
+            RotationCenterSolver.Result r = RotationCenterSolver.Fit(xs.ToArray(), ys.ToArray(), xs.Count);
+            if (!r.Success)
+            {
+                Log("旋转中心：" + r.Message);
+                txtResult.Text = "旋转中心计算失败：" + Environment.NewLine + r.Message;
+                return;
+            }
+
+            CalibRecord rec = CurrentRecord;
+            if (rec == null)
+            {
+                rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.RotationCenter);
+                rec.Kind = CalibKind.RotationCenter;
+                _settings.Records.Add(rec);
+                _settings.SetCurrent(rec);
+                _currentRecordId = rec.Id;
+            }
+
+            rec.Kind = CalibKind.RotationCenter;
+            rec.PointCount = r.PointCount;
+            rec.RmsError = r.Rms;
+            rec.MaxOffset = r.MaxError;
+            rec.MeanOffset = r.Rms;
+            rec.Precision = r.Rms;
+            // 复用 Affine 前三个槽：圆心 X、圆心 Y、半径
+            rec.Affine = new double[CalibRecord.AffineLength];
+            rec.Affine[0] = r.CenterX;
+            rec.Affine[1] = r.CenterY;
+            rec.Affine[2] = r.Radius;
+            if (rec.CreatedAt <= DateTime.MinValue) rec.CreatedAt = DateTime.Now;
+
+            SaveSettings();
+            RefreshRecordList();
+
+            txtResult.Text = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "旋转中心（{0} 个点）" + Environment.NewLine +
+                "圆心 X = {1:F4}" + Environment.NewLine +
+                "圆心 Y = {2:F4}" + Environment.NewLine +
+                "回转半径 = {3:F4}" + Environment.NewLine +
+                "残差 RMS = {4:F4}" + Environment.NewLine +
+                "最大偏差 = {5:F4}",
+                r.PointCount, r.CenterX, r.CenterY, r.Radius, r.Rms, r.MaxError);
+
+            Log(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "旋转中心：({0:F4}, {1:F4}) 半径 {2:F4} RMS {3:F4}",
+                r.CenterX, r.CenterY, r.Radius, r.Rms));
         }
 
         private void OnNewRecord(object sender, EventArgs e)
