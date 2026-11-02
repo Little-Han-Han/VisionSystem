@@ -1235,6 +1235,20 @@ namespace VisionPlatform.UI
             RefreshFlowCombo();   // 流程编排页可能新建/删除了流程，回来即刷新（无模态，双保险）
         }
         private void OnOpenCommForm(object sender, EventArgs e) { ShowChild(ref _commForm); }
+
+        /// <summary>
+        /// 打开「相机标定」窗体（模态，Owner = this）。
+        /// <para>用模态而不是 <c>ShowChild</c>：标定会改相机→机械的换算参数，</para>
+        /// <para>标定期间不应同时跑流程 / 连续预览，避免"边标定边被别的采集抢相机"。</para>
+        /// </summary>
+        private void OnOpenCalibForm(object sender, EventArgs e)
+        {
+            using (var dlg = new CalibForm())
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
         private void OnOpenRecipeForm(object sender, EventArgs e) { ShowChild(ref _recipeForm); }
 
         /// <summary>打开日志查看窗体（按日期查看 NG 与软件报错）。</summary>
@@ -1520,6 +1534,9 @@ namespace VisionPlatform.UI
             tsBtnSyncGrab.Enabled = _fullAccess;
             tsBtnCameraMgr.Enabled = _fullAccess;
             tsBtnFlow.Enabled = _fullAccess;
+            // 「相机标定」与「流程编排」同权：改的是定位/换算参数，访客一律不可用。
+            // 【必须每次刷新都重设】本方法是权限的唯一入口，漏一处会被 UpdateStatus 静默打回。
+            tsBtnCalib.Enabled = _fullAccess;
             tsBtnComm.Enabled = _fullAccess;
             tsBtnRecipe.Enabled = _fullAccess;
             tsBtnSettings.Enabled = _fullAccess;

@@ -42,6 +42,7 @@ namespace VisionPlatform.UI
             this.tsBtnCameraMgr = new System.Windows.Forms.ToolStripButton();
             this.tsBtnAlgo = new System.Windows.Forms.ToolStripButton();
             this.tsBtnFlow = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnCalib = new System.Windows.Forms.ToolStripButton();
             this.tsBtnComm = new System.Windows.Forms.ToolStripButton();
             this.tsBtnRecipe = new System.Windows.Forms.ToolStripButton();
             this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
@@ -142,6 +143,7 @@ namespace VisionPlatform.UI
                 this.tsBtnCameraMgr,
                 this.tsBtnAlgo,
                 this.tsBtnFlow,
+                this.tsBtnCalib,
                 this.tsBtnComm,
                 this.tsBtnRecipe,
                 this.tsBtnSettings,
@@ -230,6 +232,13 @@ namespace VisionPlatform.UI
             this.tsBtnFlow.Text = "流程编排";
             this.tsBtnFlow.ToolTipText = "算法流程编排：拖拽节点、连线、绑定相机与视图、运行";
             this.tsBtnFlow.Click += new System.EventHandler(this.OnOpenFlowForm);
+
+            // 「相机标定」：紧邻「流程编排」，风格与权限位完全一致（见 ApplyPermissions）。
+            this.tsBtnCalib.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnCalib.Name = "tsBtnCalib";
+            this.tsBtnCalib.Text = "相机标定";
+            this.tsBtnCalib.ToolTipText = "相机标定：N 点标定（像素 ↔ 机械）、标定记录管理与图像预览";
+            this.tsBtnCalib.Click += new System.EventHandler(this.OnOpenCalibForm);
 
             this.tsBtnComm.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnComm.Name = "tsBtnComm";
@@ -707,6 +716,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnCameraMgr;
         private System.Windows.Forms.ToolStripButton tsBtnAlgo;
         private System.Windows.Forms.ToolStripButton tsBtnFlow;
+        private System.Windows.Forms.ToolStripButton tsBtnCalib;
         private System.Windows.Forms.ToolStripButton tsBtnComm;
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
         private System.Windows.Forms.ToolStripButton tsBtnSettings;

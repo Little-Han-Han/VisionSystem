@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using VisionPlatform.Calibration;
 using VisionPlatform.Flow;
 using VisionPlatform.Vision;
 
@@ -40,6 +41,17 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public CommSettings Comm { get; set; }
 
+        /// <summary>
+        /// 相机标定参数：每台相机的多条 <see cref="CalibRecord"/>（名称 / 类型 / RMS / 变换参数），
+        /// 以及「相机 → 当前生效记录」的映射。框选与定位算法按此把像素坐标换算成机械坐标。
+        /// <para>
+        /// 【旧配置兼容】旧版 appconfig.json 没有本段，反序列化得 null，
+        /// 由 <see cref="ConfigStore.Load"/> 统一归一化为默认空配置（见那里的注释）。
+        /// </para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public CalibSettings Calibrations { get; set; }
+
         public static AppConfig CreateDefault()
         {
             return new AppConfig
@@ -48,7 +60,8 @@ namespace VisionPlatform.Core
                 Algorithm = new AlgorithmSettings(),
                 Ui = new UiSettings(),
                 Flows = new FlowSettings(),
-                Comm = CommSettings.CreateDefault()
+                Comm = CommSettings.CreateDefault(),
+                Calibrations = CalibSettings.CreateDefault()
             };
         }
     }
@@ -761,6 +774,13 @@ namespace VisionPlatform.Core
             if (cfg.Flows.Flows == null) cfg.Flows.Flows = new List<FlowDefinition>();
             if (cfg.Comm == null) cfg.Comm = CommSettings.CreateDefault();
             if (cfg.Comm.Endpoints == null) cfg.Comm.Endpoints = new List<CommEndpointConfig>();
+
+            // 【旧配置兼容，请勿移除】标定段是后加的：旧版 appconfig.json 里根本没有
+            // Calibrations，反序列化得 null；段存在但缺字段时 Records / CurrentByCamera 也是 null。
+            // 这里统一归一化（补空容器 + 逐条记录补 Affine + 清理指向已删记录的「当前」映射），
+            // 否则标定窗体一打开就会在 RecordsFor / CurrentByCamera 上 NRE。
+            if (cfg.Calibrations == null) cfg.Calibrations = CalibSettings.CreateDefault();
+            CalibSettings.Normalize(cfg.Calibrations);
 
             // 【旧配置兼容，请勿移除】通讯段是后加的：旧版 appconfig.json 里根本没有 Comm，
             // 反序列化得 null → 上面已补默认；手改过的配置若缺 Enabled 字段，bool 会给 false，

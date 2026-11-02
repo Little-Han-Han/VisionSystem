@@ -53,6 +53,10 @@
     <Compile Include="Camera\ICamera.cs" />
     <Compile Include="Camera\LocalCamera.cs" />
     <Compile Include="Camera\SimCamera.cs" />
+    <Compile Include="Calibration\CalibCoordReply.cs" />
+    <Compile Include="Calibration\CalibModels.cs" />
+    <Compile Include="Calibration\CalibSolver.cs" />
+    <Compile Include="Communication\CommQuery.cs" />
     <Compile Include="Communication\CommRegistry.cs" />
     <Compile Include="Communication\CommState.cs" />
     <Compile Include="Communication\ModbusData.cs" />
@@ -121,6 +125,12 @@
     </Compile>
     <Compile Include="UI\CameraForm.Designer.cs">
       <DependentUpon>CameraForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\CalibForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\CalibForm.Designer.cs">
+      <DependentUpon>CalibForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\FlowCanvasControl.cs">
       <SubType>Component</SubType>
