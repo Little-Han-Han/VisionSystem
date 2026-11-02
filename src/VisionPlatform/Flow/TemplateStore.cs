@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using VisionPlatform.Core;
+using VisionPlatform.Recipe;
 using VisionPlatform.Native;
 
 namespace VisionPlatform.Flow
@@ -185,10 +186,51 @@ namespace VisionPlatform.Flow
         //  路径
         // =====================================================================
 
-        /// <summary>某个节点模板资产的目录（不存在也会返回路径）。</summary>
+        /// <summary>
+        /// 某个节点模板资产的目录（不存在也会返回路径）。
+        /// <para>
+        /// 【优先方案目录】当前方案**绑定了这条流程**时，模板进
+        /// <c>&lt;方案&gt;\Templates\&lt;流程名&gt;\&lt;节点名&gt;\</c>（方案自包含、可整目录拷走）；
+        /// 没绑定就仍旧用全局 <c>Templates\&lt;flowId&gt;\&lt;nodeId&gt;</c>。
+        /// 这里只拿 Id、自己反查流程/节点名，所以<strong>所有调用方都不用改</strong>。
+        /// </para>
+        /// </summary>
         public static string DirOf(string flowId, string nodeId)
         {
+            string scoped = ScopedDirOf(flowId, nodeId);
+            if (!string.IsNullOrEmpty(scoped)) return scoped;
+
             return Path.Combine(AppPaths.TemplateDir, SanitizeId(flowId), SanitizeId(nodeId));
+        }
+
+        /// <summary>方案内的模板目录；未绑定该流程 / 查不到流程或节点名时返回空串（调用方回落全局）。</summary>
+        private static string ScopedDirOf(string flowId, string nodeId)
+        {
+            try
+            {
+                Recipe.Recipe r = RecipeStore.Current;
+                if (r == null || r.FlowIds == null || string.IsNullOrEmpty(r.Name)) return "";
+
+                bool bound = false;
+                for (int i = 0; i < r.FlowIds.Count; i++)
+                    if (string.Equals(r.FlowIds[i], flowId, StringComparison.Ordinal)) { bound = true; break; }
+                if (!bound) return "";
+
+                List<FlowDefinition> flows = ConfigStore.Current.Flows.Flows;
+                if (flows == null) return "";
+
+                FlowDefinition flow = null;
+                for (int i = 0; i < flows.Count; i++)
+                    if (flows[i] != null && string.Equals(flows[i].Id, flowId, StringComparison.Ordinal)) { flow = flows[i]; break; }
+                if (flow == null) return "";
+
+                FlowNode node = flow.FindNode(nodeId);
+                if (node == null || string.IsNullOrEmpty(node.Name)) return "";   // 节点已删：回落全局，别造新目录
+
+                return Path.Combine(AppPaths.RecipePath(r.Name), "Templates",
+                                    AssetPaths.Safe(flow.Name), AssetPaths.Safe(node.Name));
+            }
+            catch (Exception) { return ""; }
         }
 
         /// <summary>模板图路径。</summary>

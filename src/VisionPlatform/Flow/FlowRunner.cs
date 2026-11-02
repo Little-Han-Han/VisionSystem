@@ -567,7 +567,7 @@ namespace VisionPlatform.Flow
 
             string modelPath = node.GetString("ModelPath", "");
             if (string.IsNullOrWhiteSpace(modelPath))
-                modelPath = DefaultDlModel(task);
+                modelPath = DefaultDlModel(s, node, task);
             if (string.IsNullOrEmpty(modelPath))
             {
                 p.Summary = "深度学习：未找到模型（请在节点里指定 .onnx，或放到 models"
@@ -902,15 +902,34 @@ namespace VisionPlatform.Flow
             catch (Exception) { }
         }
 
-        /// <summary>models\&lt;任务&gt;\ 下第一个 .onnx（用户把模型丢进去即可用）。</summary>
-        private static string DefaultDlModel(int task)
+        /// <summary>
+        /// 深度学习模型的默认位置：<strong>方案目录优先</strong>
+        /// （<c>&lt;方案&gt;\Models\&lt;流程名&gt;\&lt;节点名&gt;\*.onnx</c>），其次全局 <c>models\&lt;任务&gt;\</c>。
+        /// <para>
+        /// 按节点分目录是为了让"同一流程里两个节点跑不同模型"成为可能 ——
+        /// 全局一个 models\seg 目录做不到这件事。
+        /// </para>
+        /// </summary>
+        private static string DefaultDlModel(FlowRunSession s, FlowNode node, int task)
+        {
+            // ① 方案内该节点的模型目录
+            string scoped = Core.AssetPaths.ModelDirOf(s.Flow, node);
+            string hit = FirstOnnx(scoped);
+            if (!string.IsNullOrEmpty(hit)) return hit;
+
+            // 2) 全局 models/<任务>/
+            return FirstOnnx(System.IO.Path.Combine(Core.AppPaths.Root, "models", DlFolderOf(task)));
+        }
+
+        private static string FirstOnnx(string dir)
         {
             try
             {
-                string dir = System.IO.Path.Combine(Core.AppPaths.Root, "models", DlFolderOf(task));
-                if (!System.IO.Directory.Exists(dir)) return "";
+                if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir)) return "";
+
                 string[] files = System.IO.Directory.GetFiles(dir, "*.onnx");
                 if (files.Length == 0) return "";
+
                 Array.Sort(files, StringComparer.OrdinalIgnoreCase);
                 return files[0];
             }
