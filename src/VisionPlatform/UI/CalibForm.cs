@@ -93,7 +93,12 @@ namespace VisionPlatform.UI
             // 整窗体统一深色主题（必须在 InitializeComponent 之后、语义色之前）
             BuildRecordGrid();
             BuildRotationCenterButton();
+            BuildPointIndexColumn();
             UiStyle.ApplyForm(this);
+
+            // 主题扫过一遍之后**必须**重设：DataGridView 的控件级 ForeColor 对单元格不完全生效，
+            // 而列级 DefaultCellStyle 会盖住控件级设置 —— 不显式刷一遍就是"字和底色一样看不见"。
+            ApplyGridStyles();
 
             // 自绘深色标题栏（与其余子窗体一致；幂等、内部已 try/catch）
             UiTitleBar.Attach(this);
@@ -402,10 +407,15 @@ namespace VisionPlatform.UI
         /// </summary>
         private void BuildRecordGrid()
         {
+            // 【坑】Controls.Remove 会把控件的 Parent 置为 null，
+            // 之后再用 listRecords.Parent 去 Add 就会加不回去（表格直接消失）。
+            // 先把容器引用存下来。
+            Control host = listRecords != null ? listRecords.Parent : null;
+
             if (listRecords != null)
             {
                 listRecords.Visible = false;
-                if (listRecords.Parent != null) listRecords.Parent.Controls.Remove(listRecords);
+                if (host != null) host.Controls.Remove(listRecords);
             }
 
             gridRecords = new DataGridView
@@ -446,8 +456,95 @@ namespace VisionPlatform.UI
             gridRecords.SelectionChanged += OnRecordGridSelectionChanged;
             gridRecords.CellEndEdit += OnRecordGridCellEndEdit;
 
-            if (listRecords != null && listRecords.Parent != null)
-                listRecords.Parent.Controls.Add(gridRecords);
+            if (host != null) host.Controls.Add(gridRecords);
+        }
+
+        /// <summary>统一刷两张表的配色（深色底下必须显式设，否则字看不见）。</summary>
+        private void ApplyGridStyles()
+        {
+            StyleGrid(gridRecords);
+            StyleGrid(gridPoints);
+        }
+
+        private static void StyleGrid(DataGridView g)
+        {
+            if (g == null) return;
+
+            // 用户明确要求：白底黑字最省事、最不容易看漏。不跟深色主题。
+            Color bg = Color.White;
+            Color fg = Color.Black;
+            Color head = Color.FromArgb(238, 238, 238);
+            Color line = Color.FromArgb(208, 208, 208);
+
+            g.BackgroundColor = bg;
+            g.GridColor = line;
+
+            // 列放不下时必须能左右拖：AutoSizeColumnsMode=None 才不会被压缩成几条缝
+            g.ScrollBars = ScrollBars.Both;
+            g.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            // 表头带 "(mm)/(px)" 单位，要两行高度才不被裁（34 仍会切一半，用 40）
+            g.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            if (g.ColumnHeadersHeight < 40) g.ColumnHeadersHeight = 40;
+            g.EnableHeadersVisualStyles = false;      // 不关掉的话表头用系统色，白底上反而看不清
+
+            g.ColumnHeadersDefaultCellStyle.BackColor = head;
+            g.ColumnHeadersDefaultCellStyle.ForeColor = fg;
+            g.ColumnHeadersDefaultCellStyle.SelectionBackColor = head;
+            g.ColumnHeadersDefaultCellStyle.SelectionForeColor = fg;
+
+            g.RowHeadersDefaultCellStyle.BackColor = head;
+            g.RowHeadersDefaultCellStyle.ForeColor = fg;
+            g.RowHeadersDefaultCellStyle.SelectionBackColor = head;
+            g.RowHeadersDefaultCellStyle.SelectionForeColor = fg;
+
+            g.DefaultCellStyle.BackColor = bg;
+            g.DefaultCellStyle.ForeColor = fg;
+            g.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0, 120, 215);
+            g.DefaultCellStyle.SelectionForeColor = Color.White;
+
+            g.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 250, 250);
+            g.AlternatingRowsDefaultCellStyle.ForeColor = fg;
+
+            for (int i = 0; i < g.Columns.Count; i++)
+            {
+                DataGridViewColumn col = g.Columns[i];
+                col.DefaultCellStyle.BackColor = bg;
+                col.DefaultCellStyle.ForeColor = fg;   // 只读列也用黑字，别再拿灰色
+
+                // Designer 里有些列是 AutoSizeMode=Fill（会跟着窗口压缩），统一改成固定宽度
+                if (col.AutoSizeMode != DataGridViewAutoSizeColumnMode.None)
+                    col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                if (col.Width < 70) col.Width = 110;
+            }
+        }
+
+        /// <summary>
+        /// 给点表加行号 —— 画在<strong>行头</strong>里，不插列。
+        /// <para>
+        /// 【为什么不用插一列】点表的读写全是按列下标（0=像素X…3=机械Y），
+        /// 插一列序号会把 6 处 Cells[n] 全部错位，风险远大于收益；
+        /// 行头本来就是 Excel 那种序号位，视觉上一样，且索引一个都不用改。
+        /// </para>
+        /// </summary>
+        private void BuildPointIndexColumn()
+        {
+            if (gridPoints == null) return;
+
+            gridPoints.RowHeadersVisible = true;
+            gridPoints.RowHeadersWidth = 46;
+            gridPoints.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
+            gridPoints.RowPostPaint += OnPointGridRowPostPaint;
+        }
+
+        private void OnPointGridRowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+
+            Rectangle rect = new Rectangle(e.RowBounds.Left, e.RowBounds.Top,
+                                           gridPoints.RowHeadersWidth - 6, e.RowBounds.Height);
+            TextRenderer.DrawText(e.Graphics, (e.RowIndex + 1).ToString(),
+                                  gridPoints.Font, rect, Color.Black,
+                                  TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
         }
 
         private void AddRecordColumn(string header, int width, bool readOnly)
