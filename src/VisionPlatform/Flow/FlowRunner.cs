@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using VisionPlatform.Camera;
 using VisionPlatform.Communication;
+using VisionPlatform.Calibration;
 using VisionPlatform.Core;
 using VisionPlatform.Native;
 using VisionSystem.Controls.Geometry;
@@ -390,6 +391,8 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.DlPose:        return RunDl(s, node, p, NativeDl.TaskPose);
                 case FlowNodeType.DlDepth:       return RunDl(s, node, p, NativeDl.TaskDepth);
                 case FlowNodeType.OcrDl:         return RunOcrDl(s, node, p);
+                case FlowNodeType.CalibTransform: return RunCalibTransform(s, node, p);
+                case FlowNodeType.DistortionCorrect: return RunDistortionCorrect(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -872,6 +875,271 @@ namespace VisionPlatform.Flow
             if (p == null || p.Frame != null || s == null || s.Current == null) return;
             try { p.Frame = (Bitmap)s.Current.Clone(); }
             catch (Exception) { p.Frame = null; }
+        }
+
+        // =====================================================================
+        //  标定类节点
+        // =====================================================================
+
+        /// <summary>
+        /// 标定转换：像素坐标 → 机械坐标。
+        /// <para>
+        /// 【只吃两类数据】<see cref="CalibKind.NPoint"/>（相似变换矩阵）与
+        /// <see cref="CalibKind.RotationCenter"/>（圆心 + 半径）。
+        /// 畸变矫正记录在这里被<strong>明确排除</strong>——它没有坐标映射关系，
+        /// 混进来只会算出垃圾数值（用户要求"插件只连自己那一类数据"）。
+        /// </para>
+        /// </summary>
+        private bool RunCalibTransform(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            CalibRecord rec = ResolveCalibRecord(node, CalibKind.NPoint);
+            if (rec == null)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "标定转换：没有可用的 N 点标定记录（请先在相机标定里做 N 点标定并设为当前）";
+                return false;
+            }
+
+            double px = node.GetDouble("SourceX", 0);
+            double py = node.GetDouble("SourceY", 0);
+
+            double mx, my;
+            if (rec.Kind == CalibKind.RotationCenter)
+            {
+                // 旋转中心：绕圆心旋转 RotateAngle 度（用于"工件转了一个角度后坐标怎么变"）
+                double cx = rec.Affine[0], cy = rec.Affine[1];
+                double deg = node.GetDouble("RotateAngle", 0);
+                double rad = deg * Math.PI / 180.0;
+                double dx = px - cx, dy = py - cy;
+                mx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
+                my = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "旋转中心转换：({0:F2},{1:F2}) 绕 ({2:F2},{3:F2}) 转 {4:F1}° → ({5:F3},{6:F3})",
+                    px, py, cx, cy, deg, mx, my);
+            }
+            else
+            {
+                // N 点标定：相似变换 [A11,A12,A21,A22,Tx,Ty]
+                double[] a = rec.Affine;
+                mx = a[0] * px + a[1] * py + a[4];
+                my = a[2] * px + a[3] * py + a[5];
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "标定转换：({0:F2},{1:F2}) px → ({2:F3},{3:F3}) mm（RMS {4:F4}）",
+                    px, py, mx, my, rec.RmsError);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 畸变矫正：用「畸变矫正」记录里的 K/dist 把当前图拉正。
+        /// <para>只吃 <see cref="CalibKind.Distortion"/>，N 点/旋转中心记录会被拒绝。</para>
+        /// </summary>
+        private bool RunDistortionCorrect(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "畸变矫正：没有输入图像";
+                return false;
+            }
+
+            CalibRecord rec = ResolveCalibRecord(node, CalibKind.Distortion);
+            if (rec == null)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "畸变矫正：没有可用的畸变矫正记录（请先在相机标定里做畸变标定并设为当前）";
+                return false;
+            }
+
+            double fx, fy, cx, cy, k1, k2, p1, p2, k3;
+            if (!TryParseDistortion(rec.ExtraJson, out fx, out fy, out cx, out cy,
+                                    out k1, out k2, out p1, out p2, out k3))
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "畸变矫正：记录里没有内参（可能是旧数据，请重新标定一次）";
+                return false;
+            }
+
+            Bitmap src = s.Current;
+            Bitmap dst;
+            try
+            {
+                dst = Undistort(src, fx, fy, cx, cy, k1, k2, p1, p2, k3);
+            }
+            catch (Exception ex)
+            {
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "畸变矫正失败：" + ex.Message;
+                return false;
+            }
+
+            s.Current = dst;
+            try { src.Dispose(); } catch (Exception) { }
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "畸变矫正：fx={0:F1} fy={1:F1} k1={2:F5} k2={3:F5}", fx, fy, k1, k2);
+            return true;
+        }
+
+        /// <summary>取标定记录：参数指定优先，其次用该相机的「当前」记录；类型不符一律拒绝。</summary>
+        private static CalibRecord ResolveCalibRecord(FlowNode node, CalibKind want)
+        {
+            CalibSettings all = ConfigStore.Current.Calibrations;
+            if (all == null || node == null) return null;
+
+            string id = node.GetString("CalibRecordId", "");
+            CalibRecord rec = null;
+
+            if (!string.IsNullOrEmpty(id))
+            {
+                rec = all.Find(id);
+                if (rec == null) return null;
+            }
+            else
+            {
+                // 没指定就取第一条该类型的记录（不跨类型串用）
+                for (int i = 0; i < all.Records.Count; i++)
+                {
+                    CalibRecord r = all.Records[i];
+                    if (r != null && r.Kind == want) { rec = r; break; }
+                }
+            }
+
+            if (rec == null || rec.Kind != want) return null;
+            return rec;
+        }
+
+        /// <summary>从记录里取出 fx/fy/cx/cy 与 5 个畸变系数（ExtraJson 是标定窗体写的键值对）。</summary>
+        private static bool TryParseDistortion(string json, out double fx, out double fy,
+                                               out double cx, out double cy,
+                                               out double k1, out double k2,
+                                               out double p1, out double p2, out double k3)
+        {
+            fx = fy = cx = cy = k1 = k2 = p1 = p2 = k3 = 0;
+            if (string.IsNullOrEmpty(json)) return false;
+
+            bool ok = true;
+            ok &= TryPick(json, "fx", out fx);
+            ok &= TryPick(json, "fy", out fy);
+            ok &= TryPick(json, "cx", out cx);
+            ok &= TryPick(json, "cy", out cy);
+            ok &= TryPick(json, "k1", out k1);
+            ok &= TryPick(json, "k2", out k2);
+            ok &= TryPick(json, "p1", out p1);
+            ok &= TryPick(json, "p2", out p2);
+            ok &= TryPick(json, "k3", out k3);
+            return ok && fx > 0 && fy > 0;
+        }
+
+        private static bool TryPick(string json, string key, out double value)
+        {
+            value = 0;
+            int at = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            if (at < 0) return false;
+
+            int colon = json.IndexOf(':', at);
+            if (colon < 0) return false;
+
+            int start = colon + 1;
+            while (start < json.Length && (json[start] == ' ' || json[start] == '\t')) start++;
+
+            int end = start;
+            while (end < json.Length && (char.IsDigit(json[end]) || json[end] == '-' || json[end] == '.'
+                                         || json[end] == 'e' || json[end] == 'E' || json[end] == '+'))
+                end++;
+
+            return double.TryParse(json.Substring(start, end - start), NumberStyles.Float,
+                                   CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// 去畸变（纯 C#，双线性和迭代反解）。
+        /// <para>
+        /// 为什么不用 C++：这一步只依赖 K/dist 的算术，不需要 OpenCV；
+        /// 放 C# 侧避免为一件事再去动原生工程与 P/Invoke（回归面小）。
+        /// 每帧全图重映射约几十毫秒，标定/检测低频场景够用。
+        /// </para>
+        /// </summary>
+        private static Bitmap Undistort(Bitmap src, double fx, double fy, double cx, double cy,
+                                        double k1, double k2, double p1, double p2, double k3)
+        {
+            int w = src.Width, h = src.Height;
+            var dst = new Bitmap(w, h, PixelFormat.Format24bppRgb);
+
+            BitmapData sd = null, dd = null;
+            try
+            {
+                sd = src.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+                dd = dst.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+
+                int stride = sd.Stride;
+                var srcBuf = new byte[stride * h];
+                var dstBuf = new byte[dd.Stride * h];
+                Marshal.Copy(sd.Scan0, srcBuf, 0, srcBuf.Length);
+
+                int dstStride = dd.Stride;
+
+                for (int y = 0; y < h; y++)
+                {
+                    double yd = (y - cy) / fy;
+
+                    for (int x = 0; x < w; x++)
+                    {
+                        double xd = (x - cx) / fx;
+
+                        // 迭代反解：已知畸变后的归一化坐标，求理想坐标
+                        double xu = xd, yu = yd;
+                        for (int it = 0; it < 5; it++)
+                        {
+                            double r2 = xu * xu + yu * yu;
+                            double radial = 1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2;
+                            double dx = 2 * p1 * xu * yu + p2 * (r2 + 2 * xu * xu);
+                            double dy = p1 * (r2 + 2 * yu * yu) + 2 * p2 * xu * yu;
+
+                            xu = (xd - dx) / radial;
+                            yu = (yd - dy) / radial;
+                        }
+
+                        double sx = xu * fx + cx;
+                        double sy = yu * fy + cy;
+
+                        int o = y * dstStride + x * 3;
+                        if (sx < 0 || sy < 0 || sx >= w - 1 || sy >= h - 1)
+                        {
+                            dstBuf[o] = 0; dstBuf[o + 1] = 0; dstBuf[o + 2] = 0;
+                            continue;
+                        }
+
+                        // 双线性
+                        int x0 = (int)sx, y0 = (int)sy;
+                        double fxr = sx - x0, fyr = sy - y0;
+                        int i00 = y0 * stride + x0 * 3;
+                        int i10 = i00 + 3;
+                        int i01 = i00 + stride;
+                        int i11 = i01 + 3;
+
+                        for (int c = 0; c < 3; c++)
+                        {
+                            double v = srcBuf[i00 + c] * (1 - fxr) * (1 - fyr)
+                                     + srcBuf[i10 + c] * fxr * (1 - fyr)
+                                     + srcBuf[i01 + c] * (1 - fxr) * fyr
+                                     + srcBuf[i11 + c] * fxr * fyr;
+                            int iv = (int)(v + 0.5);
+                            dstBuf[o + c] = (byte)(iv < 0 ? 0 : iv > 255 ? 255 : iv);
+                        }
+                    }
+                }
+
+                Marshal.Copy(dstBuf, 0, dd.Scan0, dstBuf.Length);
+            }
+            finally
+            {
+                if (sd != null) src.UnlockBits(sd);
+                if (dd != null) dst.UnlockBits(dd);
+            }
+
+            return dst;
         }
 
         /// <summary>首次加载（编译模型）超过 1.5 秒时在摘要里注明，避免误判成卡死。</summary>

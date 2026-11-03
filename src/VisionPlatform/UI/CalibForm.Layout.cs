@@ -83,6 +83,7 @@ namespace VisionPlatform.UI
             tabWork.TabPages.Add(pageD);
             tabWork.TabPages.Add(pageR);
             tabWork.SelectedIndexChanged += OnWorkTabChanged;
+            tabWork.Selecting += OnWorkTabSelecting;
 
             tableLeft.Controls.Add(tabWork, 0, 1);
             tableLeft.ResumeLayout();
@@ -159,6 +160,18 @@ namespace VisionPlatform.UI
                 Font = UiTheme.FontSmall,
                 BorderStyle = BorderStyle.FixedSingle
             };
+        }
+
+        /// <summary>设了当前标定后，只允许停留在它对应的那一页。</summary>
+        private void OnWorkTabSelecting(object sender, TabControlCancelEventArgs e)
+        {
+            if (_lockedPage < 0) return;
+            if (e.TabPageIndex == _lockedPage) return;
+
+            e.Cancel = true;
+            CalibRecord rec = CurrentRecord;
+            string kind = rec != null ? rec.KindDisplay : "当前";
+            Log("当前标定是「" + kind + "」类型，不能切到其他页；如需切换请先新建另一条记录。");
         }
 
         /// <summary>左侧当前页 → 右侧显示对应结果面板（用显隐切换，不用 Tab）。</summary>

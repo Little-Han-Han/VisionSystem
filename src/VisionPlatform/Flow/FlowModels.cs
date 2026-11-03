@@ -84,6 +84,12 @@ namespace VisionPlatform.Flow
         /// <para>与传统 OCR（模板匹配，<see cref="Ocr"/>）是两套东西，互不影响。</para>
         /// </summary>
         OcrDl,
+
+        /// <summary>标定转换：像素坐标 → 机械坐标（吃 N 点标定 / 旋转中心）。</summary>
+        CalibTransform,
+
+        /// <summary>畸变矫正：用相机内参去畸变（吃畸变矫正记录）。</summary>
+        DistortionCorrect,
 }
 
     /// <summary>

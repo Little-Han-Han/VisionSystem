@@ -139,6 +139,20 @@ namespace VisionPlatform.Flow
                     Add(list, "MorphKsize", "3");
                     break;
 
+                case FlowNodeType.CalibTransform:
+                    // 标定转换：像素 → 机械。CalibRecordId 为空时用该相机的「当前」标定
+                    Add(list, "CalibRecordId", "");
+                    Add(list, "SourceX", "0");        // 没有上游坐标时用手填的像素点
+                    Add(list, "SourceY", "0");
+                    Add(list, "ApplyRotation", "0");  // 1 = 再把结果绕旋转中心转 RotateAngle 度
+                    Add(list, "RotateAngle", "0");
+                    break;
+
+                case FlowNodeType.DistortionCorrect:
+                    // 畸变矫正：只连「畸变矫正」类型的记录
+                    Add(list, "CalibRecordId", "");
+                    break;
+
                 case FlowNodeType.PositionCorrect:
                     // 基准来源：Auto = 取上游最近匹配结果的第 1 个目标；Manual = 手动示教位姿
                     Add(list, "RefSource", "Auto");
@@ -462,7 +476,9 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("DlPose",           "目标姿态估计",    FlowNodeType.DlPose,           CatDeepLearning),
             new FlowModuleInfo("DlDepth",          "目标深度估计",    FlowNodeType.DlDepth,          CatDeepLearning),
             new FlowModuleInfo("OcrDl",            "OCR(深度学习)",   FlowNodeType.OcrDl,            CatDeepLearning),
-            new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput)
+            new FlowModuleInfo("ReceiveData",      "接收数据",        FlowNodeType.ReceiveData,      CatOutput),
+            new FlowModuleInfo("CalibTransform",   "标定转换",        FlowNodeType.CalibTransform,   CatLocation),
+            new FlowModuleInfo("DistortionCorrect","畸变矫正",        FlowNodeType.DistortionCorrect, CatImageProcessing)
         };
 
         /// <summary>

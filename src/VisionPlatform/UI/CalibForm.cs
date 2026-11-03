@@ -68,6 +68,7 @@ namespace VisionPlatform.UI
         /// <summary>正在回填界面（抑制由此引发的选中 / 保存事件）。</summary>
         private bool _loading;
         private DataGridView gridRecords;
+        private int _lockedPage = -1;
         private UiButton btnRotationCenter;
         private TextBox txtGridSize;
         private UiButton btnDistort;
@@ -671,14 +672,108 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            CalibRecord rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.NPoint);
+            string name;
+            CalibKind kind;
+            if (!PromptNewRecord(out name, out kind)) return;
+
+            CalibRecord rec = CalibRecord.Create(_cameraId, name, kind);
             _settings.Records.Add(rec);
             _settings.SetCurrent(rec);          // 新建即设为当前，省一步
             _currentRecordId = rec.Id;
 
             SaveSettings();
             RefreshRecordList();
-            Log("已新建标定记录：" + rec.Name + "（已设为当前）");
+            LockTabsToCurrent();
+            Log("已新建标定记录：" + rec.Name + "（" + rec.KindDisplay + "，已设为当前）");
+        }
+
+        /// <summary>
+        /// 新建记录的对话框：名称 + 类型（N 点标定 / 畸变矫正 / 旋转中心）。
+        /// <para>
+        /// 【为什么要选类型】类型决定这条记录用哪套算法、存哪种结果，也决定界面锁在哪个 Tab。
+        /// 以前一律建成 N 点，导致畸变/旋转中心的结果只能塞进同一类记录里，分不清。
+        /// </para>
+        /// </summary>
+        private bool PromptNewRecord(out string name, out CalibKind kind)
+        {
+            name = _settings != null ? _settings.NextName(_cameraId) : "标定 1";
+            kind = CalibKind.NPoint;
+
+            using (var dlg = new Form())
+            {
+                dlg.Text = "新建标定记录";
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.MinimizeBox = false;
+                dlg.MaximizeBox = false;
+                dlg.ClientSize = new Size(360, 170);
+                dlg.Font = UiTheme.FontBody;
+
+                var lblName = new Label { Text = "名称", Left = 16, Top = 22, Width = 60, ForeColor = Color.Black };
+                var txtName = new TextBox { Left = 84, Top = 18, Width = 250, Text = name };
+
+                var lblKind = new Label { Text = "类型", Left = 16, Top = 62, Width = 60, ForeColor = Color.Black };
+                var cboKind = new ComboBox
+                {
+                    Left = 84,
+                    Top = 58,
+                    Width = 250,
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                cboKind.Items.AddRange(new object[]
+                {
+                    "N 点标定（像素→机械）",
+                    "畸变矫正（相机内参）",
+                    "旋转中心（回转中心）"
+                });
+                cboKind.SelectedIndex = 0;
+
+                var btnOk = new Button { Text = "确定", Left = 168, Top = 116, Width = 80, Height = 30, DialogResult = DialogResult.OK };
+                var btnCancel = new Button { Text = "取消", Left = 254, Top = 116, Width = 80, Height = 30, DialogResult = DialogResult.Cancel };
+
+                dlg.Controls.AddRange(new Control[] { lblName, txtName, lblKind, cboKind, btnOk, btnCancel });
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+
+                string typed = (txtName.Text ?? "").Trim();
+                if (typed.Length == 0)
+                {
+                    MessageBox.Show(this, "名称不能为空。", "新建标定记录");
+                    return false;
+                }
+
+                name = typed;
+                kind = cboKind.SelectedIndex == 1 ? CalibKind.Distortion
+                     : cboKind.SelectedIndex == 2 ? CalibKind.RotationCenter
+                     : CalibKind.NPoint;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 把左侧 Tab 锁到「当前记录的类型」：设了当前标定后，不能再去别的页操作，
+        /// 否则会出现"当前是 N 点标定、却在畸变页算了一组数"这种自相矛盾的状态。
+        /// </summary>
+        private void LockTabsToCurrent()
+        {
+            if (tabWork == null) return;
+
+            CalibRecord rec = CurrentRecord;
+            if (rec == null)
+            {
+                _lockedPage = -1;
+                return;
+            }
+
+            int page = rec.Kind == CalibKind.Distortion ? 1
+                     : rec.Kind == CalibKind.RotationCenter ? 2
+                     : 0;
+
+            _lockedPage = page;
+            if (tabWork.SelectedIndex != page) tabWork.SelectedIndex = page;
+            ShowResultPage(page);
         }
 
         private void OnRenameRecord(object sender, EventArgs e)
