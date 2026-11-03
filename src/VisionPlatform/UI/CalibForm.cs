@@ -124,6 +124,9 @@ namespace VisionPlatform.UI
             LoadSettings();
             RefreshCameraCombo();
             RefreshCommCombo();
+
+            // 重开窗体时按已有的「当前记录」锁一次，否则一进来三页随便切
+            LockTabsToCurrent();
             RefreshRecordList();
 
             ApplySemanticColors();
@@ -842,7 +845,8 @@ namespace VisionPlatform.UI
             _settings.SetCurrent(rec);
             SaveSettings();
             RefreshRecordList();
-            Log("已把「" + rec.Name + "」设为相机 " + _cameraId + " 的当前标定。");
+            LockTabsToCurrent();      // 设为当前 → 立刻锁到该记录类型对应的页
+            Log("已把「" + rec.Name + "」设为相机 " + _cameraId + " 的当前标定（" + rec.KindDisplay + "）。");
         }
 
         /// <summary>当前选中的记录（未选中返回 null）。</summary>
