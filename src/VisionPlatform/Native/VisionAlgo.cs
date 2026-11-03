@@ -1341,6 +1341,13 @@ namespace VisionPlatform.Native
         public bool CalibFindChessboard(Bitmap src, int cols, int rows,
                                         out double[] points, out string error)
         {
+            return CalibFindChessboard(src, cols, rows, 0, out points, out error);
+        }
+
+        /// <summary>找标定板角点；pattern：0=棋盘格，1=对称圆点，2=非对称圆点。</summary>
+        public bool CalibFindChessboard(Bitmap src, int cols, int rows, int pattern,
+                                        out double[] points, out string error)
+        {
             points = null;
             error = "输入图像为空";
             if (src == null) return false;
@@ -1348,7 +1355,7 @@ namespace VisionPlatform.Native
             using (var ci = new ColorInput(src))
             {
                 VA_Image img = ci.Image;
-                points = NativeCalib.FindChessboard(_handle, ref img, cols, rows, out error);
+                points = NativeCalib.FindChessboard(_handle, ref img, cols, rows, pattern, out error);
                 return points != null;
             }
         }

@@ -17,7 +17,7 @@ namespace VisionPlatform.Native
 
         /// <summary>角点检测：返回 [x0,y0,x1,y1,...]；失败时 <paramref name="error"/> 有可读原因。</summary>
         public static double[] FindChessboard(IntPtr handle, ref VA_Image img,
-                                              int cols, int rows, out string error)
+                                              int cols, int rows, int pattern, out string error)
         {
             error = "";
 
@@ -30,7 +30,7 @@ namespace VisionPlatform.Native
             int rc;
             try
             {
-                rc = va_calib_find_chessboard(handle, ref img, cols, rows, buffer, expected, out count);
+                rc = va_calib_find_chessboard(handle, ref img, cols, rows, pattern, buffer, expected, out count);
             }
             catch (Exception ex)
             {
@@ -89,7 +89,7 @@ namespace VisionPlatform.Native
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         private static extern int va_calib_find_chessboard(IntPtr handle, ref VA_Image img,
-                                                           int cols, int rows,
+                                                           int cols, int rows, int pattern,
                                                            [In, Out] double[] out_xy, int cap,
                                                            out int out_count);
 

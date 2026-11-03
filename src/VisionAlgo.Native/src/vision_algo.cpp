@@ -435,10 +435,10 @@ int VA_CALL va_dl_clear(void* handle, int task)
 }
 
 int VA_CALL va_calib_find_chessboard(void* handle, const VA_Image* gray, int cols, int rows,
-                                      double* outXY, int cap, int* outCount)
+                                      int pattern, double* outXY, int cap, int* outCount)
 {
     VA_CTX();
-    return va::CalibFindChessboard(ctx, gray, cols, rows, outXY, cap, outCount);
+    return va::CalibFindChessboard(ctx, gray, cols, rows, pattern, outXY, cap, outCount);
 }
 
 int VA_CALL va_calib_calibrate(void* handle, const double* xy, const int* counts, int nImages,

@@ -271,7 +271,7 @@ int DlBackendAvailable(int backend);
 int DlDescribe(Context* ctx, int task, char* buf, int cap);
 
 /* 相机标定（棋盘格角点 + 内参/畸变） */
-int CalibFindChessboard(Context* ctx, const VA_Image* gray, int cols, int rows,
+int CalibFindChessboard(Context* ctx, const VA_Image* gray, int cols, int rows, int pattern,
                         double* outXY, int cap, int* outCount);
 int CalibCalibrate(Context* ctx, const double* xy, const int* counts, int nImages,
                    int cols, int rows, int width, int height, int flags,

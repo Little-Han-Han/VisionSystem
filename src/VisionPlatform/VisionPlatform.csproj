@@ -133,6 +133,9 @@
     <Compile Include="UI\CalibForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="UI\CalibForm.Layout.cs">
+      <DependentUpon>CalibForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="UI\CalibForm.Designer.cs">
       <DependentUpon>CalibForm.cs</DependentUpon>
     </Compile>

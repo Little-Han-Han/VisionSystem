@@ -4,7 +4,7 @@
 
 namespace va {
 
-int CalibFindChessboard(Context* ctx, const VA_Image* gray, int cols, int rows,
+int CalibFindChessboard(Context* ctx, const VA_Image* gray, int cols, int rows, int pattern,
                         double* outXY, int cap, int* outCount)
 {
     if (gray == 0 || outXY == 0 || outCount == 0 || cap <= 0 || cols < 2 || rows < 2)
@@ -26,15 +26,27 @@ int CalibFindChessboard(Context* ctx, const VA_Image* gray, int cols, int rows,
         else work = g;
 
         std::vector<cv::Point2f> pts;
-        const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE
-                        | cv::CALIB_CB_FAST_CHECK;
+        bool ok = false;
 
-        bool ok = cv::findChessboardCorners(work, cv::Size(cols, rows), pts, flags);
-        if (!ok)
+        if (pattern == 0)
         {
-            // 兜底再试一次：去掉 FAST_CHECK（有些低对比度图第一遍会漏）
-            ok = cv::findChessboardCorners(work, cv::Size(cols, rows), pts,
-                                           cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+            const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE
+                            | cv::CALIB_CB_FAST_CHECK;
+
+            ok = cv::findChessboardCorners(work, cv::Size(cols, rows), pts, flags);
+            if (!ok)
+            {
+                // 兜底再试一次：去掉 FAST_CHECK（有些低对比度图第一遍会漏）
+                ok = cv::findChessboardCorners(work, cv::Size(cols, rows), pts,
+                                               cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+            }
+        }
+        else
+        {
+            // 圆点网格：pattern==2 是非对称（如 4x11），其余按对称处理
+            int cbFlags = (pattern == 2) ? cv::CALIB_CB_ASYMMETRIC_GRID : cv::CALIB_CB_SYMMETRIC_GRID;
+            cbFlags |= cv::CALIB_CB_CLUSTERING;
+            ok = cv::findCirclesGrid(work, cv::Size(cols, rows), pts, cbFlags);
         }
 
         if (!ok || (int)pts.size() != cols * rows)
@@ -70,9 +82,9 @@ int CalibCalibrate(Context* ctx, const double* xy, const int* counts, int nImage
                    double* outK, double* outDist, double* outRms)
 {
     if (xy == 0 || counts == 0 || outK == 0 || outDist == 0 || outRms == 0
-        || nImages < 3 || width <= 0 || height <= 0 || cols < 2 || rows < 2)
+        || nImages < 1 || width <= 0 || height <= 0 || cols < 2 || rows < 2)
     {
-        SetError(ctx, "需要至少 3 张有效图，且棋盘格行列数 >= 2");
+        SetError(ctx, "至少需要 1 张有效图，且行列数 >= 2");
         return VA_ERR_ARG;
     }
 
@@ -118,11 +130,15 @@ int CalibCalibrate(Context* ctx, const double* xy, const int* counts, int nImage
             imagePoints.push_back(img);
         }
 
-        if (objectPoints.size() < 3)
+        if (objectPoints.empty())
         {
-            SetError(ctx, "有效标定图不足 3 张（角点检测失败的图会被跳过）");
+            SetError(ctx, "没有一张图检测到有效角点");
             return VA_ERR_ARG;
         }
+
+        // 图少（1~2 张）：固定主点与 k3、置零切向，只解 fx/fy/k1/k2，否则一定发散
+        if (objectPoints.size() < 3)
+            flags |= cv::CALIB_FIX_PRINCIPAL_POINT | cv::CALIB_ZERO_TANGENT_DIST | cv::CALIB_FIX_K3;
 
         cv::Mat K, dist;
         std::vector<cv::Mat> rvecs, tvecs;

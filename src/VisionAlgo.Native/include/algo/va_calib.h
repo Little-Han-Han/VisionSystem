@@ -24,7 +24,9 @@ extern "C" {
  *   out_count   实际找到的点数；找不到时为 0 并返回 VA_ERR_NO_EDGE
  * 返回：VA_OK / VA_ERR_ARG / VA_ERR_NO_EDGE / VA_ERR_SIZE */
 VA_API int VA_CALL va_calib_find_chessboard(void* handle, const VA_Image* gray, int cols, int rows,
-                                            double* out_xy, int cap, int* out_count);
+                                            int pattern, double* out_xy, int cap, int* out_count);
+
+/* pattern：0 = 棋盘格，1 = 对称圆点网格，2 = 非对称圆点网格 */
 
 /* 用多张图的角点标定相机。
  *   xy         所有点首尾相接（第 i 张图占 counts[i] 个点，每点 2 个 double）
