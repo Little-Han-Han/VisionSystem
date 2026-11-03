@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows.Forms;
+using VisionPlatform.Calibration;
+using VisionPlatform.Core;
 using VisionPlatform.Flow;
 
 namespace VisionPlatform.UI
@@ -505,7 +507,10 @@ namespace VisionPlatform.UI
                     cmb.ForeColor = UiTheme.ColorTextPrimary;
                     cmb.FlatStyle = FlatStyle.Flat;
                     cmb.Dock = DockStyle.Fill;
-                    foreach (NodeParamOption o in f.Options) cmb.Items.Add(o);
+                    // 标定记录是运行时数据：选项按当前节点类型过滤后现填（不让用户手输 Id）
+                    List<NodeParamOption> opts = string.Equals(f.Key, "CalibRecordId", StringComparison.Ordinal)
+                        ? BuildCalibOptions(_node) : f.Options;
+                    foreach (NodeParamOption o in opts) cmb.Items.Add(o);
                     cmb.Tag = f;
                     cmb.SelectedIndexChanged += OnEnumChanged;
                     _inputs.Add(cmb);
@@ -655,6 +660,46 @@ namespace VisionPlatform.UI
                     return num;
                 }
             }
+        }
+
+        /// <summary>
+        /// 标定记录下拉项：只列与该节点类型匹配的记录
+        /// （标定转换 → N 点标定/旋转中心；畸变矫正 → 畸变矫正）。
+        /// 第一项固定「自动（该类型第一条）」，用户不需要记 Id。
+        /// </summary>
+        private static List<NodeParamOption> BuildCalibOptions(FlowNode node)
+        {
+            var list = new List<NodeParamOption>();
+            list.Add(new NodeParamOption("自动（用该类型第一条记录）", ""));
+
+            try
+            {
+                FlowNodeType type = FlowNodeType.Preprocess;
+                if (node != null) node.TryGetType(out type);
+                bool wantDistort = type == FlowNodeType.DistortionCorrect;
+
+                CalibSettings all = ConfigStore.Current.Calibrations;
+                if (all == null || all.Records == null) return list;
+
+                for (int i = 0; i < all.Records.Count; i++)
+                {
+                    CalibRecord r = all.Records[i];
+                    if (r == null) continue;
+
+                    bool ok = wantDistort
+                        ? r.Kind == CalibKind.Distortion
+                        : (r.Kind == CalibKind.NPoint || r.Kind == CalibKind.RotationCenter);
+                    if (!ok) continue;
+
+                    string label = r.Name + "（" + r.KindDisplay + "）";
+                    if (r.HasResult)
+                        label += "  RMS " + r.RmsError.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+                    list.Add(new NodeParamOption(label, r.Id));
+                }
+            }
+            catch (Exception) { }
+
+            return list;
         }
 
         private static void StyleTextBox(Control box)

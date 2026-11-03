@@ -397,6 +397,30 @@ namespace VisionPlatform.Flow
                     P("Text",   "接收内容", FlowPortKind.Text,  false),
                     P("Number", "长度", FlowPortKind.Number, false)
                 });
+
+            // ---- 标定转换：吃图像（可选），吐机械坐标 ----
+            Register(FlowNodeType.CalibTransform,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false,
+                      "可选：需要先定位再转换时连上游图像；只用参数里的定点坐标可不连")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Coord", "机械坐标", FlowPortKind.Pose, false,
+                      "输出转换后的机械 X/Y，下游「结果输出」「发送数据」可直接连")
+                });
+
+            // ---- 畸变矫正：吃图像，吐矫正后的图像 ----
+            Register(FlowNodeType.DistortionCorrect,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true, "接上一节点的图像")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false, "去畸变后的图，可继续接下游处理节点")
+                });
         }
 
         // ---------------------- 注册与构造器 ----------------------
@@ -405,6 +429,7 @@ namespace VisionPlatform.Flow
                                      string hint = "", bool multiIn = false)
         {
             return new FlowPortDef(key, displayName, kind, required, hint, multiIn);
+
         }
 
         /// <summary>登记一个节点类型的输入 / 输出端子表（静态构造期调用一次）。</summary>

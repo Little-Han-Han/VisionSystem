@@ -741,8 +741,15 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.CalibTransform, Title = "标定转换（像素→机械）" };
 
             t.Fields.Add(Group("标定数据"));
-            t.Fields.Add(Text("CalibRecordId", "标定记录 Id", "",
-                "留空 = 自动取该类型的第一条记录；本节点只认「N 点标定」与「旋转中心」，畸变记录会被拒绝"));
+            t.Fields.Add(new NodeParamField
+            {
+                Key = "CalibRecordId",
+                Label = "标定记录",
+                Kind = NodeParamKind.Enum,
+                Default = "",
+                Options = new List<NodeParamOption>(),
+                Hint = "下拉里只列「N 点标定」与「旋转中心」；选「自动」即用该类型第一条"
+            });
 
             t.Fields.Add(Group("输入（像素坐标）"));
             t.Fields.Add(Dbl("SourceX", "坐标 X (px)", -100000m, 100000m, 3, 1m, "0",
@@ -764,8 +771,15 @@ namespace VisionPlatform.Flow
             var t = new NodeParamTable { Type = FlowNodeType.DistortionCorrect, Title = "畸变矫正（去畸变）" };
 
             t.Fields.Add(Group("标定数据"));
-            t.Fields.Add(Text("CalibRecordId", "标定记录 Id", "",
-                "留空 = 自动取第一条「畸变矫正」记录；本节点只认畸变记录（N 点/旋转中心会被拒绝）"));
+            t.Fields.Add(new NodeParamField
+            {
+                Key = "CalibRecordId",
+                Label = "标定记录",
+                Kind = NodeParamKind.Enum,
+                Default = "",
+                Options = new List<NodeParamOption>(),
+                Hint = "下拉里只列「畸变矫正」类型的记录；选「自动」即用第一条"
+            });
 
             t.Fields.Add(Note("输入：上一节点的图像　输出：去畸变后的图像（替换当前帧，供下游继续处理）"));
             t.Fields.Add(Note("需要先在「相机标定 → 畸变矫正」里标定过并设为当前"));
