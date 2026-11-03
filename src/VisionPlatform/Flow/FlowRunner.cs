@@ -916,6 +916,7 @@ namespace VisionPlatform.Flow
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
                     "旋转中心转换：({0:F2},{1:F2}) 绕 ({2:F2},{3:F2}) 转 {4:F1}° → ({5:F3},{6:F3})",
                     px, py, cx, cy, deg, mx, my);
+                p.Metrics.AngleDeg = deg;
             }
             else
             {
@@ -927,6 +928,11 @@ namespace VisionPlatform.Flow
                     "标定转换：({0:F2},{1:F2}) px → ({2:F3},{3:F3}) mm（RMS {4:F4}）",
                     px, py, mx, my, rec.RmsError);
             }
+
+            // 真正把结果交出去：下游（结果输出 / 发送数据）读的就是这两个字段
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = mx;
+            p.Metrics.TopCy = my;
 
             return true;
         }
@@ -979,6 +985,12 @@ namespace VisionPlatform.Flow
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "畸变矫正：fx={0:F1} fy={1:F1} k1={2:F5} k2={3:F5}", fx, fy, k1, k2);
+
+            // 输出：新图已替换 s.Current；指标里记录矫正参数与输出尺寸，便于下游/日志追溯
+            p.Metrics.TargetCount = 1;
+            p.Metrics.AngleDeg = double.NaN;
+            p.Metrics.Text = string.Format(CultureInfo.InvariantCulture,
+                "undistorted {0}x{1}", dst.Width, dst.Height);
             return true;
         }
 
