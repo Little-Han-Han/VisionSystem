@@ -33,6 +33,7 @@ namespace VisionPlatform.UI
         private NumericUpDown numGridRows;
         private NumericUpDown numCellSize;
         private UiButton btnDistortCalc;
+        private Label lblCellSize;
         private Label lblDistortHint;
 
         // ---- 旋转中心页 ----
@@ -58,8 +59,8 @@ namespace VisionPlatform.UI
 
             tableLeft.RowStyles.Clear();
             tableLeft.RowCount = 2;
-            tableLeft.RowStyles.Add(new RowStyle(SizeType.Percent, 40F));
-            tableLeft.RowStyles.Add(new RowStyle(SizeType.Percent, 60F));
+            tableLeft.RowStyles.Add(new RowStyle(SizeType.Percent, 48F));
+            tableLeft.RowStyles.Add(new RowStyle(SizeType.Percent, 52F));
 
             tabWork = new TabControl
             {
@@ -210,20 +211,41 @@ namespace VisionPlatform.UI
             root.Controls.Add(MakeLabel("网格类型"), 0, 0);
             root.Controls.Add(cboGridType, 1, 0);
 
-            // 列 / 行
-            numGridCols = new NumericUpDown { Dock = DockStyle.Left, Width = 80, Minimum = 2, Maximum = 30, Value = 9, Font = UiTheme.FontBody };
-            numGridRows = new NumericUpDown { Dock = DockStyle.Left, Width = 80, Minimum = 2, Maximum = 30, Value = 6, Font = UiTheme.FontBody };
+            // 列 / 行：标签与输入框贴在同一个 FlowLayoutPanel 里，避免"左边一个词、右边一个框"看不明白
+            numGridCols = new NumericUpDown
+            {
+                Width = 62, Minimum = 2, Maximum = 30, Value = 9,
+                Font = UiTheme.FontBody, Margin = new Padding(0, 4, 0, 0)
+            };
+            numGridRows = new NumericUpDown
+            {
+                Width = 62, Minimum = 2, Maximum = 30, Value = 6,
+                Font = UiTheme.FontBody, Margin = new Padding(0, 4, 0, 0)
+            };
             var pnlCols = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+            pnlCols.Controls.Add(MakeInlineLabel("列"));
             pnlCols.Controls.Add(numGridCols);
-            pnlCols.Controls.Add(MakeLabel("  ×  "));
+            pnlCols.Controls.Add(MakeInlineLabel("  ×  行"));
             pnlCols.Controls.Add(numGridRows);
-            root.Controls.Add(MakeLabel("列 × 行"), 0, 1);
+            pnlCols.Controls.Add(MakeInlineLabel("  （内角点/圆点个数）"));
+            root.Controls.Add(MakeLabel("网格"), 0, 1);
             root.Controls.Add(pnlCols, 1, 1);
+            root.SetColumnSpan(pnlCols, 1);
 
-            // 方格尺寸
-            numCellSize = new NumericUpDown { Dock = DockStyle.Left, Width = 90, Minimum = 1, Maximum = 500, Value = 25, DecimalPlaces = 2, Font = UiTheme.FontBody };
-            root.Controls.Add(MakeLabel("方格尺寸 mm"), 0, 2);
-            root.Controls.Add(numCellSize, 1, 2);
+            // 尺寸：棋盘格=方格边长，圆点=圆点直径（随类型切换文案）
+            numCellSize = new NumericUpDown
+            {
+                Width = 78, Minimum = 1, Maximum = 500, Value = 25, DecimalPlaces = 2,
+                Font = UiTheme.FontBody, Margin = new Padding(0, 4, 0, 0)
+            };
+            lblCellSize = MakeInlineLabel("方格边长 (mm)");
+            var pnlCell = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+            pnlCell.Controls.Add(numCellSize);
+            pnlCell.Controls.Add(lblCellSize);
+            root.Controls.Add(MakeLabel("尺寸"), 0, 2);
+            root.Controls.Add(pnlCell, 1, 2);
+
+            cboGridType.SelectedIndexChanged += delegate { UpdateDistortLabels(); };
 
             // 按钮
             btnDistortCalc = new UiButton
@@ -254,6 +276,27 @@ namespace VisionPlatform.UI
 
             root.Controls.Add(new Label { Text = "", Dock = DockStyle.Fill }, 0, 4);
             page.Controls.Add(root);
+        }
+
+        private static Label MakeInlineLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = UiTheme.ColorTextSecondary,
+                Font = UiTheme.FontSmall,
+                Margin = new Padding(0, 8, 4, 0)
+            };
+        }
+
+        /// <summary>尺寸文案随标定板类型切换：棋盘格看方格边长，圆点看圆点直径。</summary>
+        private void UpdateDistortLabels()
+        {
+            if (lblCellSize == null || cboGridType == null) return;
+
+            int idx = cboGridType.SelectedIndex;
+            lblCellSize.Text = idx == 0 ? "方格边长 (mm)" : "圆点直径 (mm)";
         }
 
         private static Label MakeLabel(string text)

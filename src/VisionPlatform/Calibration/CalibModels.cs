@@ -301,9 +301,12 @@ namespace VisionPlatform.Calibration
                     list.Add(rec);
             }
 
+            // 升序：老的在上、新建的追加在最后一行（用户要求，新建不能顶到第一行）
             list.Sort(delegate(CalibRecord a, CalibRecord b)
             {
-                return b.CreatedAt.CompareTo(a.CreatedAt);
+                if (a.CreatedAt == b.CreatedAt)
+                    return string.CompareOrdinal(a.Id ?? "", b.Id ?? "");
+                return a.CreatedAt.CompareTo(b.CreatedAt);
             });
             return list;
         }

@@ -364,6 +364,15 @@ namespace VisionPlatform.UI
                         string.IsNullOrEmpty(rec.FilePath) ? "（未落盘）" : rec.FilePath);
 
                     gridRecords.Rows[idx].Tag = rec.Id;
+
+                    // 「设为当前」的那一行整行高亮（浅绿底 + 加粗），一眼能看出哪条在生效
+                    if (isCurrent)
+                    {
+                        DataGridViewRow row = gridRecords.Rows[idx];
+                        row.DefaultCellStyle.BackColor = Color.FromArgb(198, 239, 206);
+                        row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(120, 200, 140);
+                        row.DefaultCellStyle.Font = new Font(gridRecords.Font, FontStyle.Bold);
+                    }
                     if (string.Equals(rec.Id, keep, StringComparison.Ordinal)) select = idx;
                 }
 
@@ -471,6 +480,7 @@ namespace VisionPlatform.UI
             AddRecordColumn("路径", 320, true);
 
             gridRecords.SelectionChanged += OnRecordGridSelectionChanged;
+            gridRecords.MouseWheel += OnRecordGridMouseWheel;
             gridRecords.CellEndEdit += OnRecordGridCellEndEdit;
 
             if (host != null) host.Controls.Add(gridRecords);
@@ -583,6 +593,28 @@ namespace VisionPlatform.UI
             };
             if (readOnly) col.DefaultCellStyle.ForeColor = UiTheme.ColorTextSecondary;
             gridRecords.Columns.Add(col);
+        }
+
+        /// <summary>
+        /// 列超出宽度时，滚轮直接横向滚动（Shift 同效）。
+        /// <para>
+        /// 实测滚动条本身没问题（HScrollBar Visible=True、宽 385px），但 17px 高的横条在
+        /// 5 行数据的表格底部很不显眼，现场都是"滚一下就以为不能动"。这里让滚轮先管横向。
+        /// </para>
+        /// </summary>
+        private void OnRecordGridMouseWheel(object sender, MouseEventArgs e)
+        {
+            var he = e as HandledMouseEventArgs;
+            if (he == null || gridRecords == null) return;
+
+            int total = 0;
+            for (int i = 0; i < gridRecords.Columns.Count; i++) total += gridRecords.Columns[i].Width;
+            if (total <= gridRecords.ClientSize.Width) return;     // 没溢出：交给默认（纵向）
+
+            int next = gridRecords.HorizontalScrollingOffset - e.Delta;
+            int max = Math.Max(0, total - gridRecords.ClientSize.Width);
+            gridRecords.HorizontalScrollingOffset = Math.Max(0, Math.Min(max, next));
+            he.Handled = true;
         }
 
         private void OnRecordGridSelectionChanged(object sender, EventArgs e)
