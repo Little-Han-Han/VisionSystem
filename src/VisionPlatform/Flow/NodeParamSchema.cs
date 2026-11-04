@@ -740,7 +740,7 @@ namespace VisionPlatform.Flow
         {
             var t = new NodeParamTable { Type = FlowNodeType.CalibTransform, Title = "标定转换（像素→机械）" };
 
-            t.Fields.Add(Group("标定数据"));
+            t.Fields.Add(Group("N 点标定（像素 → 机械）"));
             t.Fields.Add(new NodeParamField
             {
                 Key = "CalibRecordId",
@@ -748,7 +748,18 @@ namespace VisionPlatform.Flow
                 Kind = NodeParamKind.Enum,
                 Default = "",
                 Options = new List<NodeParamOption>(),
-                Hint = "下拉里只列「N 点标定」与「旋转中心」；选「自动」即用该类型第一条"
+                Hint = "只列「N 点标定」记录；选「自动」即用第一条。不用 N 点转换可选「不使用」"
+            });
+
+            t.Fields.Add(Group("旋转中心（回转 / 极坐标）"));
+            t.Fields.Add(new NodeParamField
+            {
+                Key = "RotCenterId",
+                Label = "旋转中心",
+                Kind = NodeParamKind.Enum,
+                Default = "",
+                Options = new List<NodeParamOption>(),
+                Hint = "只列「旋转中心」记录；下拉项末尾带该记录的圆心/半径/RMS，选中即用"
             });
 
             t.Fields.Add(Group("输入（像素坐标）"));

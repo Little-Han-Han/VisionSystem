@@ -906,14 +906,6 @@ namespace VisionPlatform.Flow
         /// </summary>
         private bool RunCalibTransform(FlowRunSession s, FlowNode node, FlowNodeProgress p)
         {
-            CalibRecord rec = ResolveCalibRecord(node, CalibKind.NPoint);
-            if (rec == null)
-            {
-                p.Status = FlowNodeStatus.Warn;
-                p.Summary = "标定转换：没有可用的 N 点标定记录（请先在相机标定里做 N 点标定并设为当前）";
-                return false;
-            }
-
             double px = node.GetDouble("SourceX", 0);
             double py = node.GetDouble("SourceY", 0);
             string upstreamNote = "手填";
@@ -927,39 +919,58 @@ namespace VisionPlatform.Flow
                 upstreamNote = "上游 " + (string.IsNullOrEmpty(up.Name) ? up.Id : up.Name);
             }
 
-            double mx, my;
-            if (rec.Kind == CalibKind.RotationCenter)
+            // ① N 点标定：像素 → 机械（没选就跳过，只做旋转）
+            CalibRecord npt = ResolveCalibRecord(node, CalibKind.NPoint, "CalibRecordId");
+            CalibRecord rot = ResolveCalibRecord(node, CalibKind.RotationCenter, "RotCenterId");
+
+            if (npt == null && rot == null)
             {
-                // 旋转中心：绕圆心旋转 RotateAngle 度（用于"工件转了一个角度后坐标怎么变"）
-                double cx = rec.Affine[0], cy = rec.Affine[1];
+                p.Status = FlowNodeStatus.Warn;
+                p.Summary = "标定转换：既没选 N 点标定也没选旋转中心（参数里至少选一个）";
+                return false;
+            }
+
+            double mx = px, my = py;
+            string stage = "原始";
+
+            if (npt != null)
+            {
+                double[] a = npt.Affine;
+                double tx = a[0] * px + a[1] * py + a[4];
+                double ty = a[2] * px + a[3] * py + a[5];
+                mx = tx; my = ty;
+                stage = "N点";
+            }
+
+            // ② 旋转中心：绕圆心旋转，并给出半径 / 极角
+            if (rot != null)
+            {
+                double cx = rot.Affine[0], cy = rot.Affine[1];
                 double deg = node.GetDouble("RotateAngle", 0);
                 double rad = deg * Math.PI / 180.0;
-                double dx = px - cx, dy = py - cy;
-                mx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
-                my = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
-
-                // 旋转中心真正有用的两个量：点到圆心的半径、点相对圆心的极角
+                double dx = mx - cx, dy = my - cy;
                 double radius = Math.Sqrt(dx * dx + dy * dy);
                 double polar = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+
+                mx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
+                my = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
 
                 p.Metrics.AngleDeg = deg;
                 p.Outputs.Add(new PortValue("Radius", "旋转半径", FlowPortKind.Number, radius));
                 p.Outputs.Add(new PortValue("Polar", "相对角度", FlowPortKind.Angle, polar));
+                p.Outputs.Add(new PortValue("CenterX", "圆心X", FlowPortKind.Number, cx));
+                p.Outputs.Add(new PortValue("CenterY", "圆心Y", FlowPortKind.Number, cy));
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "旋转中心：({0:F2},{1:F2}) 相对圆心 ({2:F2},{3:F2}) 半径 {4:F3}、极角 {5:F2}°，" +
-                    "转 {6:F1}°后 → ({7:F3},{8:F3})",
-                    px, py, cx, cy, radius, polar, deg, mx, my);
+                    "标定转换[{0}+旋转中心]：({1:F2},{2:F2}) px → 圆心({3:F2},{4:F2}) 半径 {5:F3}、极角 {6:F2}°、" +
+                    "转 {7:F1}° → ({8:F3},{9:F3})",
+                    stage, px, py, cx, cy, radius, polar, deg, mx, my);
             }
             else
             {
-                // N 点标定：相似变换 [A11,A12,A21,A22,Tx,Ty]
-                double[] a = rec.Affine;
-                mx = a[0] * px + a[1] * py + a[4];
-                my = a[2] * px + a[3] * py + a[5];
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "标定转换[{5}]：({0:F2},{1:F2}) px → ({2:F3},{3:F3}) mm（RMS {4:F4}）",
-                    px, py, mx, my, rec.RmsError, upstreamNote);
+                    "标定转换[{0}]：({1:F2},{2:F2}) px → ({3:F3},{4:F3}) mm（RMS {5:F4}）",
+                    upstreamNote, px, py, mx, my, npt.RmsError);
             }
 
             // 真正把结果交出去：下游（结果输出 / 发送数据）读的就是这两个字段
@@ -1053,10 +1064,15 @@ namespace VisionPlatform.Flow
         /// <summary>取标定记录：参数指定优先，其次用该相机的「当前」记录；类型不符一律拒绝。</summary>
         private static CalibRecord ResolveCalibRecord(FlowNode node, CalibKind want)
         {
+            return ResolveCalibRecord(node, want, "CalibRecordId");
+        }
+
+        private static CalibRecord ResolveCalibRecord(FlowNode node, CalibKind want, string paramKey)
+        {
             CalibSettings all = ConfigStore.Current.Calibrations;
             if (all == null || node == null) return null;
 
-            string id = node.GetString("CalibRecordId", "");
+            string id = node.GetString(paramKey, "");
             CalibRecord rec = null;
 
             if (!string.IsNullOrEmpty(id))

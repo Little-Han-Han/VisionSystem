@@ -508,8 +508,9 @@ namespace VisionPlatform.UI
                     cmb.FlatStyle = FlatStyle.Flat;
                     cmb.Dock = DockStyle.Fill;
                     // 标定记录是运行时数据：选项按当前节点类型过滤后现填（不让用户手输 Id）
-                    List<NodeParamOption> opts = string.Equals(f.Key, "CalibRecordId", StringComparison.Ordinal)
-                        ? BuildCalibOptions(_node) : f.Options;
+                    List<NodeParamOption> opts = (string.Equals(f.Key, "CalibRecordId", StringComparison.Ordinal)
+                                                  || string.Equals(f.Key, "RotCenterId", StringComparison.Ordinal))
+                        ? BuildCalibOptions(_node, f.Key) : f.Options;
                     foreach (NodeParamOption o in opts) cmb.Items.Add(o);
                     cmb.Tag = f;
                     cmb.SelectedIndexChanged += OnEnumChanged;
@@ -667,17 +668,20 @@ namespace VisionPlatform.UI
         /// （标定转换 → N 点标定/旋转中心；畸变矫正 → 畸变矫正）。
         /// 第一项固定「自动（该类型第一条）」，用户不需要记 Id。
         /// </summary>
-        private static List<NodeParamOption> BuildCalibOptions(FlowNode node)
+        private static List<NodeParamOption> BuildCalibOptions(FlowNode node, string fieldKey)
         {
             var list = new List<NodeParamOption>();
-            list.Add(new NodeParamOption("自动（用该类型第一条记录）", ""));
+
+            FlowNodeType type = FlowNodeType.Preprocess;
+            if (node != null) node.TryGetType(out type);
+
+            bool wantRotCenter = string.Equals(fieldKey, "RotCenterId", StringComparison.Ordinal);
+            bool wantDistort = type == FlowNodeType.DistortionCorrect;
+
+            list.Add(new NodeParamOption(wantRotCenter ? "不使用旋转中心" : "自动（用该类型第一条记录）", ""));
 
             try
             {
-                FlowNodeType type = FlowNodeType.Preprocess;
-                if (node != null) node.TryGetType(out type);
-                bool wantDistort = type == FlowNodeType.DistortionCorrect;
-
                 CalibSettings all = ConfigStore.Current.Calibrations;
                 if (all == null || all.Records == null) return list;
 
@@ -686,14 +690,30 @@ namespace VisionPlatform.UI
                     CalibRecord r = all.Records[i];
                     if (r == null) continue;
 
-                    bool ok = wantDistort
-                        ? r.Kind == CalibKind.Distortion
-                        : (r.Kind == CalibKind.NPoint || r.Kind == CalibKind.RotationCenter);
+                    bool ok;
+                    if (wantDistort) ok = r.Kind == CalibKind.Distortion;
+                    else if (wantRotCenter) ok = r.Kind == CalibKind.RotationCenter;
+                    else ok = r.Kind == CalibKind.NPoint;      // N 点标定字段只列 N 点
                     if (!ok) continue;
 
                     string label = r.Name + "（" + r.KindDisplay + "）";
                     if (r.HasResult)
-                        label += "  RMS " + r.RmsError.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+                    {
+                        if (wantRotCenter)
+                        {
+                            // 旋转中心：直接把计算结果写进下拉项，选之前就能看到对不对
+                            label += string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                "  圆心({0:F2},{1:F2}) R={2:F2} RMS={3:F4}",
+                                r.Affine != null && r.Affine.Length > 1 ? r.Affine[0] : 0,
+                                r.Affine != null && r.Affine.Length > 1 ? r.Affine[1] : 0,
+                                r.Affine != null && r.Affine.Length > 2 ? r.Affine[2] : 0,
+                                r.RmsError);
+                        }
+                        else
+                        {
+                            label += "  RMS " + r.RmsError.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+                        }
+                    }
                     list.Add(new NodeParamOption(label, r.Id));
                 }
             }
