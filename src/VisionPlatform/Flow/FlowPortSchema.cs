@@ -402,14 +402,24 @@ namespace VisionPlatform.Flow
             Register(FlowNodeType.CalibTransform,
                 new List<FlowPortDef>
                 {
-                    P("Image", "图像", FlowPortKind.Image, false,
-                      "可选：需要先定位再转换时连上游图像；只用参数里的定点坐标可不连")
+                    P("Coord", "坐标", FlowPortKind.Pose, false,
+                      "接模板匹配 / Blob / 圆卡尺 / 圆拟合等输出的 X/Y；不接则用参数里手填的定点坐标")
                 },
                 new List<FlowPortDef>
                 {
                     P("Coord", "机械坐标", FlowPortKind.Pose, false,
                       "输出转换后的机械 X/Y，下游「结果输出」「发送数据」可直接连")
                 });
+
+            // ---- 统一坐标输出：这些节点的 X/Y/R 可以直接接到「标定转换」 ----
+            EnsureCoordOutput(FlowNodeType.ShapeMatch,    "匹配中心");
+            EnsureCoordOutput(FlowNodeType.TemplateMatch, "匹配中心");
+            EnsureCoordOutput(FlowNodeType.Blob,          "区域中心");
+            EnsureCoordOutput(FlowNodeType.CircleCaliper, "圆心");
+            EnsureCoordOutput(FlowNodeType.FitCircle,     "圆心");
+            EnsureCoordOutput(FlowNodeType.FitLine,       "线中点");
+            EnsureCoordOutput(FlowNodeType.ObjectDetect,  "目标中心");
+            EnsureCoordOutput(FlowNodeType.Ocr,           "首字符中心");
 
             // ---- 畸变矫正：吃图像，吐矫正后的图像 ----
             Register(FlowNodeType.DistortionCorrect,
@@ -430,6 +440,26 @@ namespace VisionPlatform.Flow
         {
             return new FlowPortDef(key, displayName, kind, required, hint, multiIn);
 
+        }
+
+        /// <summary>
+        /// 给节点补一个统一的「坐标」输出端子（幂等）。
+        /// <para>
+        /// 为什么统一叫 Coord：模板匹配、Blob、圆卡尺、圆拟合的输出语义都是"一个点（可选半径/角度）"，
+        /// 如果每个节点各叫各的（TopCx / CircleCenter / MatchPose…），标定转换就得写一堆特判。
+        /// 统一成 Coord 后，下游只认这一个端子，节点换不换都不影响接线。
+        /// </para>
+        /// </summary>
+        private static void EnsureCoordOutput(FlowNodeType type, string displayName)
+        {
+            List<FlowPortDef> list;
+            if (!_outputs.TryGetValue(type, out list) || list == null) return;
+
+            for (int i = 0; i < list.Count; i++)
+                if (string.Equals(list[i].Key, "Coord", StringComparison.Ordinal)) return;
+
+            list.Add(P("Coord", displayName, FlowPortKind.Pose, false,
+                       "X / Y / R（R = 半径或角度），可直接接到标定转换"));
         }
 
         /// <summary>登记一个节点类型的输入 / 输出端子表（静态构造期调用一次）。</summary>

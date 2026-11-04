@@ -458,6 +458,20 @@ namespace VisionPlatform.Flow
             }
             if (p.Regions != null) o.Regions = new List<RegionInfo>(p.Regions);
 
+            // 统一坐标输出：凡是填了 TopCx/TopCy 的节点（模板匹配/Blob/圆卡尺/圆拟合/直线拟合…）
+            // 一律额外给出 X / Y / R 三个键，标定转换节点按 Key 取，不必逐个节点写适配
+            if (!double.IsNaN(o.Cx) && !double.IsNaN(o.Cy))
+            {
+                double r = double.IsNaN(o.Angle) ? 0 : o.Angle;
+                o.Values.RemoveAll(x => x != null &&
+                    (string.Equals(x.Key, "X", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(x.Key, "Y", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(x.Key, "R", StringComparison.OrdinalIgnoreCase)));
+                o.Values.Add(new PortValue("X", "X", FlowPortKind.Number, o.Cx));
+                o.Values.Add(new PortValue("Y", "Y", FlowPortKind.Number, o.Cy));
+                o.Values.Add(new PortValue("R", "R", FlowPortKind.Number, r));
+            }
+
             s.Outputs.Add(o);
         }
 
@@ -902,6 +916,16 @@ namespace VisionPlatform.Flow
 
             double px = node.GetDouble("SourceX", 0);
             double py = node.GetDouble("SourceY", 0);
+            string upstreamNote = "手填";
+
+            // 优先取上游 Coord 端子连过来的坐标（模板匹配/Blob/圆卡尺…都统一输出 X/Y/R）
+            NodeOutput up = FindUpstreamCoord(s, node);
+            if (up != null && !double.IsNaN(up.Cx) && !double.IsNaN(up.Cy))
+            {
+                px = up.Cx;
+                py = up.Cy;
+                upstreamNote = "上游 " + (string.IsNullOrEmpty(up.Name) ? up.Id : up.Name);
+            }
 
             double mx, my;
             if (rec.Kind == CalibKind.RotationCenter)
@@ -913,10 +937,19 @@ namespace VisionPlatform.Flow
                 double dx = px - cx, dy = py - cy;
                 mx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
                 my = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
-                p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "旋转中心转换：({0:F2},{1:F2}) 绕 ({2:F2},{3:F2}) 转 {4:F1}° → ({5:F3},{6:F3})",
-                    px, py, cx, cy, deg, mx, my);
+
+                // 旋转中心真正有用的两个量：点到圆心的半径、点相对圆心的极角
+                double radius = Math.Sqrt(dx * dx + dy * dy);
+                double polar = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+
                 p.Metrics.AngleDeg = deg;
+                p.Outputs.Add(new PortValue("Radius", "旋转半径", FlowPortKind.Number, radius));
+                p.Outputs.Add(new PortValue("Polar", "相对角度", FlowPortKind.Angle, polar));
+
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "旋转中心：({0:F2},{1:F2}) 相对圆心 ({2:F2},{3:F2}) 半径 {4:F3}、极角 {5:F2}°，" +
+                    "转 {6:F1}°后 → ({7:F3},{8:F3})",
+                    px, py, cx, cy, radius, polar, deg, mx, my);
             }
             else
             {
@@ -925,8 +958,8 @@ namespace VisionPlatform.Flow
                 mx = a[0] * px + a[1] * py + a[4];
                 my = a[2] * px + a[3] * py + a[5];
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "标定转换：({0:F2},{1:F2}) px → ({2:F3},{3:F3}) mm（RMS {4:F4}）",
-                    px, py, mx, my, rec.RmsError);
+                    "标定转换[{5}]：({0:F2},{1:F2}) px → ({2:F3},{3:F3}) mm（RMS {4:F4}）",
+                    px, py, mx, my, rec.RmsError, upstreamNote);
             }
 
             // 真正把结果交出去：下游（结果输出 / 发送数据）读的就是这两个字段
@@ -992,6 +1025,29 @@ namespace VisionPlatform.Flow
             p.Metrics.Text = string.Format(CultureInfo.InvariantCulture,
                 "undistorted {0}x{1}", dst.Width, dst.Height);
             return true;
+        }
+
+        /// <summary>
+        /// 找连到本节点 Coord 输入端子上的上游节点结果。
+        /// 没有连线返回 null（此时调用方回退到参数里手填的坐标）。
+        /// </summary>
+        private static NodeOutput FindUpstreamCoord(FlowRunSession s, FlowNode node)
+        {
+            if (s == null || node == null || s.Flow == null) return null;
+
+            List<FlowLink> links = s.Flow.FindLinksTo(node.Id, "Coord");
+            if (links == null || links.Count == 0) return null;
+
+            // 取最后一条（后连的覆盖先连的，符合"最新接线生效"的直觉）
+            string fromId = links[links.Count - 1].FromNodeId;
+            if (string.IsNullOrEmpty(fromId) || s.Outputs == null) return null;
+
+            for (int i = s.Outputs.Count - 1; i >= 0; i--)
+            {
+                NodeOutput o = s.Outputs[i];
+                if (o != null && string.Equals(o.Id, fromId, StringComparison.Ordinal)) return o;
+            }
+            return null;
         }
 
         /// <summary>取标定记录：参数指定优先，其次用该相机的「当前」记录；类型不符一律拒绝。</summary>
