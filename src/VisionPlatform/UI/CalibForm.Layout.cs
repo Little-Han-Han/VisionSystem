@@ -169,9 +169,32 @@ namespace VisionPlatform.UI
             if (e.TabPageIndex == _lockedPage) return;
 
             e.Cancel = true;
+
             CalibRecord rec = CurrentRecord;
             string kind = rec != null ? rec.KindDisplay : "当前";
-            Log("当前标定是「" + kind + "」类型，不能切到其他页；如需切换请先新建另一条记录。");
+            Log("当前标定是「" + kind + "」类型，不能切到其他页。");
+
+            // 主动给出口：问一句要不要新建该类型的记录（否则用户会被"点不动"困死）
+            CalibKind want = e.TabPageIndex == 1 ? CalibKind.Distortion
+                           : e.TabPageIndex == 2 ? CalibKind.RotationCenter
+                           : CalibKind.NPoint;
+            string wantName = want == CalibKind.Distortion ? "畸变矫正"
+                            : want == CalibKind.RotationCenter ? "旋转中心" : "N 点标定";
+
+            if (_suppressTypePrompt) return;
+
+            var ask = new Action(delegate
+            {
+                if (_suppressTypePrompt) return;
+                if (MessageBox.Show(this,
+                        "当前标定是「" + kind + "」类型，不能切到「" + wantName + "」页。\r\n\r\n" +
+                        "要新建一条「" + wantName + "」类型的记录吗？（会设为当前并切过去）",
+                        "切换标定类型", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    NewRecordOfKind(want);
+                }
+            });
+            BeginInvoke(ask);
         }
 
         /// <summary>左侧当前页 → 右侧显示对应结果面板（用显隐切换，不用 Tab）。</summary>
@@ -546,10 +569,16 @@ namespace VisionPlatform.UI
 
             double cell = numCellSize != null ? (double)numCellSize.Value : 0.0;
 
-            // 存记录（Kind=Distortion）
-            if (_settings != null && !string.IsNullOrEmpty(_cameraId))
+            // 存记录（Kind=Distortion）：当前记录类型不符时新建，不覆盖现有 N 点/旋转中心记录
             {
-                CalibRecord rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.Distortion);
+                CalibRecord rec = _settings.Find(_currentRecordId);
+                if (rec == null || rec.Kind != CalibKind.Distortion)
+                {
+                    rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.Distortion);
+                    _settings.Records.Add(rec);
+                    _settings.SetCurrent(rec);
+                    _currentRecordId = rec.Id;
+                }
                 rec.Kind = CalibKind.Distortion;
                 rec.PointCount = counts.Count;
                 rec.RmsError = rms;
@@ -701,14 +730,15 @@ namespace VisionPlatform.UI
                 }
             }
 
-            // 存记录
+            // 存记录：当前记录不是「旋转中心」类型就新建一条（不能把 N 点标定改造成旋转中心）
             CalibRecord rec = CurrentRecord;
-            if (rec == null)
+            if (rec == null || rec.Kind != CalibKind.RotationCenter)
             {
                 rec = CalibRecord.Create(_cameraId, _settings.NextName(_cameraId), CalibKind.RotationCenter);
                 _settings.Records.Add(rec);
                 _settings.SetCurrent(rec);
                 _currentRecordId = rec.Id;
+                LockTabsToCurrent();
             }
 
             rec.Kind = CalibKind.RotationCenter;

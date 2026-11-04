@@ -69,6 +69,9 @@ namespace VisionPlatform.UI
         private bool _loading;
         private DataGridView gridRecords;
         private int _lockedPage = -1;
+
+        /// <summary>自动化测试用：置 true 后切页被拦不再弹「要不要新建」对话框。</summary>
+        private bool _suppressTypePrompt;
         private UiButton btnRotationCenter;
         private TextBox txtGridSize;
         private UiButton btnDistort;
@@ -699,6 +702,35 @@ namespace VisionPlatform.UI
         /// </summary>
         private bool PromptNewRecord(out string name, out CalibKind kind)
         {
+            return PromptNewRecord(out name, out kind, CalibKind.NPoint);
+        }
+
+        /// <summary>新建一条指定类型的记录（Tab 被拦时从这里给出路）。</summary>
+        private void NewRecordOfKind(CalibKind preset)
+        {
+            if (_settings == null || string.IsNullOrEmpty(_cameraId))
+            {
+                Log("请先选择相机，再新建标定记录。");
+                return;
+            }
+
+            string name;
+            CalibKind kind;
+            if (!PromptNewRecord(out name, out kind, preset)) return;
+
+            CalibRecord rec = CalibRecord.Create(_cameraId, name, kind);
+            _settings.Records.Add(rec);
+            _settings.SetCurrent(rec);
+            _currentRecordId = rec.Id;
+
+            SaveSettings();
+            RefreshRecordList();
+            LockTabsToCurrent();
+            Log("已新建标定记录：" + rec.Name + "（" + rec.KindDisplay + "，已设为当前）");
+        }
+
+        private bool PromptNewRecord(out string name, out CalibKind kind, CalibKind preset)
+        {
             name = _settings != null ? _settings.NextName(_cameraId) : "标定 1";
             kind = CalibKind.NPoint;
 
@@ -729,7 +761,8 @@ namespace VisionPlatform.UI
                     "畸变矫正（相机内参）",
                     "旋转中心（回转中心）"
                 });
-                cboKind.SelectedIndex = 0;
+                cboKind.SelectedIndex = preset == CalibKind.Distortion ? 1
+                                      : preset == CalibKind.RotationCenter ? 2 : 0;
 
                 var btnOk = new Button { Text = "确定", Left = 168, Top = 116, Width = 80, Height = 30, DialogResult = DialogResult.OK };
                 var btnCancel = new Button { Text = "取消", Left = 254, Top = 116, Width = 80, Height = 30, DialogResult = DialogResult.Cancel };
