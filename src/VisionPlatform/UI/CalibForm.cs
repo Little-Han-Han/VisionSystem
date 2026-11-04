@@ -72,6 +72,9 @@ namespace VisionPlatform.UI
 
         /// <summary>自动化测试用：置 true 后切页被拦不再弹「要不要新建」对话框。</summary>
         private bool _suppressTypePrompt;
+
+        /// <summary>自动化测试用：置 true 后「新建」不再弹名称/类型对话框，直接按预设类型建。</summary>
+        private bool _suppressNewDialog;
         private UiButton btnRotationCenter;
         private TextBox txtGridSize;
         private UiButton btnDistort;
@@ -128,8 +131,9 @@ namespace VisionPlatform.UI
             RefreshCameraCombo();
             RefreshCommCombo();
 
-            // 重开窗体时按已有的「当前记录」锁一次，否则一进来三页随便切
+            // 重开窗体时按已有的「当前记录」定一次页，并填充旋转中心页的 N 点标定下拉
             LockTabsToCurrent();
+            RefreshRotCalibOptions();
             RefreshRecordList();
 
             ApplySemanticColors();
@@ -733,6 +737,9 @@ namespace VisionPlatform.UI
         {
             name = _settings != null ? _settings.NextName(_cameraId) : "标定 1";
             kind = CalibKind.NPoint;
+
+            // 自动化测试：不弹窗，直接按预设类型建一条
+            if (_suppressNewDialog) { kind = preset; return true; }
 
             using (var dlg = new Form())
             {

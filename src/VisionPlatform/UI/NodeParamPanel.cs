@@ -680,6 +680,9 @@ namespace VisionPlatform.UI
 
             list.Add(new NodeParamOption(wantRotCenter ? "不使用旋转中心" : "自动（用该类型第一条记录）", ""));
 
+            // 下面会按类型补记录；先记住"除首项外有几条"，为 0 时补一条提示项
+            int before = list.Count;
+
             try
             {
                 CalibSettings all = ConfigStore.Current.Calibrations;
@@ -715,6 +718,12 @@ namespace VisionPlatform.UI
                         }
                     }
                     list.Add(new NodeParamOption(label, r.Id));
+                }
+
+                if (list.Count == before)
+                {
+                    string kindName = wantDistort ? "畸变矫正" : (wantRotCenter ? "旋转中心" : "N 点标定");
+                    list.Add(new NodeParamOption("（还没有" + kindName + "记录：请到「相机标定」对应页算一条）", ""));
                 }
             }
             catch (Exception) { }

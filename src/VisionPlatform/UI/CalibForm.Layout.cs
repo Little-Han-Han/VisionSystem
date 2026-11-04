@@ -39,6 +39,7 @@ namespace VisionPlatform.UI
         // ---- 旋转中心页 ----
         private ComboBox cboRotMethod;     // 多点拟合 / 角度加点拟合
         private DataGridView gridRot;
+        private ComboBox cboRotCalib;
         private UiButton btnRotAddRow;
         private UiButton btnRotDelRow;
         private UiButton btnRotCalc;
@@ -162,45 +163,59 @@ namespace VisionPlatform.UI
             };
         }
 
-        /// <summary>设了当前标定后，只允许停留在它对应的那一页。</summary>
+        /// <summary>
+        /// 切页时不再硬拦：**切到哪一页，就自动为该类型建一条记录并设为当前**。
+        /// <para>
+        /// 【为什么改成这样】之前是 e.Cancel = true 硬拦，结果用户永远进不去「旋转中心」页，
+        /// 也就永远算不出旋转中心记录，最后"标定转换"里的旋转中心下拉只能是空的 ——
+        /// 防误操作把正常流程一起锁死了，这是设计错误。
+        /// 现在的语义：当前记录的类型始终跟当前页一致，但切换不受阻碍。
+        /// </para>
+        /// </summary>
         private void OnWorkTabSelecting(object sender, TabControlCancelEventArgs e)
         {
-            if (_lockedPage < 0) return;
-            if (e.TabPageIndex == _lockedPage) return;
+            if (tabWork == null) return;
+            if (_lockedPage < 0 || e.TabPageIndex == _lockedPage) return;
 
-            e.Cancel = true;
+            int page = e.TabPageIndex;
+            // 不能在 Selecting 里改集合（会重入），延迟到切页完成后再建
+            BeginInvoke(new Action(delegate { EnsureRecordForPage(page); }));
+        }
 
-            CalibRecord rec = CurrentRecord;
-            string kind = rec != null ? rec.KindDisplay : "当前";
-            Log("当前标定是「" + kind + "」类型，不能切到其他页。");
+        /// <summary>确保"当前记录"与所在页的类型一致；不一致就新建一条该类型的记录。</summary>
+        private void EnsureRecordForPage(int page)
+        {
+            if (_settings == null || string.IsNullOrEmpty(_cameraId)) return;
 
-            // 主动给出口：问一句要不要新建该类型的记录（否则用户会被"点不动"困死）
-            CalibKind want = e.TabPageIndex == 1 ? CalibKind.Distortion
-                           : e.TabPageIndex == 2 ? CalibKind.RotationCenter
+            CalibKind want = page == 1 ? CalibKind.Distortion
+                           : page == 2 ? CalibKind.RotationCenter
                            : CalibKind.NPoint;
-            string wantName = want == CalibKind.Distortion ? "畸变矫正"
-                            : want == CalibKind.RotationCenter ? "旋转中心" : "N 点标定";
 
-            if (_suppressTypePrompt) return;
+            CalibRecord cur = CurrentRecord;
+            if (cur != null && cur.Kind == want) return;
 
-            var ask = new Action(delegate
-            {
-                if (_suppressTypePrompt) return;
-                if (MessageBox.Show(this,
-                        "当前标定是「" + kind + "」类型，不能切到「" + wantName + "」页。\r\n\r\n" +
-                        "要新建一条「" + wantName + "」类型的记录吗？（会设为当前并切过去）",
-                        "切换标定类型", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                {
-                    NewRecordOfKind(want);
-                }
-            });
-            BeginInvoke(ask);
+            string name = _settings.NextName(_cameraId);
+            CalibRecord rec = CalibRecord.Create(_cameraId, name, want);
+
+            _settings.Records.Add(rec);
+            _settings.SetCurrent(rec);
+            _currentRecordId = rec.Id;
+
+            SaveSettings();
+            RefreshRecordList();
+            LockTabsToCurrent();
+            RefreshRotCalibOptions();
+            Log("已新建「" + rec.KindDisplay + "」记录：" + rec.Name + "（已设为当前）");
         }
 
         /// <summary>左侧当前页 → 右侧显示对应结果面板（用显隐切换，不用 Tab）。</summary>
         private void OnWorkTabChanged(object sender, EventArgs e)
         {
-            ShowResultPage(tabWork != null ? tabWork.SelectedIndex : 0);
+            int idx = tabWork != null ? tabWork.SelectedIndex : 0;
+            ShowResultPage(idx);
+
+            // 切到旋转中心页时把「N 点标定」下拉刷一遍（可能刚算完新的 N 点标定）
+            if (idx == 2) RefreshRotCalibOptions();
         }
 
         /// <summary>切到指定工作页并显示对应结果（菜单/计算完成后调用）。</summary>
@@ -357,12 +372,26 @@ namespace VisionPlatform.UI
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4
+                RowCount = 5
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));   // N 点标定
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));   // 拟合方法
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));   // 点表
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));   // 按钮
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62F));   // 提示
+
+            // N 点标定记录：旋转中心必须借它的矩阵把像素转成机械坐标
+            var rowCalib = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+            rowCalib.Controls.Add(MakeLabel("N 点标定 "));
+            cboRotCalib = new ComboBox
+            {
+                Width = 340,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = UiTheme.FontBody,
+                Margin = new Padding(0, 3, 0, 0)
+            };
+            rowCalib.Controls.Add(cboRotCalib);
+            root.Controls.Add(rowCalib, 0, 0);
 
             // 方法
             var top = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
@@ -378,7 +407,7 @@ namespace VisionPlatform.UI
             cboRotMethod.SelectedIndex = 0;
             cboRotMethod.SelectedIndexChanged += delegate { RefreshRotGridColumns(); };
             top.Controls.Add(cboRotMethod);
-            root.Controls.Add(top, 0, 0);
+            root.Controls.Add(top, 0, 1);
 
             // 点表
             gridRot = new DataGridView
@@ -397,7 +426,7 @@ namespace VisionPlatform.UI
                 BackgroundColor = Color.White
             };
             ApplyWhiteGridStyle(gridRot);
-            root.Controls.Add(gridRot, 0, 1);
+            root.Controls.Add(gridRot, 0, 2);
 
             // 操作按钮
             var ops = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
@@ -414,20 +443,63 @@ namespace VisionPlatform.UI
             ops.Controls.Add(btnRotAddRow);
             ops.Controls.Add(btnRotDelRow);
             ops.Controls.Add(btnRotCalc);
-            root.Controls.Add(ops, 0, 2);
+            root.Controls.Add(ops, 0, 3);
 
             lblRotHint = new Label
             {
                 Dock = DockStyle.Fill,
                 ForeColor = UiTheme.ColorTextSecondary,
                 Font = UiTheme.FontSmall,
-                Text = "多点拟合：只填机械 X/Y，转一圈采 6~12 点，拟合出的圆即回转中心。\r\n" +
-                       "角度加点拟合：额外填每个点对应的机械角度，会按角度均匀性加权并给出各点角度偏差。"
+                Text = "填每个角度下同一个特征点的「像素 X/Y」（转一圈采 6~12 点）：\r\n" +
+                       "先按上面选中的 N 点标定矩阵转成机械坐标，再对这些机械点拟合圆 → 圆心即旋转中心（机械坐标）。\r\n" +
+                       "角度加点拟合：额外填每个点对应的转台角度，会校验角度覆盖均匀性并给出各点角度偏差。"
             };
-            root.Controls.Add(lblRotHint, 0, 3);
+            root.Controls.Add(lblRotHint, 0, 4);
 
             page.Controls.Add(root);
             RefreshRotGridColumns();
+        }
+
+        /// <summary>旋转中心用的 N 点标定记录条目。</summary>
+        private sealed class CalibChoice
+        {
+            public readonly string Id;
+            public readonly string Name;
+
+            public CalibChoice(string id, string name) { Id = id ?? ""; Name = name ?? ""; }
+
+            public override string ToString() { return Name; }
+        }
+
+        /// <summary>把该相机的「N 点标定」记录填进下拉（旋转中心靠它把像素转机械）。</summary>
+        private void RefreshRotCalibOptions()
+        {
+            if (cboRotCalib == null) return;
+
+            string keep = "";
+            if (cboRotCalib.SelectedItem is CalibChoice) keep = ((CalibChoice)cboRotCalib.SelectedItem).Id;
+
+            cboRotCalib.Items.Clear();
+
+            if (_settings == null) return;
+
+            int select = -1;
+            List<CalibRecord> list = _settings.RecordsFor(_cameraId);
+            for (int i = 0; i < list.Count; i++)
+            {
+                CalibRecord r = list[i];
+                if (r == null || r.Kind != CalibKind.NPoint) continue;
+
+                string label = r.Name;
+                if (r.HasResult)
+                    label += "  （RMS " + r.RmsError.ToString("F3", CultureInfo.InvariantCulture) + "）";
+
+                cboRotCalib.Items.Add(new CalibChoice(r.Id, label));
+                if (string.Equals(r.Id, keep, StringComparison.Ordinal)) select = cboRotCalib.Items.Count - 1;
+            }
+
+            if (select < 0 && cboRotCalib.Items.Count > 0) select = 0;
+            if (select >= 0) cboRotCalib.SelectedIndex = select;
         }
 
         private void RefreshRotGridColumns()
@@ -438,8 +510,8 @@ namespace VisionPlatform.UI
 
             gridRot.Columns.Clear();
             gridRot.Columns.Add(MakeRotColumn("colRotIndex", "#", 44, true));
-            gridRot.Columns.Add(MakeRotColumn("colRotX", "机械X (mm)", 120, false));
-            gridRot.Columns.Add(MakeRotColumn("colRotY", "机械Y (mm)", 120, false));
+            gridRot.Columns.Add(MakeRotColumn("colRotX", "像素X (px)", 118, false));
+            gridRot.Columns.Add(MakeRotColumn("colRotY", "像素Y (px)", 118, false));
             if (withAngle) gridRot.Columns.Add(MakeRotColumn("colRotA", "角度 (°)", 100, false));
 
             if (gridRot.Rows.Count == 0) gridRot.Rows.Add();
@@ -678,7 +750,39 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            RotationCenterSolver.Result r = RotationCenterSolver.Fit(xs.ToArray(), ys.ToArray(), xs.Count);
+            // ---- 关键：点表里是「像素」，必须先过 N 点标定矩阵变成机械坐标再拟合 ----
+            // （特征点在转台上只转不移动，机械坐标本身是固定的；只有像素坐标在变）
+            CalibChoice choice = cboRotCalib != null ? cboRotCalib.SelectedItem as CalibChoice : null;
+            CalibRecord npt = choice != null && _settings != null ? _settings.Find(choice.Id) : null;
+            if (npt == null && _settings != null)
+            {
+                List<CalibRecord> all = _settings.RecordsFor(_cameraId);
+                for (int i = 0; i < all.Count; i++)
+                {
+                    CalibRecord c = all[i];
+                    if (c != null && c.Kind == CalibKind.NPoint && c.HasResult) { npt = c; break; }
+                }
+            }
+
+            if (npt == null || npt.Affine == null || npt.Affine.Length < 6)
+            {
+                txtResultR.Text = "旋转中心需要一条已算好的「N 点标定」记录：\r\n" +
+                                  "它会把你填的像素坐标换算成机械坐标，再拟合圆心。\r\n" +
+                                  "请先在「N 点标定」页做一次 N 点标定，然后回到本页。";
+                SetResultPage(2);
+                return;
+            }
+
+            double[] aff = npt.Affine;
+            var mxs = new List<double>(xs.Count);
+            var mys = new List<double>(xs.Count);
+            for (int i = 0; i < xs.Count; i++)
+            {
+                mxs.Add(aff[0] * xs[i] + aff[1] * ys[i] + aff[4]);
+                mys.Add(aff[2] * xs[i] + aff[3] * ys[i] + aff[5]);
+            }
+
+            RotationCenterSolver.Result r = RotationCenterSolver.Fit(mxs.ToArray(), mys.ToArray(), mxs.Count);
             if (!r.Success)
             {
                 txtResultR.Text = "旋转中心计算失败：" + r.Message;
@@ -709,7 +813,7 @@ namespace VisionPlatform.UI
                     for (int i = 0; i < valid.Count; i++)
                     {
                         int idx = valid[i];
-                        double measured = Math.Atan2(ys[idx] - r.CenterY, xs[idx] - r.CenterX) * 180.0 / Math.PI;
+                        double measured = Math.Atan2(mys[idx] - r.CenterY, mxs[idx] - r.CenterX) * 180.0 / Math.PI;
                         double diff = measured - angs[idx];
                         while (diff > 180) diff -= 360;
                         while (diff < -180) diff += 360;
@@ -759,6 +863,7 @@ namespace VisionPlatform.UI
             string method = withAngle ? "角度加点拟合" : "多点拟合（纯几何圆）";
             string report =
                 "旋转中心 · " + method + Environment.NewLine +
+                "换算用标定：" + npt.Name + "（RMS " + npt.RmsError.ToString("F4") + "）" + Environment.NewLine +
                 "───────────────" + Environment.NewLine +
                 "圆心 X = " + r.CenterX.ToString("F4") + Environment.NewLine +
                 "圆心 Y = " + r.CenterY.ToString("F4") + Environment.NewLine +
