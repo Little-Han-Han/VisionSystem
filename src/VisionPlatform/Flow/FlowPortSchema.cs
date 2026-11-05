@@ -412,6 +412,7 @@ namespace VisionPlatform.Flow
                 });
 
             // ---- 统一坐标输出：这些节点的 X/Y/R 可以直接接到「标定转换」 ----
+            EnsureCoordOutput(FlowNodeType.PositionCorrect, "修正位姿");
             EnsureCoordOutput(FlowNodeType.ShapeMatch,    "匹配中心");
             EnsureCoordOutput(FlowNodeType.TemplateMatch, "匹配中心");
             EnsureCoordOutput(FlowNodeType.Blob,          "区域中心");

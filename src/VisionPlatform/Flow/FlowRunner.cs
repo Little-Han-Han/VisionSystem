@@ -2706,6 +2706,24 @@ namespace VisionPlatform.Flow
             // 覆盖式写入（链内多个位置修正节点以最后一个为准，不累加）
             s.Transform.Set(rx, ry, ra, dx, dy, dAngle, dScale);
 
+            // 【必须写】位置修正原来只往 Summary 里塞一句话，Metrics/Outputs 全是空的：
+            // 结果① 标定转换的参数面板拿不到坐标（一直显示 0,0 或不更新）；
+            // 结果② 下游「结果输出」「发送数据」也引用不到修正位姿。
+            // 这里把修正后的实际位置与偏移量都作为正式输出交出去。
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = curX;
+            p.Metrics.TopCy = curY;
+            p.Metrics.AngleDeg = curA;
+
+            p.Outputs.Add(new PortValue("X", "X", FlowPortKind.Number, curX));
+            p.Outputs.Add(new PortValue("Y", "Y", FlowPortKind.Number, curY));
+            p.Outputs.Add(new PortValue("R", "R", FlowPortKind.Number, curA));
+            p.Outputs.Add(new PortValue("dX", "偏移X", FlowPortKind.Number, dx));
+            p.Outputs.Add(new PortValue("dY", "偏移Y", FlowPortKind.Number, dy));
+            p.Outputs.Add(new PortValue("dAngle", "角度偏差", FlowPortKind.Angle, dAngle));
+            p.Outputs.Add(new PortValue("RefX", "基准X", FlowPortKind.Number, rx));
+            p.Outputs.Add(new PortValue("RefY", "基准Y", FlowPortKind.Number, ry));
+
             // 可视化：**两个**坐标系 + 一条偏差箭头
             //   淡青 = 基准（示教时的位置）
             //   亮橙 = 实测（本帧工件的位置）
