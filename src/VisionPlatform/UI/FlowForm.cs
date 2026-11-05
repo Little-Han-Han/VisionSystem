@@ -85,6 +85,20 @@ namespace VisionPlatform.UI
         {
             InitializeComponent();
 
+            // 参数面板取「上游实时坐标」的通道：按当前流程的 Coord 连线找上游节点的上次运行坐标
+            NodeParamPanel.RuntimeCoordProvider = delegate(FlowNode n)
+            {
+                FlowDefinition f = CurrentFlow;
+                if (f == null || n == null) return null;
+
+                List<FlowLink> links = f.FindLinksTo(n.Id, "Coord");
+                if (links == null || links.Count == 0) return null;
+
+                System.Drawing.PointF p;
+                if (_lastCoords.TryGetValue(links[links.Count - 1].FromNodeId, out p)) return p;
+                return null;
+            };
+
             // 工具箱改 TreeView 后拖拽走 ItemDrag：分类节点 Tag=null 不可拖，
             // 仍只传 FlowModuleInfo.Key 字符串，FlowCanvasControl.OnDragDrop 零改动。
             treeModules.ItemDrag += OnModuleItemDrag;
@@ -584,6 +598,10 @@ namespace VisionPlatform.UI
         #endregion
 
         #region 流程列表与画布
+
+        /// <summary>上次运行各节点输出的坐标（nodeId → 像素坐标），供参数面板实时显示"上游传进来的值"。</summary>
+        private readonly Dictionary<string, System.Drawing.PointF> _lastCoords =
+            new Dictionary<string, System.Drawing.PointF>(StringComparer.Ordinal);
 
         private FlowDefinition CurrentFlow
         {
@@ -2430,6 +2448,9 @@ namespace VisionPlatform.UI
         private void OnControllerProgress(object sender, FlowProgressEventArgs e)
         {
             FlowProgressSnapshot snap = e != null ? e.Snapshot : null;
+
+            if (snap != null && !double.IsNaN(snap.Cx) && !double.IsNaN(snap.Cy))
+                _lastCoords[snap.NodeId] = new System.Drawing.PointF((float)snap.Cx, (float)snap.Cy);
             if (snap == null) return;
             if (IsDisposed || !IsHandleCreated) return;
 

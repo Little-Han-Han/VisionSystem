@@ -37,6 +37,12 @@ namespace VisionPlatform.UI
         private Control _banner;
 
         private FlowNode _node;
+
+        /// <summary>
+        /// 运行时坐标来源：由流程窗体注入，参数面板据此把「坐标 X/Y」显示成上游真正传进来的值。
+        /// <para>没有连线/没跑过时返回 null，输入框回落到参数里存的定点。</para>
+        /// </summary>
+        public static Func<FlowNode, System.Drawing.PointF?> RuntimeCoordProvider;
         private NodeParamTable _table;
         private bool _updating;
 
@@ -100,6 +106,9 @@ namespace VisionPlatform.UI
 
             Build(table);
             LoadValues(node);
+
+            // 有上游坐标连线时，把 X/Y 显示成实际传入值（必须在 LoadValues 之后，否则又被参数覆盖）
+            ApplyRuntimeCoord();
 
             body.Visible = true;
             empty.Visible = false;
@@ -467,6 +476,43 @@ namespace VisionPlatform.UI
         /// </para>
         /// <para>tooltip 换成禁用原因（而不是原来的 Hint）：用户最想知道的是"为什么不能改、什么时候能改"。</para>
         /// </summary>
+        /// <summary>
+        /// 标定转换节点：如果「坐标」输入端子接上了上游，把 X/Y 两个数值框改成**只读并显示实际值**，
+        /// 而不是一直显示参数里存的 0。用户反馈"输入一直是 0,0"就是这个原因。
+        /// </summary>
+        private void ApplyRuntimeCoord()
+        {
+            if (RuntimeCoordProvider == null || _node == null) return;
+
+            FlowNodeType type;
+            if (!_node.TryGetType(out type) || type != FlowNodeType.CalibTransform) return;
+
+            System.Drawing.PointF? coord = RuntimeCoordProvider(_node);
+            if (!coord.HasValue) return;
+
+            for (int i = 0; i < _inputs.Count; i++)
+            {
+                var num = _inputs[i] as NumericUpDown;
+                if (num == null) continue;
+
+                var f = num.Tag as NodeParamField;
+                if (f == null) continue;
+
+                double value;
+                if (string.Equals(f.Key, "SourceX", StringComparison.Ordinal)) value = coord.Value.X;
+                else if (string.Equals(f.Key, "SourceY", StringComparison.Ordinal)) value = coord.Value.Y;
+                else continue;
+
+                decimal v = (decimal)value;
+                if (v < num.Minimum) v = num.Minimum;
+                if (v > num.Maximum) v = num.Maximum;
+                num.Value = v;
+
+                num.Enabled = false;   // 用 Enabled=false 而不是 ReadOnly：ReadOnly 挡不住上下箭头
+                toolTip.SetToolTip(num, "运行时取上游连线传入的值（不受参数里填的数影响）");
+            }
+        }
+
         private void ApplyDisabled(Control control, NodeParamField f)
         {
             if (control == null || f == null) return;

@@ -58,6 +58,12 @@ namespace VisionPlatform.Flow
         /// </summary>
         public bool KeepFrameForUi;
 
+        /// <summary>节点输出的主坐标（像素）。标定转换的参数面板据此实时显示"上游传进来的值"。</summary>
+        public double Cx = double.NaN;
+
+        /// <summary>同上，Y。</summary>
+        public double Cy = double.NaN;
+
         /// <summary>该节点自身产出的叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes = new List<IGeometryShape>();
 
@@ -764,6 +770,12 @@ namespace VisionPlatform.Flow
             snap.Type = ResolveNodeType(s, p.NodeId);
             snap.ElapsedMs = p.ElapsedMs;
             snap.Summary = p.Summary ?? "";
+
+            if (p.Metrics != null)
+            {
+                snap.Cx = p.Metrics.TopCx;
+                snap.Cy = p.Metrics.TopCy;
+            }
             snap.Fps = fps;
             snap.AvgCycleMs = avgMs;
 
