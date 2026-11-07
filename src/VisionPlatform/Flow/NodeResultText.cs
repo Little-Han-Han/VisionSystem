@@ -132,6 +132,25 @@ namespace VisionPlatform.Flow
                     return string.Format(CultureInfo.InvariantCulture, "{0} 个{1}",
                         m.TargetCount, Num(" · {0:0.00}", m.TopScore));
 
+                // ---- 本期新增的测量类：卡片上只放"一个数"，细节留给结果区摘要 ----
+                case FlowNodeType.EdgePair:
+                    return Trim(Num("宽 {0:0.##} px", m.Value)
+                                + (m.TargetCount > 0
+                                    ? " · " + m.TargetCount.ToString(CultureInfo.InvariantCulture) + " 对"
+                                    : ""));
+
+                case FlowNodeType.PointPointMeasure:
+                    return Num("距离 {0:0.##} px", m.Value);
+
+                case FlowNodeType.PointLineMeasure:
+                    return Num("垂距 {0:0.##} px", m.Value);
+
+                case FlowNodeType.LineLineMeasure:
+                    return Trim(Num("夹角 {0:0.##}°", m.AngleDeg) + Num(" · 间距 {0:0.##}", m.Value));
+
+                case FlowNodeType.LineIntersect:
+                    return Trim("交点" + Point(m.TopCx, m.TopCy));
+
                 default:
                     return "";
             }
@@ -169,6 +188,12 @@ namespace VisionPlatform.Flow
         {
             if (double.IsNaN(value) || double.IsInfinity(value)) return "";
             return string.Format(CultureInfo.InvariantCulture, format, value);
+        }
+
+        /// <summary>拼出来的短句去掉两端空白（可选片段为空时会留下前导空格）。</summary>
+        private static string Trim(string text)
+        {
+            return string.IsNullOrEmpty(text) ? "" : text.Trim();
         }
 
         private static string Point(double x, double y)

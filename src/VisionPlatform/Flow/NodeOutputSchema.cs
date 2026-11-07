@@ -67,6 +67,18 @@ namespace VisionPlatform.Flow
             return fallback;
         }
 
+        /// <summary>把坐标类值格式化成 <c>(x, y)</c>；不是坐标时退回原值的字符串。</summary>
+        private string AsPointText()
+        {
+            if (Raw is PointF)
+            {
+                var p = (PointF)Raw;
+                return "(" + p.X.ToString("F1", CultureInfo.InvariantCulture)
+                     + ", " + p.Y.ToString("F1", CultureInfo.InvariantCulture) + ")";
+            }
+            return Convert.ToString(Raw, CultureInfo.InvariantCulture);
+        }
+
         /// <summary>按类型格式化：角度 12.34°、坐标 (320.0, 240.0)、布尔 OK/NG。</summary>
         public string Format()
         {
@@ -99,6 +111,15 @@ namespace VisionPlatform.Flow
 
                 case FlowPortKind.Bool:
                     return AsBool(false) ? "OK" : "NG";
+
+                case FlowPortKind.Pose:
+                    return AsPointText();
+
+                case FlowPortKind.Geometry:
+                    {
+                        var g = Raw as FlowGeometryValue;
+                        return g != null ? g.ToString() : Convert.ToString(Raw, CultureInfo.InvariantCulture);
+                    }
 
                 case FlowPortKind.Number:
                     {

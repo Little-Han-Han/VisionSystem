@@ -1153,23 +1153,42 @@ namespace VisionPlatform.UI
                         result.Add(DrawSpec.MakeRect(label, c[0], c[1], c[2], c[3]));
                 }
 
-                // 直线卡尺：扫描线段 X1 / Y1 / X2 / Y2
-                if (f.Key == "X1" && HasKey(table, "Y1") && HasKey(table, "X2") && HasKey(table, "Y2")
-                    && !result.Exists(x => x.Kind == DrawShapeKind.Line))
+                // 直线卡尺：扫描线段 X1 / Y1 / X2 / Y2（含带前缀的多组，如交点卡尺的 Line1X1 / Line2X1）
+                if (f.Key.EndsWith("X1", StringComparison.Ordinal))
                 {
-                    result.Add(DrawSpec.MakeLine(string.IsNullOrEmpty(groupTitle) ? "扫描线段" : groupTitle));
+                    string prefix = f.Key.Substring(0, f.Key.Length - 2);
+                    if (HasKey(table, prefix + "Y1") && HasKey(table, prefix + "X2") && HasKey(table, prefix + "Y2")
+                        && !result.Exists(x => string.Equals(x.PrimaryKey, f.Key, StringComparison.Ordinal)))
+                    {
+                        result.Add(DrawSpec.MakeLine(
+                            string.IsNullOrEmpty(groupTitle) ? "扫描线段" : groupTitle, prefix));
+                    }
                 }
 
-                // 圆卡尺：环形 ROI Cx / Cy / InnerRadius / OuterRadius
-                if (f.Key == "Cx" && HasKey(table, "Cy") && HasKey(table, "InnerRadius") && HasKey(table, "OuterRadius")
-                    && !result.Exists(x => x.Kind == DrawShapeKind.Ring))
+                // 圆卡尺：环形 ROI Cx / Cy / InnerRadius / OuterRadius（同样支持前缀）
+                if (f.Key.EndsWith("Cx", StringComparison.Ordinal))
                 {
-                    result.Add(DrawSpec.MakeRing(string.IsNullOrEmpty(groupTitle) ? "环形 ROI" : groupTitle));
+                    string prefix = f.Key.Substring(0, f.Key.Length - 2);
+                    if (HasKey(table, prefix + "Cy") && HasKey(table, prefix + "InnerRadius")
+                        && HasKey(table, prefix + "OuterRadius")
+                        && !result.Exists(x => string.Equals(x.PrimaryKey, f.Key, StringComparison.Ordinal)))
+                    {
+                        result.Add(DrawSpec.MakeRing(
+                            string.IsNullOrEmpty(groupTitle) ? "环形 ROI" : groupTitle, prefix));
+                    }
                 }
             }
 
-            result.Sort((a, b) => SpecOrder(a).CompareTo(SpecOrder(b)));
-            return result;
+            // 稳定排序：List.Sort 不稳定，同 Kind 的多组（两条扫描线）会被打乱，
+            // 于是"菜单里第 1 项"和"用户以为的第 1 项"可能不是同一组。这里按序号搬运。
+            // 上限 9 = SpecOrder 的 default 值，超出范围的项不会被漏掉。
+            var ordered = new List<DrawSpec>(result.Count);
+            for (int ord = 0; ord <= 9; ord++)
+            {
+                foreach (DrawSpec s in result)
+                    if (SpecOrder(s) == ord) ordered.Add(s);
+            }
+            return ordered.Count == result.Count ? ordered : result;
         }
 
         /// <summary>几何组在菜单中的优先级（越小越靠前）。</summary>
@@ -1319,6 +1338,45 @@ namespace VisionPlatform.UI
                 flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
                     "卡尺 {0} 个 · 投影 {1:0.#}px · 宽度 {2:0.#}px（未运行：示意布局）",
                     count, len, Math.Max(1.0, hw * 2)));
+                return;
+            }
+
+            // 边缘对：与直线卡尺同一套布局（扫描线 + 每格投影窗），只是提示文案不同
+            if (type == FlowNodeType.EdgePair)
+            {
+                int count = node.GetInt("CaliperCount", 10);
+                double len = node.GetDouble("ProjectionLength", 30);
+                double hw = node.GetDouble("FilterHalfWidth", 2);
+
+                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutLine(
+                    node.GetDouble("X1", 100), node.GetDouble("Y1", 100),
+                    node.GetDouble("X2", 300), node.GetDouble("Y2", 100),
+                    count, len, hw);
+
+                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
+                    "边缘对：卡尺 {0} 个 · 投影 {1:0.#}px（投影长度要大于被测线宽）", count, len));
+                return;
+            }
+
+            // 交点卡尺：两组扫描线一起画，用户一眼能看出两条线是否交叉在视野内
+            if (type == FlowNodeType.LineIntersect)
+            {
+                var shapes = new List<IGeometryShape>();
+                shapes.AddRange(FlowShapes.CaliperLayoutLine(
+                    node.GetDouble("Line1X1", 100), node.GetDouble("Line1Y1", 100),
+                    node.GetDouble("Line1X2", 300), node.GetDouble("Line1Y2", 100),
+                    node.GetInt("Line1CaliperCount", 10),
+                    node.GetDouble("Line1ProjectionLength", 20),
+                    node.GetDouble("FilterHalfWidth", 2)));
+                shapes.AddRange(FlowShapes.CaliperLayoutLine(
+                    node.GetDouble("Line2X1", 200), node.GetDouble("Line2Y1", 50),
+                    node.GetDouble("Line2X2", 200), node.GetDouble("Line2Y2", 250),
+                    node.GetInt("Line2CaliperCount", 10),
+                    node.GetDouble("Line2ProjectionLength", 20),
+                    node.GetDouble("FilterHalfWidth", 2)));
+
+                flowPreview.ShowNodeLayout(shapes,
+                    "交点卡尺：两组扫描线（已接「直线1 / 直线2」端子的一侧不用这里的参数）");
                 return;
             }
 

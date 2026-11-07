@@ -146,6 +146,9 @@ namespace VisionPlatform.Flow
                     Add(list, "SourceY", "0");
                     Add(list, "ApplyRotation", "0");  // 1 = 再把结果绕旋转中心转 RotateAngle 度
                     Add(list, "RotateAngle", "0");
+                    // 距离换算比例来源：Calib = 由 N 点标定的尺度项推导；Manual = 手填 mm/px
+                    Add(list, "ScaleSource", "Calib");
+                    Add(list, "MmPerPx", "0");        // 0 = 未知（此时距离原样按像素输出）
                     break;
 
                 case FlowNodeType.DistortionCorrect:
@@ -376,6 +379,75 @@ namespace VisionPlatform.Flow
                     // 未连接时自动连接一次
                     Add(list, "AutoConnect", "1");
                     break;
+
+                // ================= 本期新增：交点卡尺 =================
+                // 两条扫描线各自是"直线卡尺"的 ROI；Line1/Line2 端子连了上游时，对应那组参数不生效。
+                case FlowNodeType.LineIntersect:
+                    Add(list, "Line1X1", "100");
+                    Add(list, "Line1Y1", "100");
+                    Add(list, "Line1X2", "300");
+                    Add(list, "Line1Y2", "100");
+                    Add(list, "Line1CaliperCount", "10");
+                    Add(list, "Line1ProjectionLength", "20");
+                    Add(list, "Line1Polarity", "0");
+                    Add(list, "Line1EdgeThreshold", "30");
+
+                    Add(list, "Line2X1", "200");
+                    Add(list, "Line2Y1", "50");
+                    Add(list, "Line2X2", "200");
+                    Add(list, "Line2Y2", "250");
+                    Add(list, "Line2CaliperCount", "10");
+                    Add(list, "Line2ProjectionLength", "20");
+                    Add(list, "Line2Polarity", "0");
+                    Add(list, "Line2EdgeThreshold", "30");
+
+                    Add(list, "FilterHalfWidth", "2");
+                    Add(list, "SelectMode", "0");
+                    Add(list, "MinEdgeCount", "3");
+                    Add(list, "RejectOutliers", "1");
+                    Add(list, "OutlierTolerance", "2");
+                    Add(list, "MaxRms", "0");
+                    break;
+
+                // ================= 本期新增：边缘对查找 =================
+                case FlowNodeType.EdgePair:
+                    Add(list, "X1", "100");
+                    Add(list, "Y1", "100");
+                    Add(list, "X2", "300");
+                    Add(list, "Y2", "100");
+                    Add(list, "CaliperCount", "10");
+                    Add(list, "ProjectionLength", "30");
+                    Add(list, "EdgeThreshold", "20");
+                    Add(list, "FilterHalfWidth", "2");
+                    Add(list, "PairPolarity", "0");     // 0=亮线 1=暗线
+                    Add(list, "MinWidth", "0");
+                    Add(list, "MaxWidth", "0");
+                    Add(list, "SelectMode", "0");       // 0=最强 1=最宽 2=最窄 3=最前
+                    Add(list, "ExpectMin", "0");
+                    Add(list, "ExpectMax", "0");
+                    Add(list, "WidthMin", "0");
+                    Add(list, "WidthMax", "0");
+                    break;
+
+                // ================= 本期新增：点点 / 点直线 / 线线测量 =================
+                // 三者都只有"判定上下限"一类参数：几何来源走端子，不在参数里重复配。
+                case FlowNodeType.PointPointMeasure:
+                    Add(list, "DistMin", "0");
+                    Add(list, "DistMax", "0");
+                    break;
+
+                case FlowNodeType.PointLineMeasure:
+                    Add(list, "DistMin", "0");
+                    Add(list, "DistMax", "0");
+                    break;
+
+                case FlowNodeType.LineLineMeasure:
+                    Add(list, "ParallelTol", "0.5");    // 夹角小于该值视为平行（度）
+                    Add(list, "AngleMin", "0");
+                    Add(list, "AngleMax", "0");
+                    Add(list, "DistMin", "0");
+                    Add(list, "DistMax", "0");
+                    break;
             }
 
             return list;
@@ -453,7 +525,7 @@ namespace VisionPlatform.Flow
         /// <summary>深度学习（OpenVINO 推理）：语义分割 / 姿态估计 / 深度估计。与传统算法分开。</summary>
         public const string CatDeepLearning = "DeepLearning";
 
-        /// <summary>全部算法模块，按工具箱显示顺序排列（16 项）。</summary>
+        /// <summary>全部算法模块，按工具箱显示顺序排列（28 项）。</summary>
         public static readonly List<FlowModuleInfo> All = new List<FlowModuleInfo>
         {
             new FlowModuleInfo("ImageSource",      "图像源",          FlowNodeType.ImageSource,      CatAcquisition),
@@ -466,6 +538,12 @@ namespace VisionPlatform.Flow
             new FlowModuleInfo("Blob",             "Blob 分析",       FlowNodeType.Blob,             CatSegmentation),
             new FlowModuleInfo("LineCaliper",      "直线卡尺",        FlowNodeType.LineCaliper,      CatCaliper),
             new FlowModuleInfo("CircleCaliper",    "圆卡尺",          FlowNodeType.CircleCaliper,    CatCaliper),
+            // 本期新增：交点 / 边缘对 / 三种几何测量，全部归入「卡尺与测量」
+            new FlowModuleInfo("LineIntersect",    "交点卡尺",        FlowNodeType.LineIntersect,    CatCaliper),
+            new FlowModuleInfo("EdgePair",         "边缘对查找",      FlowNodeType.EdgePair,         CatCaliper),
+            new FlowModuleInfo("PointPointMeasure","点点测量",        FlowNodeType.PointPointMeasure,CatCaliper),
+            new FlowModuleInfo("PointLineMeasure", "点直线测量",      FlowNodeType.PointLineMeasure, CatCaliper),
+            new FlowModuleInfo("LineLineMeasure",  "线线测量",        FlowNodeType.LineLineMeasure,  CatCaliper),
             new FlowModuleInfo("Sharpness",        "清晰度",          FlowNodeType.Sharpness,        CatImageProcessing),
             new FlowModuleInfo("FitCircle",        "圆拟合",          FlowNodeType.FitCircle,        CatSegmentation),
             new FlowModuleInfo("FitLine",          "直线拟合",        FlowNodeType.FitLine,          CatSegmentation),
@@ -482,9 +560,9 @@ namespace VisionPlatform.Flow
         };
 
         /// <summary>
-        /// 分类目录（7 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
+        /// 分类目录（8 项，顺序 = 工具箱自上而下顺序；每项带该分类下的模块）。
         /// <para>
-        /// 合计 1 + 2 + 4 + 2 + 3 + 3 + 1 = 16，与 <see cref="All"/> 一一对应、无遗漏无重复。
+        /// 合计 1 + 3 + 4 + 7 + 3 + 1 + 5 + 4 = 28，与 <see cref="All"/> 一一对应、无遗漏无重复。
         /// 这是 <see cref="All"/> 的<strong>另一种组织视图</strong>，<see cref="All"/> 本身一字未动
         /// （<c>SmokeParallel</c> 的用例依赖 <see cref="All"/> 的既有顺序）。
         /// </para>

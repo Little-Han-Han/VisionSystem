@@ -90,6 +90,26 @@ namespace VisionPlatform.Flow
 
         /// <summary>畸变矫正：用相机内参去畸变（吃畸变矫正记录）。</summary>
         DistortionCorrect,
+
+        // ===== 本期追加（测量与交点类，同样加在末尾，保证既有序号与字符串不变）=====
+
+        /// <summary>
+        /// 交点卡尺（双直线卡尺找交点）：两条直线卡尺各自找线 → 求延长线交点。
+        /// <para>两条线可来自上游「直线卡尺」的 Geometry 输出，也可由本节点内置的两组扫描线现场找边。</para>
+        /// </summary>
+        LineIntersect,
+
+        /// <summary>边缘对查找：沿扫描线法向一维取样，按极性把「一升一降」配成对，输出线宽。</summary>
+        EdgePair,
+
+        /// <summary>点点测量：两点距离 / 方向角 / 中点。</summary>
+        PointPointMeasure,
+
+        /// <summary>点直线测量：点到直线的垂距 / 垂足。</summary>
+        PointLineMeasure,
+
+        /// <summary>线线测量：两直线夹角 / 交点 / 平行间距。</summary>
+        LineLineMeasure,
 }
 
     /// <summary>

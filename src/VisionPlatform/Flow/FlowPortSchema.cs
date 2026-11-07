@@ -8,7 +8,8 @@ namespace VisionPlatform.Flow
     /// </summary>
     /// <remarks>
     /// <strong>只能在枚举末尾追加</strong>：本枚举只在内存中用于判定，但新增成员会改变既有
-    /// 「类型兼容矩阵」的形状，追加时请同步更新 docs\架构-流程端口化改造.md §4.1。
+    /// 「类型兼容矩阵」的形状，追加时请同步更新 docs\架构\增量架构设计.md §4（端口化改造）
+    /// 与 §7（公共约定：端子模型）。
     /// </remarks>
     public enum FlowPortKind
     {
@@ -103,10 +104,21 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>本端子是否接受来自 <paramref name="source"/> 类型的数据。</summary>
-        /// <remarks>规则：<c>源类型 == 自身类型 || 源为 Any || 自身为 Any</c>。</remarks>
+        /// <remarks>
+        /// 规则：<c>源类型 == 自身类型 || 源为 Any || 自身为 Any</c>。
+        /// <para>
+        /// <strong>唯一例外：点 ↔ 位姿互通</strong>。本库的「统一坐标」约定下，
+        /// 位姿 = 点 + 角度/尺度（<c>Coord</c> 输出就是 Pose），两者在"一个 X/Y 位置"上语义重叠：
+        /// 若判成不兼容，用户把「交点」(Point) 接到「标定转换.坐标」(Pose) 会被拒，
+        /// 只能靠"碰巧同名"的端口才连得上。故允许双向连通，但仍<strong>拒绝</strong>图像 / 数值 / 列表。
+        /// </para>
+        /// </remarks>
         public bool Accepts(FlowPortKind source)
         {
-            return source == Kind || source == FlowPortKind.Any || Kind == FlowPortKind.Any;
+            if (source == Kind || source == FlowPortKind.Any || Kind == FlowPortKind.Any) return true;
+            if (Kind == FlowPortKind.Pose && source == FlowPortKind.Point) return true;
+            if (Kind == FlowPortKind.Point && source == FlowPortKind.Pose) return true;
+            return false;
         }
 
         public override string ToString()
@@ -398,17 +410,120 @@ namespace VisionPlatform.Flow
                     P("Number", "长度", FlowPortKind.Number, false)
                 });
 
-            // ---- 标定转换：吃图像（可选），吐机械坐标 ----
+            // ---- 标定转换：吃坐标 / 距离 / 角度，吐机械坐标 / 机械距离 / 机械角度 ----
+            // 【本版改动】原来只有一个 Coord 输入：像素距离、角度这类"测量结果"根本没有入口，
+            // 现场只能先用脚本算一遍再传，等于绕开了标定。现在把三类量都摆成端子：
+            //   Coord    = 点（X/Y）→ 走 6 参数仿射 / 旋转中心
+            //   Distance = 像素距离   → 乘「mm/px」（由 N 点标定的尺度项推导，或手填）
+            //   Angle    = 像素角度   → 叠加标定旋转角（+ 回转角）
+            // 三个输入彼此独立：只接距离也能换算，不接坐标就不输出坐标。
             Register(FlowNodeType.CalibTransform,
                 new List<FlowPortDef>
                 {
                     P("Coord", "坐标", FlowPortKind.Pose, false,
-                      "接模板匹配 / Blob / 圆卡尺 / 圆拟合等输出的 X/Y；不接则用参数里手填的定点坐标")
+                      "接「匹配位姿 / 区域中心 / 圆心 / 交点 / 中点」等 X/Y；不接则用参数里手填的定点坐标"),
+                    P("Distance", "距离", FlowPortKind.Number, false,
+                      "接测量节点的「距离 / 宽度」（像素），按标定比例换算成 mm"),
+                    P("Angle", "角度", FlowPortKind.Angle, false,
+                      "接测量节点的「角度」（像素），叠加标定的旋转角后输出机械角")
                 },
                 new List<FlowPortDef>
                 {
-                    P("Coord", "机械坐标", FlowPortKind.Pose, false,
-                      "输出转换后的机械 X/Y，下游「结果输出」「发送数据」可直接连")
+                    // 【显示名刻意短】四个输出并排排在 180px 宽的卡片下沿，
+                    // 每个只有 ~34px：4 个汉字会被省略号截断（当时就是这么发现的）。
+                    // 语义不靠名字靠 Hint 与摘要，"坐标"就是"机械坐标"。
+                    P("Coord", "坐标", FlowPortKind.Pose, false,
+                      "转换后的机械 X/Y；下游「结果输出」「发送数据」可直接连"),
+                    P("Distance", "距离", FlowPortKind.Number, false,
+                      "像素距离 × 比例（mm）；标定缺尺度时原样输出像素值"),
+                    P("Angle", "角度", FlowPortKind.Angle, false,
+                      "像素角度 + 标定旋转角（+ 回转角）"),
+                    P("Scale", "比例", FlowPortKind.Number, false,
+                      "本次使用的 mm/px（0 = 未标定 / 未填）")
+                });
+
+            // ---- 本期新增：交点卡尺（双直线卡尺找交点）----
+            // 两个 Geometry 输入可选：连了就"用上游直线卡尺的结果求交"，
+            // 没连就用节点内置的两组扫描线现场找边。Image 因此也不必填（纯计算场景没有图也能跑）。
+            Register(FlowNodeType.LineIntersect,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, false,
+                      "内联卡尺要用图；两条直线都由上游 Geometry 提供时可完全不接"),
+                    P("Line1", "直线1", FlowPortKind.Geometry, false,
+                      "接「直线卡尺 / 直线拟合」的 Geometry；不接则用参数里「直线1」的扫描线现场找边"),
+                    P("Line2", "直线2", FlowPortKind.Geometry, false,
+                      "接「直线卡尺 / 直线拟合」的 Geometry；不接则用参数里「直线2」的扫描线现场找边")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Coord", "坐标", FlowPortKind.Pose, false,
+                      "交点 X/Y，可直接接「标定转换.坐标」或其它测量节点"),
+                    P("Intersection", "交点", FlowPortKind.Point, false),
+                    P("Angle", "夹角", FlowPortKind.Angle, false, "两直线夹角（0~90°）"),
+                    P("Rms", "RMS", FlowPortKind.Number, false, "两条线直线度的较大者（上游直线时为 0）")
+                });
+
+            // ---- 本期新增：边缘对查找（线宽）----
+            Register(FlowNodeType.EdgePair,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Width", "宽度", FlowPortKind.Number, false, "所有有效边缘对的对宽均值（像素）"),
+                    P("Count", "对数", FlowPortKind.Number, false),
+                    P("Center", "中心", FlowPortKind.Point, false, "主对（按选对策略）的中点"),
+                    P("Coord", "坐标", FlowPortKind.Pose, false, "主对中点，可直接接「标定转换.坐标」")
+                });
+
+            // ---- 本期新增：点点 / 点直线 / 线线测量 ----
+            // 点类输入端子的 Kind 用 Point：与 Pose（Coord）双向兼容，
+            // 因此「匹配位姿 / 区域中心」这类既有 X/Y 输出可以直接接进来。
+            Register(FlowNodeType.PointPointMeasure,
+                new List<FlowPortDef>
+                {
+                    P("Point1", "点1", FlowPortKind.Point, true, "接坐标输出（Coord / 中心 / 交点…）"),
+                    P("Point2", "点2", FlowPortKind.Point, true, "接坐标输出（Coord / 中心 / 交点…）")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Distance", "距离", FlowPortKind.Number, false, "两点距离（像素）"),
+                    P("Angle", "角度", FlowPortKind.Angle, false, "点1→点2 的方向角（度）"),
+                    P("Dx", "ΔX", FlowPortKind.Number, false),
+                    P("Dy", "ΔY", FlowPortKind.Number, false),
+                    P("Coord", "中点", FlowPortKind.Pose, false, "两点中点，可直接接「标定转换.坐标」")
+                });
+
+            Register(FlowNodeType.PointLineMeasure,
+                new List<FlowPortDef>
+                {
+                    P("Point", "点", FlowPortKind.Point, true),
+                    P("Line", "直线", FlowPortKind.Geometry, true,
+                      "接「直线卡尺 / 直线拟合」的 Geometry")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Distance", "垂距", FlowPortKind.Number, false, "点到直线的垂直距离（像素）"),
+                    P("Foot", "垂足", FlowPortKind.Point, false),
+                    P("Angle", "线角", FlowPortKind.Angle, false, "所测直线的方向角（度）"),
+                    P("Coord", "坐标", FlowPortKind.Pose, false, "垂足 X/Y，可直接接「标定转换.坐标」")
+                });
+
+            Register(FlowNodeType.LineLineMeasure,
+                new List<FlowPortDef>
+                {
+                    P("Line1", "直线1", FlowPortKind.Geometry, true),
+                    P("Line2", "直线2", FlowPortKind.Geometry, true)
+                },
+                new List<FlowPortDef>
+                {
+                    P("Angle", "夹角", FlowPortKind.Angle, false, "两直线夹角（0~90°，平行时为 0）"),
+                    P("Intersection", "交点", FlowPortKind.Point, false, "平行时不输出"),
+                    P("Distance", "间距", FlowPortKind.Number, false, "平行时的线间距（像素）；不平行时不适用"),
+                    P("Coord", "坐标", FlowPortKind.Pose, false,
+                      "交点 X/Y；两条线平行（夹角小于容差）时不输出，此时只有「间距」有效")
                 });
 
             // ---- 统一坐标输出：这些节点的 X/Y/R 可以直接接到「标定转换」 ----
@@ -552,11 +667,15 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>
-        /// 两个端子的类型是否可连。规则：<c>from == to || from == Any || to == Any</c>。
+        /// 两个端子的类型是否可连。规则：<c>from == to || from == Any || to == Any</c>，
+        /// 另加「点 ↔ 位姿互通」这一个例外（与 <see cref="FlowPortDef.Accepts"/> 同规则）。
         /// </summary>
         public static bool IsCompatible(FlowPortKind from, FlowPortKind to)
         {
-            return from == to || from == FlowPortKind.Any || to == FlowPortKind.Any;
+            if (from == to || from == FlowPortKind.Any || to == FlowPortKind.Any) return true;
+            if (to == FlowPortKind.Pose && from == FlowPortKind.Point) return true;
+            if (to == FlowPortKind.Point && from == FlowPortKind.Pose) return true;
+            return false;
         }
 
         /// <summary>连线合法性判定：源输出端子 → 目标输入端子。</summary>

@@ -71,8 +71,14 @@ namespace VisionPlatform.Flow
         /// <summary>变换后的 ROI 轮廓（青，虚线）。</summary>
         public static readonly Color ColorRoi = Color.Cyan;
 
-        /// <summary>拟合圆 / 拟合直线结果（天蓝）。</summary>
+        /// <summary>拟合结果（直线 / 圆）的颜色。</summary>
         public static readonly Color ColorFit = Color.DeepSkyBlue;
+
+        /// <summary>测量连线（点—点、点—垂足）的颜色（青绿）。</summary>
+        public static readonly Color ColorMeasure = Color.FromArgb(120, 235, 190);
+
+        /// <summary>边缘对 / 交点标记的颜色（橙粉，与卡尺的洋红、边缘点的黄区分开）。</summary>
+        public static readonly Color ColorEdgePair = Color.FromArgb(255, 150, 120);
 
         /// <summary>字符识别字符框（橙色）。</summary>
         public static readonly Color ColorOcr = Color.FromArgb(255, 152, 0);

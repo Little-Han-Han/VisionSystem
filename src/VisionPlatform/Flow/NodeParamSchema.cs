@@ -335,6 +335,11 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.Blob:            return Blob();
                 case FlowNodeType.LineCaliper:     return LineCaliper();
                 case FlowNodeType.CircleCaliper:   return CircleCaliper();
+                case FlowNodeType.LineIntersect:   return LineIntersect();
+                case FlowNodeType.EdgePair:        return EdgePair();
+                case FlowNodeType.PointPointMeasure: return PointPointMeasure();
+                case FlowNodeType.PointLineMeasure:  return PointLineMeasure();
+                case FlowNodeType.LineLineMeasure:   return LineLineMeasure();
                 case FlowNodeType.Sharpness:       return Sharpness();
                 case FlowNodeType.CalibTransform:  return CalibTransformSchema();
                 case FlowNodeType.DistortionCorrect: return DistortionCorrectSchema();
@@ -735,6 +740,147 @@ namespace VisionPlatform.Flow
             return t;
         }
 
+        /// <summary>
+        /// 交点卡尺：两组扫描线各找一条直线，再求延长线交点。
+        /// <para>
+        /// 两个 Geometry 端子（Line1 / Line2）<strong>优先</strong>：连了就直读上游直线，
+        /// 对应那一组扫描线参数不生效（面板里仍显示，方便同一节点两种用法随时切换）。
+        /// 未连的那一侧用本组参数内联找边，因此"两条都接上游"时图像都可以不接。
+        /// </para>
+        /// </summary>
+        private static NodeParamTable LineIntersect()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.LineIntersect, Title = "交点卡尺" };
+
+            // 组标题刻意短：面板头部约 10 个字就截断，长括号说明会被吃掉，
+            // 完整规则放在 FooterNote 与端子 Hint 里（"内联"= 未接端子时才用这组扫描线）。
+            t.Fields.Add(Group("直线1（内联）"));
+            AddCaliperLineFields(t, "Line1", 100, 100, 300, 100);
+
+            t.Fields.Add(Group("直线2（内联）"));
+            AddCaliperLineFields(t, "Line2", 200, 50, 200, 250);
+
+            t.Fields.Add(Group("公共找边参数"));
+            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2", "一维均值滤波，抗噪", true));
+            t.Fields.Add(Enum("SelectMode", "选边策略", "0",
+                new[] { "最强", "最前", "最后" }, new[] { "0", "1", "2" }));
+            t.Fields.Add(Int("MinEdgeCount", "最少边缘点", 0, 200, "3"));
+            t.Fields.Add(Bool("RejectOutliers", "剔除离群点", "1", "首轮拟合后按残差剔除一轮"));
+            t.Fields.Add(Dbl("OutlierTolerance", "剔除阈值(px)", 0, 100, 2, 0.5m, "2", "", true));
+
+            t.Fields.Add(Group("判定（0 = 不限）"));
+            t.Fields.Add(Dbl("MaxRms", "直线度上限", 0, 1000, 2, 0.5m, "0", "两条线取较大者"));
+
+            t.Fields.Add(Note("输出：交点坐标（接标定转换）· 交点 · 夹角 · 直线度"));
+            t.FooterNote = "「直线1 / 直线2」端子连上游「直线卡尺 / 直线拟合」时优先用上游直线；"
+                         + "未连的一侧用本组扫描线现场找边（此时必须接图像）。";
+            return t;
+        }
+
+        /// <summary>给"复合卡尺"节点补一组扫描线参数（键名 = <paramref name="prefix"/> + X1/Y1/X2/Y2…）。</summary>
+        private static void AddCaliperLineFields(NodeParamTable t, string prefix,
+                                                 int x1, int y1, int x2, int y2)
+        {
+            t.Fields.Add(Dbl(prefix + "X1", "起点 X", -100000, 100000, 1, 1m,
+                x1.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            t.Fields.Add(Dbl(prefix + "Y1", "起点 Y", -100000, 100000, 1, 1m,
+                y1.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            t.Fields.Add(Dbl(prefix + "X2", "终点 X", -100000, 100000, 1, 1m,
+                x2.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            t.Fields.Add(Dbl(prefix + "Y2", "终点 Y", -100000, 100000, 1, 1m,
+                y2.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            t.Fields.Add(Int(prefix + "CaliperCount", "卡尺个数", 1, 200, "10"));
+            t.Fields.Add(Dbl(prefix + "ProjectionLength", "投影长度(px)", 1, 500, 1, 1m, "20"));
+            t.Fields.Add(Enum(prefix + "Polarity", "极性", "0",
+                new[] { "Any（不过滤）", "由暗到亮", "由亮到暗" }, new[] { "0", "1", "2" }));
+            t.Fields.Add(Dbl(prefix + "EdgeThreshold", "边缘阈值", 0, 255, 1, 1m, "30", "灰度跳变幅值"));
+        }
+
+        /// <summary>边缘对查找（线宽）：沿扫描线法向找"一升一降"两条边，测对宽。</summary>
+        private static NodeParamTable EdgePair()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.EdgePair, Title = "边缘对查找" };
+
+            t.Fields.Add(Group("扫描线段（图像坐标）"));
+            t.Fields.Add(Dbl("X1", "起点 X", -100000, 100000, 1, 1m, "100"));
+            t.Fields.Add(Dbl("Y1", "起点 Y", -100000, 100000, 1, 1m, "100"));
+            t.Fields.Add(Dbl("X2", "终点 X", -100000, 100000, 1, 1m, "300"));
+            t.Fields.Add(Dbl("Y2", "终点 Y", -100000, 100000, 1, 1m, "100"));
+
+            t.Fields.Add(Group("找边"));
+            t.Fields.Add(Int("CaliperCount", "卡尺个数", 1, 200, "10"));
+            t.Fields.Add(Dbl("ProjectionLength", "投影长度(px)", 2, 2000, 1, 1m, "30",
+                "每格沿法向的取样长度，要大于被测线宽"));
+            t.Fields.Add(Dbl("EdgeThreshold", "边缘阈值", 0, 255, 1, 1m, "20", "梯度幅值（灰度/px）"));
+            t.Fields.Add(Int("FilterHalfWidth", "滤波半宽", 0, 20, "2", "一维均值滤波，抗噪", true));
+            t.Fields.Add(Enum("PairPolarity", "极性", "0",
+                new[] { "亮线（暗→亮→暗）", "暗线（亮→暗→亮）" }, new[] { "0", "1" }));
+
+            t.Fields.Add(Group("宽度过滤与选对（0 = 不限）"));
+            t.Fields.Add(Dbl("MinWidth", "宽度下限(px)", 0, 100000, 2, 0.5m, "0", "逐对过滤"));
+            t.Fields.Add(Dbl("MaxWidth", "宽度上限(px)", 0, 100000, 2, 0.5m, "0", "逐对过滤"));
+            t.Fields.Add(Enum("SelectMode", "选对策略", "0",
+                new[] { "最强", "最宽", "最窄", "最前" }, new[] { "0", "1", "2", "3" },
+                "决定「中心 / 坐标」取哪一对；「宽度」始终是全部有效对的均值"));
+
+            t.Fields.Add(Group("判定（0 = 不限）"));
+            t.Fields.Add(Int("ExpectMin", "对数下限", 0, 1000, "0"));
+            t.Fields.Add(Int("ExpectMax", "对数上限", 0, 1000, "0"));
+            t.Fields.Add(Dbl("WidthMin", "宽度下限(判定)", 0, 100000, 2, 0.5m, "0", "对均值的判定，与上面的逐对过滤不同"));
+            t.Fields.Add(Dbl("WidthMax", "宽度上限(判定)", 0, 100000, 2, 0.5m, "0"));
+
+            t.Fields.Add(Note("输出：宽度（均值）· 对数 · 中心 · 坐标（可接标定转换）"));
+            t.FooterNote = "对宽沿「扫描线法线」方向测量；扫描线应与被测线大致垂直。";
+            return t;
+        }
+
+        /// <summary>点点测量：两个坐标端子 → 距离 / 方向角 / ΔX / ΔY / 中点。</summary>
+        private static NodeParamTable PointPointMeasure()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.PointPointMeasure, Title = "点点测量" };
+
+            t.Fields.Add(Group("判定（0 = 不限）"));
+            t.Fields.Add(Dbl("DistMin", "距离下限(px)", 0, 1000000, 2, 0.5m, "0"));
+            t.Fields.Add(Dbl("DistMax", "距离上限(px)", 0, 1000000, 2, 0.5m, "0"));
+
+            t.Fields.Add(Note("输入：点1 / 点2 两个坐标端子（可接匹配中心 / Blob 中心 / 交点 / 中点）"));
+            t.Fields.Add(Note("输出：距离 · 角度 · ΔX · ΔY · 中点（中点可接标定转换）"));
+            return t;
+        }
+
+        /// <summary>点直线测量：点到直线的垂距 / 垂足。</summary>
+        private static NodeParamTable PointLineMeasure()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.PointLineMeasure, Title = "点直线测量" };
+
+            t.Fields.Add(Group("判定（0 = 不限）"));
+            t.Fields.Add(Dbl("DistMin", "垂距下限(px)", 0, 1000000, 2, 0.5m, "0"));
+            t.Fields.Add(Dbl("DistMax", "垂距上限(px)", 0, 1000000, 2, 0.5m, "0"));
+
+            t.Fields.Add(Note("输入：点（坐标端子）+ 直线（几何端子，接「直线卡尺 / 直线拟合」）"));
+            t.Fields.Add(Note("输出：垂距 · 垂足 · 线角 · 垂足坐标（可接标定转换）"));
+            return t;
+        }
+
+        /// <summary>线线测量：两直线夹角 / 交点 / 平行间距。</summary>
+        private static NodeParamTable LineLineMeasure()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.LineLineMeasure, Title = "线线测量" };
+
+            t.Fields.Add(Group("平行判定"));
+            t.Fields.Add(Dbl("ParallelTol", "平行容差(°)", 0, 90, 2, 0.1m, "0.5",
+                "夹角小于该值即视为平行：只输出「间距」，不输出交点"));
+
+            t.Fields.Add(Group("判定（0 = 不限）"));
+            t.Fields.Add(Dbl("AngleMin", "夹角下限(°)", 0, 90, 2, 0.5m, "0"));
+            t.Fields.Add(Dbl("AngleMax", "夹角上限(°)", 0, 90, 2, 0.5m, "0"));
+            t.Fields.Add(Dbl("DistMin", "间距下限(px)", 0, 1000000, 2, 0.5m, "0", "仅平行时有意义"));
+            t.Fields.Add(Dbl("DistMax", "间距上限(px)", 0, 1000000, 2, 0.5m, "0"));
+
+            t.Fields.Add(Note("输入：两条直线（几何端子）　输出：夹角 · 交点 · 间距 · 交点坐标"));
+            return t;
+        }
+
         /// <summary>标定转换：像素 → 机械坐标。</summary>
         private static NodeParamTable CalibTransformSchema()
         {
@@ -762,17 +908,25 @@ namespace VisionPlatform.Flow
                 Hint = "只列「旋转中心」记录；下拉项末尾带该记录的圆心/半径/RMS，选中即用"
             });
 
-            t.Fields.Add(Group("输入（像素坐标）"));
+            t.Fields.Add(Group("输入（未接端子时用这里的定点）"));
             t.Fields.Add(Dbl("SourceX", "坐标 X (px)", -100000m, 100000m, 3, 1m, "0",
-                "要转换的像素点；接上游测量节点时用它输出的坐标"));
+                "要转换的像素点；接了「坐标」端子时以端子为准，本项置灰"));
             t.Fields.Add(Dbl("SourceY", "坐标 Y (px)", -100000m, 100000m, 3, 1m, "0", ""));
+
+            t.Fields.Add(Group("距离换算（像素 → mm）"));
+            t.Fields.Add(Enum("ScaleSource", "比例来源", "Calib",
+                new[] { "由标定推导", "手填 mm/px" }, new[] { "Calib", "Manual" },
+                "由标定推导 = 取 N 点标定尺度项（√|det A|）；手填 = 用下面的数值"));
+            t.Fields.Add(Dbl("MmPerPx", "比例 (mm/px)", 0m, 10000m, 6, 0.0001m, "0",
+                "仅「手填」时生效；0 = 未知（此时「机械距离」按原像素值输出，摘要会注明未标定）", true));
 
             t.Fields.Add(Group("旋转（仅旋转中心类型生效）"));
             t.Fields.Add(Bool("ApplyRotation", "绕回转中心旋转", "0",
                 "勾上则把坐标绕旋转中心转一个角度（模拟工件转位后的位置）"));
             t.Fields.Add(Dbl("RotateAngle", "旋转角 (°)", -360m, 360m, 3, 1m, "0", "逆时针为正"));
 
-            t.Fields.Add(Note("输出：机械坐标写入节点指标的 X/Y（下游结果输出、发送数据可直接引用）"));
+            t.Fields.Add(Note("输入端子：坐标（X/Y）· 距离（px）· 角度（px 方向角）——三者可分别接测量节点"));
+            t.Fields.Add(Note("输出端子：机械坐标 · 机械距离 · 机械角度 · 比例（mm/px）"));
             return t;
         }
 

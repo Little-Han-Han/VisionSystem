@@ -67,6 +67,17 @@ namespace VisionPlatform.Flow
         /// <summary>Blob 最大面积目标的圆度；<c>NaN</c> = 不适用。</summary>
         public double MaxCircularity = double.NaN;
 
+        /// <summary>
+        /// 主测量值（像素）：点点 / 点直线测量的距离、边缘对的宽度、线线测量的间距…
+        /// <c>NaN</c> = 本节点不产出单一测量值。
+        /// <para>
+        /// 【为什么单列一个字段】测量类节点的"结论"就是一个数（距离 / 宽度），
+        /// 塞进 <see cref="TopScore"/> 会把"匹配分数"和"毫米"混成同一个字段，
+        /// 结果区与脚本都会读错语义。
+        /// </para>
+        /// </summary>
+        public double Value = double.NaN;
+
         /// <summary>是否有任何可用判据（全"不适用"则返回 false，文案层据此回落 <c>Summary</c>）。</summary>
         public bool HasAny
         {
@@ -78,6 +89,7 @@ namespace VisionPlatform.Flow
                        || !double.IsNaN(AngleDeg)
                        || Text != null
                        || CharCount >= 0
+                       || !double.IsNaN(Value)
                        || !double.IsNaN(MaxArea);
             }
         }

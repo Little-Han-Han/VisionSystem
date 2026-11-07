@@ -377,7 +377,7 @@ test_images/
 
 # 第三方依赖的二进制运行时
 # OpenCV 的 opencv_world455d.dll 约 122MB，远超 GitHub 单文件 100MB 上限，
-# 因此 bin 下的 DLL 不入库；获取方式见 ThirdParty/README.md。
+# 因此 bin 下的 DLL 不入库；获取方式见根 README.md「快速开始 → 准备 OpenCV 运行时 DLL」。
 # 头文件与 .lib 体积很小（各数 MB），保留在仓库中以便 clone 后直接编译。
 ThirdParty/**/bin/
 ThirdParty/**/*.dll
@@ -393,14 +393,52 @@ ThirdParty/**/*.pdb
 # 日志入库功能会静默失效。依赖仅 KERNEL32 + VC 运行时（后者 OpenCV/OpenVINO 本就要求）。
 !ThirdParty/SQLite/sqlite3.dll
 # ============================================================
-# 测试/冒烟程序（用户要求：不入库，本地保留，确认后自行上传）
-# 注意：VisionSystem.sln 仍引用这三个工程——新机器 clone 后加载解决方案
-# 会提示缺少项目，单独构建 VisionPlatform / VisionAlgo.Native 不受影响。
+# 本机探针（AI 回归用，用户要求不入库）：SmokeAlgo + SmokeUi，
+# 其中 SmokeUi 已合并原 SmokeParallel 的并行/端口化套件。
+# 两个工程都不在 VisionSystem.sln 中，clone 后不会出现「缺少项目」提示；
+# 本机统一用 _build_smoke.bat <Debug|Release> 构建（该脚本同样不入库）。
 # ============================================================
 src/SmokeAlgo/
 src/SmokeUi/
+# 原 SmokeParallel 目录已删除，保留规则防止旧目录残留被误 add
 src/SmokeParallel/
+# VisionSystem.Demo 只在本机保留：已从解决方案与仓库移除，避免 git add -A 回灌
+/src/VisionSystem.Demo/
 /tools/fix_lag.py
 # SmokeAlgo 的 ObjectDetect 用例每次运行都会覆盖写这个诊断文件（模型维度/锚点数），
 # 属测试产物，不该进版本库。
 detect_diag.txt
+
+# ============================================================
+# 测试相关 / 图片素材（用户要求：不上传 GitHub，本地保留）
+# 已经入库的同名文件需另外执行 git rm --cached 才会从远端移除，
+# 只加忽略规则对已跟踪文件无效。
+# ============================================================
+
+# 图片文件夹：参考图、界面截图 dump、标定样张、现场照片
+/Image/
+/TestImages/
+/test_images/
+/tools/dump/
+/tools/dump_measure/
+/tools/calib_sample/
+/tools/*dump*/
+/tools/*sample*/
+# 根目录下的参考图（本地副本已移到 Image/，仓库不再保留）
+/*.png
+/*.jpg
+/*.jpeg
+/*.bmp
+
+# 测试 / 冒烟脚本与诊断输出
+/_build_smoke.bat
+/tools/ref.png
+/tools/smoke_*.py
+/tools/analyze_ref*.py
+/tools/blob_check.py
+/tools/ocr_log.txt
+/tools/ocr_ref.txt
+/tools/ocr_run.log
+/tools/step1.txt
+/tools/*.log
+/tools/*_diag*.txt

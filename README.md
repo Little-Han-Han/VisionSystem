@@ -57,7 +57,6 @@
 - **系统设置**：图片保存路径 / 格式（PNG/JPEG/BMP/TIFF）/ 保留天数（自动清理）/ 检测后自动保存与仅存 NG / 循环运行前是否要求通讯已连接
 - **配置持久化**：系统 / 算法 / 界面 / 流程 四类参数落到本地 JSON（`%AppData%/VisionPlatform/appconfig.json`），重启自动加载
 - **图像显示控件库 `VisionSystem.Controls`**：双缓冲、大图流畅缩放平移、几何图形（圆/矩形/旋转矩形/圆环）编辑、HUD 坐标与像素值、与 OpenCV `Mat` 零拷贝互通
-- **控件库演示 `VisionSystem.Demo`**：展示 `ImageViewer` 交互与图形编辑
 
 ---
 
@@ -127,14 +126,19 @@ VisionSystem/                              唯一解决方案根目录
 ├── README.md                              本文件
 ├── ThirdParty/                            所有外部依赖，按用途分次级目录
 │   ├── OpenCV/                            OpenCV 4.5.5（include / lib/x64 已入库，bin/x64 需自备）
-│   ├── HikVision/                         海康 MVS SDK（当前为空，附 README 说明）
-│   └── README.md                          第三方依赖说明
+│   ├── OpenVino2025.4.1/                  OpenVINO CPU 推理运行时
+│   ├── SQLite/                            日志库原生 DLL
+│   └── HikVision/                         海康 MVS SDK（当前为空）
 ├── bin/x64/{Debug,Release}/               算法 DLL 与 OpenCV 运行时（构建产物）
-├── docs/                                  文档
-│   ├── 平台架构.md                         架构、分层、模块职责、P/Invoke 规范
-│   ├── 使用说明.md                        操作方式与集成步骤
-│   ├── API参考.md                         控件库完整 API 清单
-│   └── 遗留问题.md                        已知问题、TODO、占位实现
+├── docs/                                  文档（入口：docs/README.md 知识图谱）
+│   ├── README.md                          知识图谱：概念图 / 唯一权威出处 / 文档地图
+│   ├── 平台架构.md                        架构、分层、模块职责（待更新）
+│   ├── API参考.md                         控件库完整 API 清单（待更新）
+│   ├── 遗留问题.md                        已知问题、TODO、占位实现（待更新）
+│   ├── 需求/增量需求总览.md                5 次增量 PRD 合并
+│   ├── 架构/增量架构设计.md                6 份架构设计合并 + 公共约定唯一出处
+│   ├── 参考资料/                          参考资料汇编 + 使用说明
+│   └── 图表/                              6 份 Mermaid 类图 / 时序图
 └── src/
     ├── VisionAlgo.Native/                 【C++ / OpenCV】算法 DLL
     │   ├── include/
@@ -151,7 +155,6 @@ VisionSystem/                              唯一解决方案根目录
     │   ├── Geometry/                       IGeometryShape / ShapeHandle / 各形状 / ShapeCollection
     │   ├── Interop/                        CvInterop（OpenCV 数据互操作）
     │   └── Rendering/                      Viewport（坐标变换）/ RenderOptions
-    ├── VisionSystem.Demo/                  【C#】控件库演示
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
         ├── Core/                          Logger / AppPaths / Json / OpResult /
@@ -186,7 +189,12 @@ xcopy /Y "%OPENCV%\x64\vc15\bin\opencv_world455.dll"   ThirdParty\OpenCV\bin\x64
 xcopy /Y "%OPENCV%\x64\vc15\bin\opencv_world455d.dll"  ThirdParty\OpenCV\bin\x64\
 ```
 
-（只跑 Release 时只需 `opencv_world455.dll`；调试需要 `455d.dll`。）详见 `ThirdParty/README.md`。
+（只跑 Release 时只需 `opencv_world455.dll`；调试需要 `455d.dll`。）
+
+> `ThirdParty/` 按用途分目录：`OpenCV/`（4.5.5 头文件 + 导入库）、`OpenVino2025.4.1/runtime/`（CPU 推理运行时）、
+> `SQLite/`（日志库原生 DLL）、`HikVision/`（海康 MVS SDK，当前为空）、`Communication/`（当前无第三方依赖）。
+> 工程统一用 `$(ProjectDir)..\..\ThirdParty\...` 相对路径引用，不依赖系统 PATH；未安装 MVS SDK 时
+> 海康相机为占位实现，可用模拟相机 `SIM-0` 跑通全流程。
 
 ### 3. 构建
 双击根目录的 `build.bat`，或在命令行执行：
@@ -210,11 +218,12 @@ build.bat Release    :: 编译 Release | x64
 
 ## 文档索引
 
-- [平台架构.md](docs/平台架构.md) —— 分层架构、技术栈、目录结构、模块职责、C++↔C# 调用规范、扩展指南
-- [使用说明.md](docs/使用说明.md) —— 操作方式、集成到现有项目、OpenCV 对接、常见问题
-- [API参考.md](docs/API参考.md) —— 控件库全部公开属性、方法、事件
-- [遗留问题.md](docs/遗留问题.md) —— 已知问题、占位实现（如海康相机 SDK）、后续 TODO
-- [PRD-摄像头与流程编排.md](docs/PRD-摄像头与流程编排.md) —— 本机摄像头接入 + 流程编排的增量 PRD
-- [架构-摄像头与流程编排.md](docs/架构-摄像头与流程编排.md) —— 上述功能的增量设计
-- [测试报告-摄像头与流程编排.md](docs/测试报告-摄像头与流程编排.md) —— 原生实证、加固回归与收尾确认
-- [ThirdParty/README.md](ThirdParty/README.md) —— 第三方依赖准备与引用方式
+- [知识图谱 docs/README.md](docs/README.md) —— **先看这里**：概念关系图、「概念 → 唯一权威出处」表、旧文档→新章节映射、图表索引
+- [增量需求总览.md](docs/需求/增量需求总览.md) —— 5 次增量 PRD 合并：目标、需求编号总表、验收口径
+- [增量架构设计.md](docs/架构/增量架构设计.md) —— 6 份架构设计合并：关键决策、接口要点、落地红线；§7 是跨增量公共约定的唯一出处
+- [参考资料汇编.md](docs/参考资料/参考资料汇编.md) —— 形状匹配论文/开源资料 + VisionPro 界面参考图实测
+- [使用说明.md](docs/参考资料/使用说明.md) —— 操作方式、集成到现有项目、OpenCV 对接、常见问题
+- [平台架构.md](docs/平台架构.md) —— 分层架构、模块职责、C++↔C# 调用规范（**待更新：架构复用率改造**）
+- [API参考.md](docs/API参考.md) —— 控件库全部公开属性、方法、事件（**待更新**）
+- [遗留问题.md](docs/遗留问题.md) —— 已知问题、占位实现（如海康相机 SDK）、后续 TODO（**待更新**）
+- [快速开始 → 准备 OpenCV 运行时 DLL](#2-准备-opencv-运行时-dll) —— 第三方依赖准备与引用方式

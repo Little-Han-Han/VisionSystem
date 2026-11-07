@@ -1528,6 +1528,11 @@ namespace VisionPlatform.UI
                 case FlowNodeType.Ocr: return Color.FromArgb(255, 185, 95);
                 case FlowNodeType.LineCaliper:
                 case FlowNodeType.CircleCaliper:
+                case FlowNodeType.LineIntersect:
+                case FlowNodeType.EdgePair:
+                case FlowNodeType.PointPointMeasure:
+                case FlowNodeType.PointLineMeasure:
+                case FlowNodeType.LineLineMeasure:
                 case FlowNodeType.FitLine:
                 case FlowNodeType.FitCircle:
                 case FlowNodeType.Sharpness: return Color.FromArgb(140, 220, 150);

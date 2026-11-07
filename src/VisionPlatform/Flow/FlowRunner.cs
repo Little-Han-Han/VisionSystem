@@ -393,6 +393,11 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.OcrDl:         return RunOcrDl(s, node, p);
                 case FlowNodeType.CalibTransform: return RunCalibTransform(s, node, p);
                 case FlowNodeType.DistortionCorrect: return RunDistortionCorrect(s, node, p);
+                case FlowNodeType.LineIntersect: return RunLineIntersect(s, node, p);
+                case FlowNodeType.EdgePair:      return RunEdgePair(s, node, p);
+                case FlowNodeType.PointPointMeasure: return RunPointPointMeasure(s, node, p);
+                case FlowNodeType.PointLineMeasure:  return RunPointLineMeasure(s, node, p);
+                case FlowNodeType.LineLineMeasure:   return RunLineLineMeasure(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -427,6 +432,7 @@ namespace VisionPlatform.Flow
                 if (!double.IsNaN(m.TopCx)) o.Cx = m.TopCx;
                 if (!double.IsNaN(m.TopCy)) o.Cy = m.TopCy;
                 if (!double.IsNaN(m.AngleDeg)) o.Angle = m.AngleDeg;
+                if (!double.IsNaN(m.Value)) o.Value = m.Value;
             }
 
             // 位姿：优先节点自己的位姿表（匹配/卡尺会写），否则用 Metrics 里的坐标
@@ -896,88 +902,203 @@ namespace VisionPlatform.Flow
         // =====================================================================
 
         /// <summary>
-        /// 标定转换：像素坐标 → 机械坐标。
+        /// 标定转换：像素 → 机械。三类输入彼此独立，接哪个算哪个：
+        /// <list type="bullet">
+        /// <item><c>Coord</c>（点）→ 走 N 点标定的 6 参数仿射 / 旋转中心，出机械 X/Y；</item>
+        /// <item><c>Distance</c>（像素距离）→ 乘 mm/px（由标定尺度项推导或手填），出机械距离；</item>
+        /// <item><c>Angle</c>（像素角度）→ 叠加标定旋转角（+ 回转角），出机械角度。</item>
+        /// </list>
         /// <para>
-        /// 【只吃两类数据】<see cref="CalibKind.NPoint"/>（相似变换矩阵）与
+        /// 【只吃两类标定记录】<see cref="CalibKind.NPoint"/>（相似变换矩阵）与
         /// <see cref="CalibKind.RotationCenter"/>（圆心 + 半径）。
         /// 畸变矫正记录在这里被<strong>明确排除</strong>——它没有坐标映射关系，
         /// 混进来只会算出垃圾数值（用户要求"插件只连自己那一类数据"）。
         /// </para>
+        /// <para>
+        /// 【没有坐标输入时不再吐 (0,0)】旧实现把上游没给坐标的情况按 <c>Cx=0</c> 处理，
+        /// 于是"接了个不发坐标的节点"会静默输出机械原点。现在只有真的取到点才输出坐标，
+        /// 否则只输出距离 / 角度两条量，摘要里明确写"无坐标输入"。
+        /// </para>
         /// </summary>
         private bool RunCalibTransform(FlowRunSession s, FlowNode node, FlowNodeProgress p)
         {
+            // ---- ① 点输入：优先「坐标」端子；端子没接才用手填定点 ----
             double px = node.GetDouble("SourceX", 0);
             double py = node.GetDouble("SourceY", 0);
-            string upstreamNote = "手填";
+            string pointNote = "手填定点";
+            bool hasPoint = false;
 
-            // 优先取上游 Coord 端子连过来的坐标（模板匹配/Blob/圆卡尺…都统一输出 X/Y/R）
-            NodeOutput up = FindUpstreamCoord(s, node);
-            if (up != null && !double.IsNaN(up.Cx) && !double.IsNaN(up.Cy))
+            PointF upPoint;
+            string upNote;
+            if (TryGetInputPoint(s, node, "Coord", out upPoint, out upNote))
             {
-                px = up.Cx;
-                py = up.Cy;
-                upstreamNote = "上游 " + (string.IsNullOrEmpty(up.Name) ? up.Id : up.Name);
+                px = upPoint.X;
+                py = upPoint.Y;
+                hasPoint = true;
+                pointNote = string.IsNullOrEmpty(upNote) ? "上游坐标" : upNote + " 坐标";
+            }
+            else if (Math.Abs(px) > 1e-9 || Math.Abs(py) > 1e-9)
+            {
+                hasPoint = true;   // 参数里手填了非零定点，视为有意为之
             }
 
-            // ① N 点标定：像素 → 机械（没选就跳过，只做旋转）
+            // ---- ② 距离 / 角度输入（测量节点的直接出口）----
+            double distPx, anglePx;
+            string distNote, angleNote;
+            bool hasDist = TryGetInputNumber(s, node, "Distance", out distPx, out distNote);
+            bool hasAngle = TryGetInputNumber(s, node, "Angle", out anglePx, out angleNote);
+
+            // ---- ③ 标定记录 ----
             CalibRecord npt = ResolveCalibRecord(node, CalibKind.NPoint, "CalibRecordId");
             CalibRecord rot = ResolveCalibRecord(node, CalibKind.RotationCenter, "RotCenterId");
 
-            if (npt == null && rot == null)
+            if (npt != null && (npt.Affine == null || npt.Affine.Length < CalibRecord.AffineLength))
+                npt = null;      // 记录存在但没算过：当作没有，别让 NullReference 冒到上层
+
+            // ---- ④ 比例 mm/px：手填优先，其次由 N 点标定的尺度项推导 ----
+            bool manualScale = string.Equals(node.GetString("ScaleSource", "Calib"), "Manual",
+                                             StringComparison.OrdinalIgnoreCase);
+            double mmPerPx = 0.0;
+            string scaleNote = "未标定";
+
+            if (manualScale)
+            {
+                mmPerPx = node.GetDouble("MmPerPx", 0);
+                scaleNote = mmPerPx > 0
+                    ? string.Format(CultureInfo.InvariantCulture, "手填 {0:F6} mm/px", mmPerPx)
+                    : "手填比例未设置";
+            }
+            else if (npt != null)
+            {
+                double[] a = npt.Affine;
+                // 相似变换：A = s·R，两列的模都是尺度 s；取 |det| 的平方根更稳（与旋转方向无关）
+                double det = Math.Abs(a[0] * a[3] - a[1] * a[2]);
+                if (det > 1e-12) mmPerPx = Math.Sqrt(det);
+                scaleNote = mmPerPx > 0
+                    ? string.Format(CultureInfo.InvariantCulture, "标定 {0:F6} mm/px", mmPerPx)
+                    : "标定尺度无效";
+            }
+
+            if (npt == null && rot == null && mmPerPx <= 0)
             {
                 p.Status = FlowNodeStatus.Warn;
-                p.Summary = "标定转换：既没选 N 点标定也没选旋转中心（参数里至少选一个）";
+                p.Summary = "标定转换：既没选标定记录，也没有可用的 mm/px（参数里至少给一个）";
                 return false;
             }
+
+            // ---- ⑤ 坐标转换 ----
+            // 【只有真的取到点才转换】没接坐标、参数又是 0 时，硬转出来的 (0,0) 机械坐标
+            // 会被下游当成"原点处的检测结果"（旧实现就是这样静默吐原点）。
+            // 有 N 点标定 → 走仿射；只有旋转中心 → 在原坐标上绕圆周转（回转 / 极坐标场景，保持历史行为）。
+            bool canCoord = hasPoint && (npt != null || rot != null);
 
             double mx = px, my = py;
             string stage = "原始";
 
-            if (npt != null)
+            if (canCoord && npt != null)
             {
                 double[] a = npt.Affine;
-                double tx = a[0] * px + a[1] * py + a[4];
-                double ty = a[2] * px + a[3] * py + a[5];
-                mx = tx; my = ty;
+                mx = a[0] * px + a[1] * py + a[4];
+                my = a[2] * px + a[3] * py + a[5];
                 stage = "N点";
             }
 
-            // ② 旋转中心：绕圆心旋转，并给出半径 / 极角
-            if (rot != null)
+            double rotateDeg = 0.0;
+            double radius = double.NaN, polar = double.NaN;
+
+            // ---- ⑥ 旋转中心：绕圆心旋转，并给出半径 / 极角 ----
+            if (canCoord && rot != null && rot.Affine != null && rot.Affine.Length >= 2)
             {
                 double cx = rot.Affine[0], cy = rot.Affine[1];
-                double deg = node.GetDouble("RotateAngle", 0);
-                double rad = deg * Math.PI / 180.0;
+                rotateDeg = node.GetDouble("RotateAngle", 0);
+                double rad = rotateDeg * Math.PI / 180.0;
                 double dx = mx - cx, dy = my - cy;
-                double radius = Math.Sqrt(dx * dx + dy * dy);
-                double polar = Math.Atan2(dy, dx) * 180.0 / Math.PI;
+                radius = Math.Sqrt(dx * dx + dy * dy);
+                polar = Math.Atan2(dy, dx) * 180.0 / Math.PI;
 
                 mx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
-                my = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
+                my = cx + dx * Math.Sin(rad) + dy * Math.Cos(rad);
 
-                p.Metrics.AngleDeg = deg;
                 p.Outputs.Add(new PortValue("Radius", "旋转半径", FlowPortKind.Number, radius));
                 p.Outputs.Add(new PortValue("Polar", "相对角度", FlowPortKind.Angle, polar));
                 p.Outputs.Add(new PortValue("CenterX", "圆心X", FlowPortKind.Number, cx));
                 p.Outputs.Add(new PortValue("CenterY", "圆心Y", FlowPortKind.Number, cy));
+            }
 
-                p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "标定转换[{0}+旋转中心]：({1:F2},{2:F2}) px → 圆心({3:F2},{4:F2}) 半径 {5:F3}、极角 {6:F2}°、" +
-                    "转 {7:F1}° → ({8:F3},{9:F3})",
-                    stage, px, py, cx, cy, radius, polar, deg, mx, my);
+            bool hasCoordOut = canCoord;
+
+            // ---- ⑦ 距离 / 角度换算 ----
+            // 距离：像素 × mm/px；没有比例时原样输出像素值，并在摘要里注明（不冒充 mm）
+            double distOut = double.NaN;
+            bool distIsMm = false;
+            if (hasDist)
+            {
+                if (mmPerPx > 0)
+                {
+                    distOut = distPx * mmPerPx;
+                    distIsMm = true;
+                    p.Outputs.Add(new PortValue("Distance", "机械距离", FlowPortKind.Number, distOut));
+                }
+                else
+                {
+                    distOut = distPx;
+                    p.Outputs.Add(new PortValue("Distance", "距离(px)", FlowPortKind.Number, distOut));
+                }
+            }
+
+            // 角度：像素角度 + 标定旋转角（A = s·R 的旋转量）+ 回转角
+            double angleOut = double.NaN;
+            if (hasAngle)
+            {
+                double offset = 0.0;
+                if (npt != null)
+                {
+                    double[] a = npt.Affine;
+                    offset = Math.Atan2(a[2], a[0]) * 180.0 / Math.PI;   // 标定自身的旋转
+                }
+                angleOut = FlowGeometryMath.NormalizeAngle180(anglePx + offset + rotateDeg);
+                p.Outputs.Add(new PortValue("Angle", "机械角度", FlowPortKind.Angle, angleOut));
+            }
+
+            // ---- ⑧ 坐标输出 ----
+            if (hasCoordOut)
+            {
+                var mp = new PointF((float)mx, (float)my);
+                p.Outputs.Add(new PortValue("Coord", "机械坐标", FlowPortKind.Pose, mp));
+                p.Metrics.TargetCount = 1;
+                p.Metrics.TopCx = mx;
+                p.Metrics.TopCy = my;
+            }
+
+            // 比例本身也作为输出：下游脚本 / 发送数据要直接引用
+            p.Outputs.Add(new PortValue("Scale", "比例", FlowPortKind.Number, mmPerPx));
+
+            // ---- ⑨ 摘要 ----
+            var sb = new StringBuilder();
+            sb.Append("标定转换");
+            if (hasCoordOut)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture,
+                    "[{0}]：({1:F2},{2:F2}) px → ({3:F3},{4:F3}) mm", stage, px, py, mx, my);
+                if (rot != null) sb.AppendFormat(CultureInfo.InvariantCulture, "（转 {0:F1}°）", rotateDeg);
+                if (npt != null) sb.AppendFormat(CultureInfo.InvariantCulture, " RMS {0:F4}", npt.RmsError);
             }
             else
             {
-                p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "标定转换[{0}]：({1:F2},{2:F2}) px → ({3:F3},{4:F3}) mm（RMS {5:F4}）",
-                    upstreamNote, px, py, mx, my, npt.RmsError);
+                sb.Append("：无坐标输入");
             }
 
-            // 真正把结果交出去：下游（结果输出 / 发送数据）读的就是这两个字段
-            p.Metrics.TargetCount = 1;
-            p.Metrics.TopCx = mx;
-            p.Metrics.TopCy = my;
+            if (hasDist)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture, " · 距离 {0:F3} {1}（{2}）",
+                    distOut, distIsMm ? "mm" : "px", distIsMm ? scaleNote : "未标定");
+            }
+            if (hasAngle)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture, " · 角度 {0:F2}°（{1}）", angleOut, angleNote);
+            }
 
+            p.Summary = sb.ToString();
             return true;
         }
 
@@ -1036,29 +1157,6 @@ namespace VisionPlatform.Flow
             p.Metrics.Text = string.Format(CultureInfo.InvariantCulture,
                 "undistorted {0}x{1}", dst.Width, dst.Height);
             return true;
-        }
-
-        /// <summary>
-        /// 找连到本节点 Coord 输入端子上的上游节点结果。
-        /// 没有连线返回 null（此时调用方回退到参数里手填的坐标）。
-        /// </summary>
-        private static NodeOutput FindUpstreamCoord(FlowRunSession s, FlowNode node)
-        {
-            if (s == null || node == null || s.Flow == null) return null;
-
-            List<FlowLink> links = s.Flow.FindLinksTo(node.Id, "Coord");
-            if (links == null || links.Count == 0) return null;
-
-            // 取最后一条（后连的覆盖先连的，符合"最新接线生效"的直觉）
-            string fromId = links[links.Count - 1].FromNodeId;
-            if (string.IsNullOrEmpty(fromId) || s.Outputs == null) return null;
-
-            for (int i = s.Outputs.Count - 1; i >= 0; i--)
-            {
-                NodeOutput o = s.Outputs[i];
-                if (o != null && string.Equals(o.Id, fromId, StringComparison.Ordinal)) return o;
-            }
-            return null;
         }
 
         /// <summary>取标定记录：参数指定优先，其次用该相机的「当前」记录；类型不符一律拒绝。</summary>
@@ -3661,6 +3759,15 @@ namespace VisionPlatform.Flow
             int calTotal = r.Points != null ? r.Points.Count : 0;
             int calRejected = Math.Max(0, calTotal - r.ValidCount);
 
+            // 主判据：线中点作为该节点的「坐标」（Coord 端子的实际取值来源）
+            if (r.Line != null)
+            {
+                p.Metrics.TargetCount = 1;
+                p.Metrics.TopCx = (r.Line.X1 + r.Line.X2) * 0.5;
+                p.Metrics.TopCy = (r.Line.Y1 + r.Line.Y2) * 0.5;
+                p.Metrics.AngleDeg = r.AngleDeg;
+            }
+
             // 直线卡尺的运行参数全部上报（长度/角度/直线度/有效点/剔除数）
             p.Outputs.Add(new PortValue("Length", "长度", FlowPortKind.Number, r.Length));
             p.Outputs.Add(new PortValue("Angle", "角度", FlowPortKind.Angle, r.AngleDeg));
@@ -3668,6 +3775,13 @@ namespace VisionPlatform.Flow
             p.Outputs.Add(new PortValue("ValidCount", "有效点", FlowPortKind.Number, (double)r.ValidCount));
             p.Outputs.Add(new PortValue("CaliperCount", "卡尺数", FlowPortKind.Number, (double)calTotal));
             p.Outputs.Add(new PortValue("RejectedCount", "剔除数", FlowPortKind.Number, (double)calRejected));
+            // 几何端子值：下游「交点卡尺 / 点直线测量 / 线线测量」靠它求交、求垂距。
+            // 只报 Length/Angle 这类标量是算不出交点的（端子表里声明了 Geometry 就必须真给值）。
+            if (r.Line != null && !double.IsNaN(r.Line.X1) && !double.IsNaN(r.Line.X2))
+            {
+                p.Outputs.Add(new PortValue("Geometry", "直线", FlowPortKind.Geometry,
+                    FlowGeometryValue.Line(r.Line.X1, r.Line.Y1, r.Line.X2, r.Line.Y2)));
+            }
             if (r.Line != null)
             {
                 p.Outputs.Add(new PortValue("Start", "起点", FlowPortKind.Point,
@@ -3783,10 +3897,18 @@ namespace VisionPlatform.Flow
             int circTotal = r.Points != null ? r.Points.Count : 0;
             double radius = r.Circle.Radius;
 
+            // 主判据：圆心即该节点的「坐标」（Coord 端子的实际取值来源）
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = r.Circle.Cx;
+            p.Metrics.TopCy = r.Circle.Cy;
+
             p.Outputs.Add(new PortValue("Diameter", "直径", FlowPortKind.Number, diameter));
             p.Outputs.Add(new PortValue("Radius", "半径", FlowPortKind.Number, radius));
             p.Outputs.Add(new PortValue("Center", "圆心", FlowPortKind.Point,
                 new PointF((float)r.Circle.Cx, (float)r.Circle.Cy)));
+            // 几何端子值（下游求交 / 求距用；只给数值是算不出几何关系的）
+            p.Outputs.Add(new PortValue("Geometry", "圆", FlowPortKind.Geometry,
+                FlowGeometryValue.Circle(r.Circle.Cx, r.Circle.Cy, radius)));
             p.Outputs.Add(new PortValue("Rms", "圆度", FlowPortKind.Number, r.Rms));
             p.Outputs.Add(new PortValue("ValidCount", "有效点", FlowPortKind.Number, (double)r.ValidCount));
             p.Outputs.Add(new PortValue("CaliperCount", "卡尺数", FlowPortKind.Number, (double)circTotal));
@@ -3797,6 +3919,709 @@ namespace VisionPlatform.Flow
                 "圆卡尺：直径 {0:F1} 圆心 ({1:F1},{2:F1}) RMS {3:F2} 有效点 {4}/{5}",
                 diameter, r.Circle.Cx, r.Circle.Cy, r.Rms, r.ValidCount, circTotal)
                 + PoseInputNote(s, node);
+            return true;
+        }
+
+        // =====================================================================
+        //  测量类节点：交点卡尺 / 边缘对 / 点点 / 点直线 / 线线
+        // =====================================================================
+        //
+        //  【共同约定】
+        //   · 几何一律**先按端子取**（FindInputPort：输入端子 → 连线 → 上游输出端子），
+        //     取不到就明确报「哪个端子没接 / 上游没给几何」，绝不退化成 (0,0) 继续算 ——
+        //     0 坐标在图上"看起来有结果"，比直接报错更难查。
+        //   · 输出的坐标点同时写进 Metrics（TopCx/TopCy），这样既进结果区，
+        //     又能被「标定转换」按既有 X/Y 口径读到，不需要为每个新节点写适配。
+
+        /// <summary>一次"按输入端子取上游值"的命中信息（用于给摘要带上来源节点名）。</summary>
+        private sealed class InputPortHit
+        {
+            /// <summary>上游节点的输出台账。</summary>
+            public NodeOutput Upstream;
+
+            /// <summary>该输出端子上真正挂着的类型化值；可能为 null（上游没发这个键）。</summary>
+            public PortValue Value;
+
+            /// <summary>命中的连线。</summary>
+            public FlowLink Link;
+        }
+
+        /// <summary>
+        /// 按「输入端子 → 反查连线 → 上游输出端子」取上游值。
+        /// <para>
+        /// 多条线时取<strong>最后一条</strong>（后连的覆盖先连的，与「换数据源」的直觉一致）。
+        /// 上游节点存在但该端子没有对应 PortValue 时返回的 <see cref="InputPortHit.Value"/> 为 null ——
+        /// 调用方据此回退到 X/Y 或报"上游未提供该量"。
+        /// </para>
+        /// </summary>
+        private static InputPortHit FindInputPort(FlowRunSession s, FlowNode node, string inPortKey)
+        {
+            if (s == null || node == null || s.Flow == null || string.IsNullOrEmpty(inPortKey)) return null;
+
+            List<FlowLink> links = s.Flow.FindLinksTo(node.Id, inPortKey);
+            if (links == null || links.Count == 0) return null;
+
+            FlowLink link = links[links.Count - 1];
+            if (link == null || string.IsNullOrEmpty(link.FromNodeId)) return null;
+
+            NodeOutput up = null;
+            if (s.Outputs != null)
+            {
+                for (int i = s.Outputs.Count - 1; i >= 0; i--)
+                {
+                    NodeOutput o = s.Outputs[i];
+                    if (o != null && string.Equals(o.Id, link.FromNodeId, StringComparison.Ordinal)) { up = o; break; }
+                }
+            }
+            if (up == null) return null;
+
+            var hit = new InputPortHit { Upstream = up, Link = link };
+            if (!string.IsNullOrEmpty(link.FromPort)) hit.Value = up.Port(link.FromPort);
+            return hit;
+        }
+
+        /// <summary>来源节点的一句说明（摘要里用）。</summary>
+        private static string UpstreamLabel(InputPortHit hit)
+        {
+            if (hit == null || hit.Upstream == null) return "";
+            string name = string.IsNullOrEmpty(hit.Upstream.Name) ? hit.Upstream.Id : hit.Upstream.Name;
+            return string.IsNullOrEmpty(name) ? "" : "上游「" + name + "」";
+        }
+
+        /// <summary>
+        /// 取某输入端子上的<strong>点</strong>。
+        /// <para>
+        /// 取值顺序：① 端口值本身就是 PointF（Point / Pose 端子）；② 上游的 X / Y 两个数值键
+        /// （由 <c>RecordOutput</c> 统一摊平，覆盖匹配 / Blob / 卡尺 / 拟合等所有节点）；
+        /// ③ 上游位姿表里的中心（<see cref="NodeOutput.HasPose"/>）。
+        /// </para>
+        /// </summary>
+        private static bool TryGetInputPoint(FlowRunSession s, FlowNode node, string portKey,
+                                             out PointF point, out string note)
+        {
+            point = PointF.Empty;
+            note = "";
+
+            InputPortHit hit = FindInputPort(s, node, portKey);
+            if (hit == null) return false;
+
+            note = UpstreamLabel(hit);
+
+            if (hit.Value != null && hit.Value.Raw is PointF)
+            {
+                point = (PointF)hit.Value.Raw;
+                return !float.IsNaN(point.X) && !float.IsNaN(point.Y);
+            }
+
+            if (hit.Upstream != null)
+            {
+                PortValue xv = hit.Upstream.Port("X");
+                PortValue yv = hit.Upstream.Port("Y");
+                if (xv != null && yv != null)
+                {
+                    point = new PointF((float)xv.AsNumber(0.0), (float)yv.AsNumber(0.0));
+                    return true;
+                }
+
+                if (hit.Upstream.HasPose)
+                {
+                    point = new PointF((float)hit.Upstream.Cx, (float)hit.Upstream.Cy);
+                    return true;
+                }
+            }
+
+            note = "";
+            return false;
+        }
+
+        /// <summary>取某输入端子上的<strong>几何</strong>值（直线 / 圆）；上游没发几何时返回 false。</summary>
+        private static bool TryGetInputGeometry(FlowRunSession s, FlowNode node, string portKey,
+                                                out FlowGeometryValue geometry, out string note)
+        {
+            geometry = null;
+            note = "";
+
+            InputPortHit hit = FindInputPort(s, node, portKey);
+            if (hit == null) return false;
+
+            note = UpstreamLabel(hit);
+            if (hit.Value != null) geometry = hit.Value.Raw as FlowGeometryValue;
+
+            if (geometry == null) note = "";
+            return geometry != null;
+        }
+
+        /// <summary>取某输入端子上的<strong>数值 / 角度</strong>；上游没发该键时返回 false。</summary>
+        private static bool TryGetInputNumber(FlowRunSession s, FlowNode node, string portKey,
+                                              out double value, out string note)
+        {
+            value = double.NaN;
+            note = "";
+
+            InputPortHit hit = FindInputPort(s, node, portKey);
+            if (hit == null) return false;
+
+            note = UpstreamLabel(hit);
+            if (hit.Value != null)
+            {
+                double v = hit.Value.AsNumber(double.NaN);
+                if (!double.IsNaN(v)) { value = v; return true; }
+            }
+
+            note = "";
+            return false;
+        }
+
+        // ---------------------- 交点卡尺 ----------------------
+
+        /// <summary>
+        /// 交点卡尺：两条直线各自由「上游 Geometry」或「内联卡尺」取得，再求延长线交点。
+        /// <para>
+        /// 优先级：端子连了就用上游直线（对应一侧的内联参数不生效）；没连才现场找边。
+        /// 因此"两条都接上游"时本节点是纯计算节点，连图像都不用接。
+        /// </para>
+        /// </summary>
+        private bool RunLineIntersect(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            // 预览帧：连续运行时 StepNext 不留帧，这里显式留一份（只为预览，不影响计算）
+            if (s.CaptureFrames && s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
+            FlowGeometryValue g1, g2;
+            string note1, note2;
+            TryGetInputGeometry(s, node, "Line1", out g1, out note1);
+            TryGetInputGeometry(s, node, "Line2", out g2, out note2);
+
+            double rms1 = 0.0, rms2 = 0.0;
+            string src1, src2;
+
+            if (g1 == null)
+            {
+                if (s.Current == null)
+                {
+                    p.Status = FlowNodeStatus.Warn;
+                    p.Summary = "交点卡尺：直线1 未接上游几何，且没有输入图像可做内联卡尺";
+                    return false;
+                }
+
+                CaliperLineResult r1;
+                string err1;
+                if (!TryRunInlineCaliper(s, node, "Line1", out r1, out err1))
+                {
+                    p.Summary = "交点卡尺（直线1）：" + err1;
+                    return false;
+                }
+
+                g1 = FlowGeometryValue.Line(r1.Line.X1, r1.Line.Y1, r1.Line.X2, r1.Line.Y2);
+                rms1 = r1.Rms;
+                src1 = "内联卡尺1";
+                AddCaliperOverlay(p, r1.Points, node.GetDouble("FilterHalfWidth", 2),
+                                  r1.Line, FlowShapes.ColorCaliperLine);
+            }
+            else
+            {
+                src1 = string.IsNullOrEmpty(note1) ? "上游直线1" : note1 + " 直线1";
+            }
+
+            if (g2 == null)
+            {
+                if (s.Current == null)
+                {
+                    p.Status = FlowNodeStatus.Warn;
+                    p.Summary = "交点卡尺：直线2 未接上游几何，且没有输入图像可做内联卡尺";
+                    return false;
+                }
+
+                CaliperLineResult r2;
+                string err2;
+                if (!TryRunInlineCaliper(s, node, "Line2", out r2, out err2))
+                {
+                    p.Summary = "交点卡尺（直线2）：" + err2;
+                    return false;
+                }
+
+                g2 = FlowGeometryValue.Line(r2.Line.X1, r2.Line.Y1, r2.Line.X2, r2.Line.Y2);
+                rms2 = r2.Rms;
+                src2 = "内联卡尺2";
+                AddCaliperOverlay(p, r2.Points, node.GetDouble("FilterHalfWidth", 2),
+                                  r2.Line, FlowShapes.ColorCaliperLine);
+            }
+            else
+            {
+                src2 = string.IsNullOrEmpty(note2) ? "上游直线2" : note2 + " 直线2";
+            }
+
+            if (g1 == null || g2 == null || g1.IsDegenerateLine || g2.IsDegenerateLine)
+            {
+                p.Summary = "交点卡尺：取到的直线无效（长度为 0）";
+                return false;
+            }
+
+            double angle = FlowGeometryMath.AngleBetweenLines(g1, g2);
+
+            PointF cross;
+            if (!FlowGeometryMath.TryIntersect(g1, g2, out cross))
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "交点卡尺：两条线接近平行（夹角 {0:F2}°），无交点", angle);
+                return false;
+            }
+
+            // 近似平行时交点会飞到极远处（数值上"算得出"，工程上没有意义）
+            if (Math.Abs(cross.X) > 1e6 || Math.Abs(cross.Y) > 1e6)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "交点卡尺：两条线接近平行（夹角 {0:F2}°），交点超出可用范围", angle);
+                return false;
+            }
+
+            // 可视化：两线（上游来的也画出来，否则用户看不到"到底用的哪条线"）+ 交点十字
+            p.Shapes.Add(FlowShapes.Line(g1.X1, g1.Y1, g1.X2, g1.Y2, FlowShapes.ColorMeasure, 1.6f));
+            p.Shapes.Add(FlowShapes.Line(g2.X1, g2.Y1, g2.X2, g2.Y2, FlowShapes.ColorMeasure, 1.6f));
+            p.Shapes.AddRange(FlowShapes.Crosshair(cross.X, cross.Y));
+            p.Shapes.Add(FlowShapes.Marker(cross.X, cross.Y, FlowShapes.ColorEdgePair));
+
+            p.Outputs.Add(new PortValue("Coord", "交点坐标", FlowPortKind.Pose, cross));
+            p.Outputs.Add(new PortValue("Intersection", "交点", FlowPortKind.Point, cross));
+            p.Outputs.Add(new PortValue("Angle", "夹角", FlowPortKind.Angle, angle));
+            p.Outputs.Add(new PortValue("Rms", "直线度", FlowPortKind.Number, Math.Max(rms1, rms2)));
+
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = cross.X;
+            p.Metrics.TopCy = cross.Y;
+            p.Metrics.AngleDeg = angle;
+
+            // 判定：直线度上限（0 = 不限）
+            double maxRms = node.GetDouble("MaxRms", 0);
+            if (maxRms > 0 && Math.Max(rms1, rms2) > maxRms)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "交点卡尺：交点 ({0:F2},{1:F2}) 夹角 {2:F2}°，直线度 {3:F2} 超出上限 {4:F2}",
+                    cross.X, cross.Y, angle, Math.Max(rms1, rms2), maxRms);
+                return false;
+            }
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "交点卡尺：交点 ({0:F2},{1:F2}) 夹角 {2:F2}° 直线度 {3:F2}/{4:F2}（{5} · {6}）",
+                cross.X, cross.Y, angle, rms1, rms2, src1, src2);
+            return true;
+        }
+
+        /// <summary>
+        /// 用节点内置的一组扫描线找一条直线（键名 = <paramref name="prefix"/> + X1/Y1/X2/Y2 …）。
+        /// 与「直线卡尺」节点同一条路径：先减 ROI 裁剪偏移，再应用位置修正变换。
+        /// </summary>
+        private bool TryRunInlineCaliper(FlowRunSession s, FlowNode node, string prefix,
+                                         out CaliperLineResult result, out string error)
+        {
+            result = null;
+            error = "";
+
+            PointF a = s.Transform.ApplyToPoint(node.GetDouble(prefix + "X1", 0) - s.OffsetX,
+                                                node.GetDouble(prefix + "Y1", 0) - s.OffsetY);
+            PointF b = s.Transform.ApplyToPoint(node.GetDouble(prefix + "X2", 0) - s.OffsetX,
+                                                node.GetDouble(prefix + "Y2", 0) - s.OffsetY);
+
+            var cp = new CaliperParam
+            {
+                X1 = a.X, Y1 = a.Y, X2 = b.X, Y2 = b.Y,
+                CaliperCount = node.GetInt(prefix + "CaliperCount", 10),
+                ProjectionLength = node.GetDouble(prefix + "ProjectionLength", 20),
+                Polarity = node.GetInt(prefix + "Polarity", 0),
+                EdgeThreshold = node.GetDouble(prefix + "EdgeThreshold", 30),
+                FilterHalfWidth = node.GetInt("FilterHalfWidth", 2),
+                SelectMode = node.GetInt("SelectMode", 0),
+                MinEdgeCount = node.GetInt("MinEdgeCount", 3),
+                RejectOutliers = node.GetInt("RejectOutliers", 1),
+                OutlierTolerance = node.GetDouble("OutlierTolerance", 2)
+            };
+
+            OpResult<CaliperLineResult> lr = _algo.LineCaliper(s.Current, cp);
+            if (!lr.Success || lr.Value == null)
+            {
+                error = string.IsNullOrEmpty(lr.Message) ? "未找到直线" : Tail(lr.Message);
+                return false;
+            }
+
+            result = lr.Value;
+            return true;
+        }
+
+        /// <summary>卡尺可视化：投影窗口（辅助层）+ 命中点 + 拟合直线（目标层）。</summary>
+        private static void AddCaliperOverlay(FlowNodeProgress p, List<CaliperPoint> points,
+                                              double halfWidth, LineResult line, Color color)
+        {
+            if (p == null) return;
+
+            p.AuxShapes.AddRange(FlowShapes.CaliperWindows(points, halfWidth));
+            p.Shapes.AddRange(FlowShapes.CaliperHits(points));
+
+            if (line != null)
+            {
+                p.Shapes.Add(FlowShapes.Line(line.X1, line.Y1, line.X2, line.Y2, color, 1.6f));
+            }
+        }
+
+        // ---------------------- 边缘对查找 ----------------------
+
+        /// <summary>
+        /// 边缘对查找（线宽）：沿扫描线法向逐格取样 → 一维找边 → 按极性配对 → 输出对宽。
+        /// </summary>
+        private bool RunEdgePair(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "边缘对：无输入帧";
+                return true;
+            }
+
+            if (s.CaptureFrames && s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
+            // 扫描线段是几何属性（图像坐标），与直线卡尺同口径：先减偏移，再应用位置修正
+            PointF a = s.Transform.ApplyToPoint(node.GetDouble("X1", 0) - s.OffsetX,
+                                                node.GetDouble("Y1", 0) - s.OffsetY);
+            PointF b = s.Transform.ApplyToPoint(node.GetDouble("X2", 0) - s.OffsetX,
+                                                node.GetDouble("Y2", 0) - s.OffsetY);
+
+            double minWidth = node.GetDouble("MinWidth", 0);
+            double maxWidth = node.GetDouble("MaxWidth", 0);
+            int filterHw = node.GetInt("FilterHalfWidth", 2);
+
+            EdgePairScanResult scan;
+            string error;
+            bool any = EdgePairScanner.TryScan(s.Current,
+                a.X, a.Y, b.X, b.Y,
+                node.GetInt("CaliperCount", 10),
+                node.GetDouble("ProjectionLength", 30),
+                node.GetDouble("EdgeThreshold", 20),
+                filterHw,
+                node.GetInt("PairPolarity", 0),
+                minWidth, maxWidth,
+                out scan, out error);
+
+            // 窗口一律画出来（未命中的窗口是灰的）：用户据此判断"扫到了没有、扫歪了没有"
+            if (scan != null)
+            {
+                p.AuxShapes.AddRange(FlowShapes.CaliperWindows(scan.Windows, filterHw));
+
+                for (int i = 0; i < scan.Pairs.Count; i++)
+                {
+                    EdgePair pair = scan.Pairs[i];
+                    p.Shapes.Add(FlowShapes.Line(pair.A.X, pair.A.Y, pair.B.X, pair.B.Y,
+                                                 FlowShapes.ColorEdgePair, 2.0f));
+                }
+            }
+
+            if (!any)
+            {
+                p.Summary = "边缘对：" + error;
+                return false;
+            }
+
+            // 均值口径：全部有效对的平均宽度（单对抖动大，均值才是"线宽"）
+            double sum = 0.0;
+            for (int i = 0; i < scan.Pairs.Count; i++) sum += scan.Pairs[i].Width;
+            double meanWidth = sum / scan.Pairs.Count;
+
+            int selectMode = node.GetInt("SelectMode", 0);
+            EdgePair main = EdgePairScanner.Select(scan.Pairs, selectMode);
+            PointF center = main != null ? main.Center : scan.Pairs[0].Center;
+
+            p.Shapes.Add(FlowShapes.Marker(center.X, center.Y, FlowShapes.ColorMeasure));
+
+            p.Outputs.Add(new PortValue("Width", "宽度", FlowPortKind.Number, meanWidth));
+            p.Outputs.Add(new PortValue("Count", "对数", FlowPortKind.Number, (double)scan.Pairs.Count));
+            p.Outputs.Add(new PortValue("Center", "中心", FlowPortKind.Point, center));
+            p.Outputs.Add(new PortValue("Coord", "坐标", FlowPortKind.Pose, center));
+
+            p.Metrics.TargetCount = scan.Pairs.Count;
+            p.Metrics.TopCx = center.X;
+            p.Metrics.TopCy = center.Y;
+            p.Metrics.Value = meanWidth;
+
+            int expectMin = node.GetInt("ExpectMin", 0);
+            int expectMax = node.GetInt("ExpectMax", 0);
+            double widthMin = node.GetDouble("WidthMin", 0);
+            double widthMax = node.GetDouble("WidthMax", 0);
+
+            string measure = string.Format(CultureInfo.InvariantCulture,
+                "边缘对：宽度 {0:F2} px（{1} 对，命中 {2}/{3} 格，中心 ({4:F1},{5:F1})）",
+                meanWidth, scan.Pairs.Count, scan.HitCalipers, scan.CaliperCount, center.X, center.Y);
+
+            if (expectMin > 0 && scan.Pairs.Count < expectMin)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，对数少于下限 {0}", expectMin);
+                return false;
+            }
+            if (expectMax > 0 && scan.Pairs.Count > expectMax)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，对数多于上限 {0}", expectMax);
+                return false;
+            }
+            if (widthMax > 0 && meanWidth > widthMax)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，宽度超出上限 {0:F2}", widthMax);
+                return false;
+            }
+            if (widthMin > 0 && meanWidth < widthMin)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，宽度小于下限 {0:F2}", widthMin);
+                return false;
+            }
+
+            p.Summary = measure + PoseInputNote(s, node);
+            return true;
+        }
+
+        // ---------------------- 点点测量 ----------------------
+
+        /// <summary>点点测量：两点距离 / 方向角 / ΔX / ΔY / 中点。</summary>
+        private bool RunPointPointMeasure(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            PointF a, b;
+            string noteA, noteB;
+            if (!TryGetInputPoint(s, node, "Point1", out a, out noteA))
+            {
+                p.Summary = "点点测量：点1 未取到坐标（请把坐标输出接到「点1」端子）";
+                return false;
+            }
+            if (!TryGetInputPoint(s, node, "Point2", out b, out noteB))
+            {
+                p.Summary = "点点测量：点2 未取到坐标（请把坐标输出接到「点2」端子）";
+                return false;
+            }
+
+            double distance = FlowGeometryMath.Distance(a, b);
+            double angle = FlowGeometryMath.DirectionDeg(a, b);
+            double dx = b.X - a.X, dy = b.Y - a.Y;
+            var mid = new PointF((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
+
+            p.Shapes.Add(FlowShapes.Line(a.X, a.Y, b.X, b.Y, FlowShapes.ColorMeasure, 1.6f));
+            p.Shapes.Add(FlowShapes.Marker(a.X, a.Y, FlowShapes.ColorEdgeHit));
+            p.Shapes.Add(FlowShapes.Marker(b.X, b.Y, FlowShapes.ColorEdgeHit));
+            p.Shapes.Add(FlowShapes.Marker(mid.X, mid.Y, FlowShapes.ColorMeasure));
+
+            p.Outputs.Add(new PortValue("Distance", "距离", FlowPortKind.Number, distance));
+            p.Outputs.Add(new PortValue("Angle", "角度", FlowPortKind.Angle, angle));
+            p.Outputs.Add(new PortValue("Dx", "ΔX", FlowPortKind.Number, dx));
+            p.Outputs.Add(new PortValue("Dy", "ΔY", FlowPortKind.Number, dy));
+            p.Outputs.Add(new PortValue("Coord", "中点", FlowPortKind.Pose, mid));
+
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = mid.X;
+            p.Metrics.TopCy = mid.Y;
+            p.Metrics.AngleDeg = angle;
+            p.Metrics.Value = distance;
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "点点测量：距离 {0:F3} px 角度 {1:F2}° Δ({2:F1},{3:F1})（{4} → {5}）",
+                distance, angle, dx, dy, noteA, noteB);
+
+            double min = node.GetDouble("DistMin", 0);
+            double max = node.GetDouble("DistMax", 0);
+            if (max > 0 && distance > max)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "点点测量：距离 {0:F3} px 超出上限 {1:F3}", distance, max);
+                return false;
+            }
+            if (min > 0 && distance < min)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "点点测量：距离 {0:F3} px 小于下限 {1:F3}", distance, min);
+                return false;
+            }
+
+            return true;
+        }
+
+        // ---------------------- 点直线测量 ----------------------
+
+        /// <summary>点直线测量：点到直线的垂距与垂足。</summary>
+        private bool RunPointLineMeasure(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            PointF pt;
+            string notePt;
+            if (!TryGetInputPoint(s, node, "Point", out pt, out notePt))
+            {
+                p.Summary = "点直线测量：点 未取到坐标（请把坐标输出接到「点」端子）";
+                return false;
+            }
+
+            FlowGeometryValue line;
+            string noteLine;
+            if (!TryGetInputGeometry(s, node, "Line", out line, out noteLine))
+            {
+                p.Summary = "点直线测量：直线 未取到几何（请把「直线卡尺 / 直线拟合」的几何输出接到「直线」端子）";
+                return false;
+            }
+            if (line.IsDegenerateLine)
+            {
+                p.Summary = "点直线测量：上游直线长度为 0，无法求垂距";
+                return false;
+            }
+
+            PointF foot;
+            double distance = FlowGeometryMath.PointLineDistance(pt, line, out foot);
+            if (double.IsNaN(distance))
+            {
+                p.Summary = "点直线测量：直线无效（无法求垂距）";
+                return false;
+            }
+
+            double lineAngle = line.AngleDeg;
+
+            p.Shapes.Add(FlowShapes.Line(line.X1, line.Y1, line.X2, line.Y2, FlowShapes.ColorMeasure, 1.4f));
+            p.Shapes.Add(FlowShapes.Line(pt.X, pt.Y, foot.X, foot.Y, FlowShapes.ColorEdgePair, 1.6f, true));
+            p.Shapes.Add(FlowShapes.Marker(pt.X, pt.Y, FlowShapes.ColorEdgeHit));
+            p.Shapes.Add(FlowShapes.Marker(foot.X, foot.Y, FlowShapes.ColorMeasure));
+
+            p.Outputs.Add(new PortValue("Distance", "垂距", FlowPortKind.Number, distance));
+            p.Outputs.Add(new PortValue("Foot", "垂足", FlowPortKind.Point, foot));
+            p.Outputs.Add(new PortValue("Angle", "线角", FlowPortKind.Angle, lineAngle));
+            p.Outputs.Add(new PortValue("Coord", "垂足坐标", FlowPortKind.Pose, foot));
+
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = foot.X;
+            p.Metrics.TopCy = foot.Y;
+            p.Metrics.AngleDeg = lineAngle;
+            p.Metrics.Value = distance;
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "点直线测量：垂距 {0:F3} px 垂足 ({1:F2},{2:F2}) 线角 {3:F2}°（{4} · {5}）",
+                distance, foot.X, foot.Y, lineAngle, notePt, noteLine);
+
+            double min = node.GetDouble("DistMin", 0);
+            double max = node.GetDouble("DistMax", 0);
+            if (max > 0 && distance > max)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "点直线测量：垂距 {0:F3} px 超出上限 {1:F3}", distance, max);
+                return false;
+            }
+            if (min > 0 && distance < min)
+            {
+                p.Summary = string.Format(CultureInfo.InvariantCulture,
+                    "点直线测量：垂距 {0:F3} px 小于下限 {1:F3}", distance, min);
+                return false;
+            }
+
+            return true;
+        }
+
+        // ---------------------- 线线测量 ----------------------
+
+        /// <summary>线线测量：夹角 / 交点 / 平行间距。</summary>
+        private bool RunLineLineMeasure(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            FlowGeometryValue l1, l2;
+            string note1, note2;
+            if (!TryGetInputGeometry(s, node, "Line1", out l1, out note1))
+            {
+                p.Summary = "线线测量：直线1 未取到几何（请接「直线卡尺 / 直线拟合」的几何输出）";
+                return false;
+            }
+            if (!TryGetInputGeometry(s, node, "Line2", out l2, out note2))
+            {
+                p.Summary = "线线测量：直线2 未取到几何（请接「直线卡尺 / 直线拟合」的几何输出）";
+                return false;
+            }
+            if (l1.IsDegenerateLine || l2.IsDegenerateLine)
+            {
+                p.Summary = "线线测量：上游直线长度为 0，无法测量";
+                return false;
+            }
+
+            double angle = FlowGeometryMath.AngleBetweenLines(l1, l2);
+            double parallelTol = node.GetDouble("ParallelTol", 0.5);
+            bool parallel = !double.IsNaN(angle) && angle <= parallelTol;
+
+            p.Shapes.Add(FlowShapes.Line(l1.X1, l1.Y1, l1.X2, l1.Y2, FlowShapes.ColorMeasure, 1.4f));
+            p.Shapes.Add(FlowShapes.Line(l2.X1, l2.Y1, l2.X2, l2.Y2, FlowShapes.ColorMeasure, 1.4f));
+
+            p.Outputs.Add(new PortValue("Angle", "夹角", FlowPortKind.Angle, angle));
+            p.Metrics.TargetCount = 1;
+            p.Metrics.AngleDeg = angle;
+
+            double spacing = double.NaN;
+            PointF cross = PointF.Empty;
+            bool hasCross = false;
+
+            if (parallel)
+            {
+                spacing = FlowGeometryMath.ParallelSpacing(l1, l2);
+                p.Outputs.Add(new PortValue("Distance", "间距", FlowPortKind.Number, spacing));
+                p.Metrics.Value = spacing;
+            }
+            else if (FlowGeometryMath.TryIntersect(l1, l2, out cross))
+            {
+                hasCross = true;
+                p.Outputs.Add(new PortValue("Intersection", "交点", FlowPortKind.Point, cross));
+                p.Outputs.Add(new PortValue("Coord", "交点坐标", FlowPortKind.Pose, cross));
+                p.Shapes.AddRange(FlowShapes.Crosshair(cross.X, cross.Y));
+                p.Shapes.Add(FlowShapes.Marker(cross.X, cross.Y, FlowShapes.ColorEdgePair));
+
+                p.Metrics.TopCx = cross.X;
+                p.Metrics.TopCy = cross.Y;
+            }
+
+            // 判定：夹角范围（0/0 = 不限）与平行间距范围（仅平行时）
+            double angleMin = node.GetDouble("AngleMin", 0);
+            double angleMax = node.GetDouble("AngleMax", 0);
+            double distMin = node.GetDouble("DistMin", 0);
+            double distMax = node.GetDouble("DistMax", 0);
+
+            string measure = parallel
+                ? string.Format(CultureInfo.InvariantCulture,
+                    "线线测量：平行（夹角 {0:F2}° ≤ {1:F2}°）间距 {2:F3} px（{3} · {4}）",
+                    angle, parallelTol, spacing, note1, note2)
+                : string.Format(CultureInfo.InvariantCulture,
+                    "线线测量：夹角 {0:F2}° 交点 ({1:F2},{2:F2})（{3} · {4}）",
+                    angle, hasCross ? cross.X : double.NaN, hasCross ? cross.Y : double.NaN, note1, note2);
+
+            p.Summary = measure;
+
+            if (angleMax > 0 && angle > angleMax)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，夹角超出上限 {0:F2}°", angleMax);
+                return false;
+            }
+            if (angleMin > 0 && angle < angleMin)
+            {
+                p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，夹角小于下限 {0:F2}°", angleMin);
+                return false;
+            }
+
+            if (parallel && !double.IsNaN(spacing))
+            {
+                if (distMax > 0 && spacing > distMax)
+                {
+                    p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，间距超出上限 {0:F3}", distMax);
+                    return false;
+                }
+                if (distMin > 0 && spacing < distMin)
+                {
+                    p.Summary = measure + string.Format(CultureInfo.InvariantCulture, "，间距小于下限 {0:F3}", distMin);
+                    return false;
+                }
+            }
+
+            if (!parallel && !hasCross)
+            {
+                p.Summary = measure + "，但交点求解失败";
+                return false;
+            }
+
             return true;
         }
 
@@ -3863,6 +4688,15 @@ namespace VisionPlatform.Flow
                 if (g != null) p.Shapes.Add(g);
             }
 
+            p.Outputs.Add(new PortValue("Geometry", "圆", FlowPortKind.Geometry,
+                FlowGeometryValue.Circle(cr.Value.Cx, cr.Value.Cy, cr.Value.Radius)));
+            p.Outputs.Add(new PortValue("Radius", "半径", FlowPortKind.Number, cr.Value.Radius));
+
+            // 圆心即「坐标」（Coord 端子的取值来源；不写这里，下游标定只能拿到 0,0）
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = cr.Value.Cx;
+            p.Metrics.TopCy = cr.Value.Cy;
+
             // 最小轮廓面积：按拟合圆等效面积做下限判定（0 = 不限）
             double minArea = node.GetDouble("MinContourArea", 0);
             double area = Math.PI * cr.Value.Radius * cr.Value.Radius;
@@ -3907,6 +4741,20 @@ namespace VisionPlatform.Flow
                 IGeometryShape g = FlowShapes.FitResult(lr.Value);
                 if (g != null) p.Shapes.Add(g);
             }
+
+            p.Outputs.Add(new PortValue("Geometry", "直线", FlowPortKind.Geometry,
+                FlowGeometryValue.Line(lr.Value.X1, lr.Value.Y1, lr.Value.X2, lr.Value.Y2)));
+            p.Outputs.Add(new PortValue("Length", "长度", FlowPortKind.Number, lr.Value.Length));
+            p.Outputs.Add(new PortValue("Angle", "角度", FlowPortKind.Angle,
+                FlowGeometryMath.NormalizeLineAngle(
+                    Math.Atan2(lr.Value.Y2 - lr.Value.Y1, lr.Value.X2 - lr.Value.X1) * 180.0 / Math.PI)));
+
+            // 线中点即「坐标」（Coord 端子的取值来源）
+            p.Metrics.TargetCount = 1;
+            p.Metrics.TopCx = (lr.Value.X1 + lr.Value.X2) * 0.5;
+            p.Metrics.TopCy = (lr.Value.Y1 + lr.Value.Y2) * 0.5;
+            p.Metrics.AngleDeg = FlowGeometryMath.NormalizeLineAngle(
+                Math.Atan2(lr.Value.Y2 - lr.Value.Y1, lr.Value.X2 - lr.Value.X1) * 180.0 / Math.PI);
 
             // 最小轮廓面积：拟合直线没有面积概念，用线段长度平方做同口径下限判定
             double minArea = node.GetDouble("MinContourArea", 0);

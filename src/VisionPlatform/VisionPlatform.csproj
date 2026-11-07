@@ -99,6 +99,9 @@
     <Compile Include="Flow\OcrTemplateLoadResult.cs" />
     <Compile Include="Flow\FlowNodeMetrics.cs" />
     <Compile Include="Flow\NodeResultText.cs" />
+    <Compile Include="Flow\FlowGeometryValue.cs" />
+    <Compile Include="Flow\FlowGeometryMath.cs" />
+    <Compile Include="Flow\EdgePairScanner.cs" />
     <Compile Include="Flow\TemplateStore.cs" />
     <Compile Include="Flow\TemplateTrainer.cs" />
     <Compile Include="Flow\NodeParamSchema.cs" />

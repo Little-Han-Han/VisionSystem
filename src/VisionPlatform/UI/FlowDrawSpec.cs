@@ -85,18 +85,27 @@ namespace VisionPlatform.UI
                 x, y, w, h, null, null, null, null, null, null, null, null, angle);
         }
 
-        /// <summary>构造直线卡尺描述（扫描线段 X1/Y1/X2/Y2）。</summary>
-        public static DrawSpec MakeLine(string label)
+        /// <summary>
+        /// 构造直线卡尺描述（扫描线段 X1/Y1/X2/Y2）。
+        /// <para>
+        /// <paramref name="prefix"/> 用于"一个节点里有多组扫描线"的场景（如交点卡尺的直线1/直线2）：
+        /// 键名前缀由 DrawSpec 携带，写回时不会串组。
+        /// </para>
+        /// </summary>
+        public static DrawSpec MakeLine(string label, string prefix = "")
         {
-            return new DrawSpec(DrawShapeKind.Line, InteractionMode.DrawLine, label, "X1",
-                null, null, null, null, "X1", "Y1", "X2", "Y2", null, null, null, null);
+            string p = prefix ?? "";
+            return new DrawSpec(DrawShapeKind.Line, InteractionMode.DrawLine, label, p + "X1",
+                null, null, null, null, p + "X1", p + "Y1", p + "X2", p + "Y2", null, null, null, null);
         }
 
-        /// <summary>构造圆卡尺描述（环形 ROI Cx/Cy/InnerRadius/OuterRadius）。</summary>
-        public static DrawSpec MakeRing(string label)
+        /// <summary>构造圆卡尺描述（环形 ROI Cx/Cy/InnerRadius/OuterRadius），<paramref name="prefix"/> 同上。</summary>
+        public static DrawSpec MakeRing(string label, string prefix = "")
         {
-            return new DrawSpec(DrawShapeKind.Ring, InteractionMode.DrawRing, label, "Cx",
-                null, null, null, null, null, null, null, null, "Cx", "Cy", "InnerRadius", "OuterRadius");
+            string p = prefix ?? "";
+            return new DrawSpec(DrawShapeKind.Ring, InteractionMode.DrawRing, label, p + "Cx",
+                null, null, null, null, null, null, null, null,
+                p + "Cx", p + "Cy", p + "InnerRadius", p + "OuterRadius");
         }
     }
 }

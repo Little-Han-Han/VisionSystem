@@ -269,6 +269,10 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.FitLine:
                 case FlowNodeType.FitCircle:
                 case FlowNodeType.ObjectDetect:
+                // 本期新增：这两个节点按扫描线段取图（ROI 要跟着位置修正走），
+                // 不补虚拟边就会被排到位置修正之前，"ROI 没被修正"的老问题会原样复现。
+                case FlowNodeType.EdgePair:
+                case FlowNodeType.LineIntersect:
                     return true;
                 default:
                     return false;

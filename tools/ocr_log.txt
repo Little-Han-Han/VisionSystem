@@ -1,8 +1,0 @@
-start 2026-10-11T12:13:49.1565651+08:00
-begin
-types ok
-langs: zh-Hans-CN
-use lang: zh-Hans-CN
-ERROR: 使用“1”个参数调用“OpenRead”时发生异常:“未能找到文件“C:\Users\admin\Desktop\VisionSystem\娴佺▼鍥惧弬鑰冨浘.png”。”
-在 <ScriptBlock>、C:\Users\admin\Desktop\VisionSystem\tools\ocr_ref.ps1 中: 第 59 行
-在 <ScriptBlock>、<无文件> 中: 第 503 行

@@ -20,9 +20,6 @@
     <Filter Include="Common">
       <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000005}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ThirdParty">
-      <UniqueIdentifier>{A1B2C3D4-0001-4000-8000-000000000006}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <!-- 头文件夹 -->
   <ItemGroup>
@@ -53,6 +50,9 @@
     <ClInclude Include="include\algo\va_caliper.h">
       <Filter>include\algo</Filter>
     </ClInclude>
+    <ClInclude Include="include\algo\va_calib.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
     <ClInclude Include="include\algo\va_filter.h">
       <Filter>include\algo</Filter>
     </ClInclude>
@@ -68,6 +68,12 @@
     <ClInclude Include="include\algo\va_detect.h">
       <Filter>include\algo</Filter>
     </ClInclude>
+    <ClInclude Include="include\algo\va_dl.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_ocrdl.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
   </ItemGroup>
   <!-- 源文件夹 -->
   <ItemGroup>
@@ -78,6 +84,9 @@
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_blob.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_calib.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_fit.cpp">
@@ -113,6 +122,12 @@
     <ClCompile Include="src\algo\algo_detect.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
+    <ClCompile Include="src\algo\algo_dl.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_ocrdl.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
   </ItemGroup>
   <!-- Common 文件夹：公共头文件与实现 -->
   <ItemGroup>
@@ -134,14 +149,5 @@
     <ClCompile Include="Common\va_internal.cpp">
       <Filter>Common</Filter>
     </ClCompile>
-  </ItemGroup>
-  <!-- 依赖说明文档 -->
-  <ItemGroup>
-    <Text Include="..\..\ThirdParty\README.md">
-      <Filter>ThirdParty</Filter>
-    </Text>
-    <Text Include="..\..\ThirdParty\HikVision\README.md">
-      <Filter>ThirdParty</Filter>
-    </Text>
   </ItemGroup>
 </Project>

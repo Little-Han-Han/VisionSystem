@@ -8,7 +8,6 @@ REM  Projects (all under VisionSystem.sln):
 REM    VisionAlgo.Native      C++ / OpenCV   algorithm DLL   (x64)
 REM    VisionSystem.Controls  C#  image viewer control library
 REM    VisionPlatform         C#  industrial vision software
-REM    VisionSystem.Demo      C#  demo for the control library
 REM
 REM  Usage:
 REM    build.bat            Debug   | x64

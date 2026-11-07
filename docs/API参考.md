@@ -288,12 +288,12 @@ public RingShape(PointF center, float outerRadius, float innerRadius)
 
 ### CvPixelLayout 枚举
 
-| 值 | 对应 OpenCV 类型 | 说明 |
-|---|---|---|
-| `Gray8` | `CV_8UC1` | 单通道灰度（自动附加灰度调色板）。 |
-| `Bgr24` | `CV_8UC3` | B-G-R，OpenCV 默认顺序。 |
-| `Rgb24` | `CV_8UC3` | R-G-B，已做过通道转换的数据。 |
-| `Bgra32` | `CV_8UC4` | B-G-R-A，第 4 通道强制置 255。 |
+| 值        | 对应 OpenCV 类型 | 说明                     |
+| -------- | ------------ | ---------------------- |
+| `Gray8`  | `CV_8UC1`    | 单通道灰度（自动附加灰度调色板）。      |
+| `Bgr24`  | `CV_8UC3`    | B-G-R，OpenCV 默认顺序。     |
+| `Rgb24`  | `CV_8UC3`    | R-G-B，已做过通道转换的数据。      |
+| `Bgra32` | `CV_8UC4`    | B-G-R-A，第 4 通道强制置 255。 |
 
 ### 方法
 
