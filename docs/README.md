@@ -1,4 +1,4 @@
-# docs 知识图谱
+﻿# docs 知识图谱
 
 > **入口文档**。本目录 2026-11-07 做过一次整理：删掉过程性/长期未更新的内容，
 > 把同一目的的文件合并成 3 份，并按用途分文件夹。
@@ -81,7 +81,11 @@ flowchart LR
 | VisionPro 参考图实测（测量 / OCR / 推断） | [参考资料汇编 §2](参考资料/参考资料汇编.md#ref-visionpro) | [架构 §4](架构/增量架构设计.md#arch-4) |
 | 控件操作、集成、OpenCV 对接 | [使用说明](参考资料/使用说明.md) | [平台架构](平台架构.md) |
 | 控件库公开 API 清单 | [API参考](API参考.md)（待更新） | [使用说明](参考资料/使用说明.md) |
-| 分层架构、模块职责、P/Invoke 规范 | [平台架构](平台架构.md)（待更新） | [增量架构设计 §7](架构/增量架构设计.md#arch-common) |
+| 模块契约 `IFlowNodeModule` / 注册表 / 动态加载 | [VisionPlatform 解耦重构 §2](架构/VisionPlatform解耦重构.md) | `src/VisionPlatform.Framework/Modules/` |
+| 项目分层与依赖方向（改造后） | [VisionPlatform 解耦重构 §2.2](架构/VisionPlatform解耦重构.md) | 顶层 [README 整体软件架构](../README.md) |
+| 参数列表控件 `ParamListControl` / `IParamValueStore` | [VisionPlatform 解耦重构 §3.3](架构/VisionPlatform解耦重构.md) | `src/VisionPlatform.UI.Controls/` |
+| 新增算法模块的操作步骤 | [VisionPlatform 解耦重构 §7.1](架构/VisionPlatform解耦重构.md) | — |
+| 分层架构、模块职责、P/Invoke 规范（**改造前快照**） | [平台架构](平台架构.md)（待更新） | 改造后结构见 [解耦重构 §2](架构/VisionPlatform解耦重构.md)；公共约定见 [架构 §7](架构/增量架构设计.md#arch-common) |
 | 已知问题、占位实现、TODO | [遗留问题](遗留问题.md)（待更新） | 各增量章节的「落地红线」 |
 
 ## 3. 文档地图：旧文件名 → 新位置
@@ -124,12 +128,13 @@ flowchart LR
 docs/
 ├── README.md                    本文件：知识图谱、权威出处、文档地图
 ├── API参考.md                   【待更新】控件库公开 API
-├── 平台架构.md                  【待更新】分层架构与模块职责
+├── 平台架构.md                  【改造前快照】分层架构与模块职责
 ├── 遗留问题.md                  【待更新】已知问题与 TODO
 ├── 需求/
 │   └── 增量需求总览.md          5 次增量 PRD 合并
 ├── 架构/
-│   └── 增量架构设计.md          6 份架构设计合并；§7 公共约定唯一出处
+│   ├── 增量架构设计.md          6 份架构设计合并；§7 公共约定唯一出处
+│   └── VisionPlatform解耦重构.md 模块化/UI 复用改造：耦合点、前后对比、修改记录
 ├── 参考资料/
 │   ├── 参考资料汇编.md          形状匹配资料 + VisionPro 参考图实测
 │   └── 使用说明.md              操作 / 集成 / OpenCV 对接

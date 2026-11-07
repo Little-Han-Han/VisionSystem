@@ -1,7 +1,6 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
-using VisionPlatform.Core;
 
 namespace VisionPlatform.UI
 {
@@ -570,24 +569,6 @@ namespace VisionPlatform.UI
         private static int ClampByte(int v)
         {
             return v < 0 ? 0 : (v > 255 ? 255 : v);
-        }
-
-        /// <summary>
-        /// 取日志级别对应的前景色。
-        /// <para>分级配色：INFO=主文本、WARN=橙、ERROR=红、RESULT_OK=绿、RESULT_NG=红。
-        /// RESULT_NG 与 ERROR 同为红色但层级不同：NG 是「检出来了不合格」，
-        /// ERROR 是「流程跑崩了」，面板会再按级别前缀区分。</para>
-        /// </summary>
-        public static Color LogLevelColor(LogLevel level)
-        {
-            switch (level)
-            {
-                case LogLevel.Warn:     return ColorWarn;
-                case LogLevel.Error:    return ColorNg;
-                case LogLevel.ResultOk: return ColorOk;
-                case LogLevel.ResultNg: return ColorNg;
-                default:                return ColorTextPrimary;   // Info
-            }
         }
 
         /// <summary>套用统计项名称标签（9 pt 次文本色）。</summary>

@@ -1,6 +1,10 @@
-# VisionSystem — 工业机器视觉软件
+﻿# VisionSystem — 工业机器视觉软件
 
-一套完整的工业视觉检测软件：用 **C++ / OpenCV** 编写视觉算法，用 **C# / WinForms (.NET Framework 4.8)** 编写软件界面，通过 P/Invoke 调用 C++ 算法 DLL。整套代码包含在一个解决方案 `VisionSystem.sln` 内，共 4 个项目。
+<!-- VERSION_BLOCK_START -->
+> **当前版本：1.0.0.0**（初始版本）
+<!-- VERSION_BLOCK_END -->
+
+一套完整的工业视觉检测软件：用 **C++ / OpenCV** 编写视觉算法，用 **C# / WinForms (.NET Framework 4.8)** 编写软件界面，通过 P/Invoke 调用 C++ 算法 DLL。整套代码包含在一个解决方案 `VisionSystem.sln` 内，共 7 个项目。
 
 - 目标框架：**.NET Framework 4.8**
 - 算法引擎：**C++ / OpenCV 4.5.5**
@@ -19,11 +23,16 @@
 │           导出为 x64 DLL，按 va_ 前缀 C 接口暴露
 ├─ P/Invoke 边界  VisionPlatform/Native/VisionAlgo.cs、NativeCamera.cs
 │           （界面与算法之间唯一的接触面：结构体一一映射、零拷贝传入、输出由 C# 分配）
-├─ 业务层    VisionPlatform  (C#) ── 配置 / 相机 / 流程 / 通讯 / 配方 / 检测引擎
-└─ 表现层    VisionPlatform/UI + VisionSystem.Controls ── 主界面、各功能窗体、图像显示控件库
+├─ 契约层    VisionPlatform.Framework ── 模块契约 / 注册表 / 动态加载 / 公共数据类型（无 WinForms）
+├─ 模块层    VisionPlatform.Modules   ── 28 个算法模块的端子 / 默认参数 / 参数表 / 界面声明（运行时加载）
+├─ 业务层    VisionPlatform           ── 配置 / 相机 / 流程执行 / 通讯 / 配方 / 检测引擎
+└─ 表现层    VisionPlatform/UI + VisionPlatform.UI.Controls + VisionSystem.Controls
+            窗体、可复用主题与参数列表控件、图像显示控件库
 ```
 
-**核心约束**：界面不直接碰算法，算法不认识界面，中间仅靠 `Native/VisionAlgo.cs` 这一道 P/Invoke 边界隔离。
+**核心约束**：界面不直接碰算法，算法不认识界面；节点差异由模块包**声明**（端子 / 参数表 / 界面提示），
+宿主 UI 不按节点类型写分支。依赖方向 `Modules → Framework ← UI.Controls ← 宿主`，详见
+[VisionPlatform 解耦重构](docs/架构/VisionPlatform解耦重构.md)。
 
 **多流程并行**：`FlowRunManager` 为每条流程维护一个 `FlowRunSlot`（独立线程 + 独立原生算法上下文 `va::Context`），「全部启动」并行跑所有流程；相机按 `CameraLease` 独占（默认严格独占，避免并发取帧打崩厂商 SDK），同相机取帧由 `CameraGrabGate` 串行化。
 
@@ -35,14 +44,17 @@
 |---|---|---|
 | 算法层 | `VisionAlgo.Native` | C++ / OpenCV：预处理、Blob、清晰度、圆/直线拟合、模板/形状匹配、目标检测、OCR、本机相机采集 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs`、`Native/NativeCamera.cs` | 唯一接触 C++ 处；结构体映射、零拷贝传入、相机帧经 `VA_Image`（BGR，`stride` 如实传递） |
+| 契约层 | `VisionPlatform.Framework` | `IFlowNodeModule` / `IFlowModulePackage`、`FlowModuleRegistry`、`ModuleLoader`、公共数据类型（`FlowNodeType` / `ParamItem` / 参数表 / 端子） |
+| 模块层 | `VisionPlatform.Modules` | 28 个算法模块的清单、默认参数、参数表、端子、界面提示；输出到 `Modules\`，由宿主反射加载 |
 | 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult / AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore |
 |  | `VisionPlatform/Camera` | 相机接口与**本机摄像头 `LocalCamera`** / 模拟 `SimCamera` / 海康 `HikCamera`（占位）/ CameraManager |
-|  | `VisionPlatform/Flow` | 流程模型、模块目录 `FlowModule`、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`、结果通道 `FlowOutputChannel` |
+|  | `VisionPlatform/Flow` | 流程模型、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`、结果通道 `FlowOutputChannel`；`FlowModule` / `NodeParamSchema` / `FlowPortSchema` 为模块门面 |
 |  | `VisionPlatform/Communication` | TCP 客户端/服务端、Modbus TCP、`CommState` |
 |  | `VisionPlatform/Recipe` | 配方模型与 JSON 存储 |
 |  | `VisionPlatform/Vision` | 检测配置、`InspectionEngine` |
 | 显示层 | `VisionSystem.Controls` | 图像显示、几何图形、OpenCV 互操作 |
-| 表现层 | `VisionPlatform/UI` | 登录、主运行界面、系统设置及各功能窗体 |
+| 通用界面层 | `VisionPlatform.UI.Controls` | `UiTheme` / `UiStyle`、按钮 / 表格 / 树 / 标题栏、声明式参数列表 `ParamListControl` |
+| 表现层 | `VisionPlatform/UI` | 登录、主运行界面、流程编排、系统设置及各功能窗体 |
 
 ---
 
@@ -121,7 +133,7 @@
 
 ```
 VisionSystem/                              唯一解决方案根目录
-├── VisionSystem.sln                       单一解决方案（4 个项目 + Solution Items）
+├── VisionSystem.sln                       单一解决方案（7 个项目 + Solution Items）
 ├── build.bat                              一键构建（含代理变量清理）
 ├── README.md                              本文件
 ├── ThirdParty/                            所有外部依赖，按用途分次级目录
@@ -132,7 +144,8 @@ VisionSystem/                              唯一解决方案根目录
 ├── bin/x64/{Debug,Release}/               算法 DLL 与 OpenCV 运行时（构建产物）
 ├── docs/                                  文档（入口：docs/README.md 知识图谱）
 │   ├── README.md                          知识图谱：概念图 / 唯一权威出处 / 文档地图
-│   ├── 平台架构.md                        架构、分层、模块职责（待更新）
+│   ├── 平台架构.md                        架构、分层、模块职责（改造前快照）
+│   ├── 架构/VisionPlatform解耦重构.md      模块化与 UI 复用改造：耦合点、前后对比、修改记录
 │   ├── API参考.md                         控件库完整 API 清单（待更新）
 │   ├── 遗留问题.md                        已知问题、TODO、占位实现（待更新）
 │   ├── 需求/增量需求总览.md                5 次增量 PRD 合并
@@ -206,13 +219,29 @@ build.bat Release    :: 编译 Release | x64
 
 构建成功后产物位于：
 - `bin\x64\{配置}\VisionAlgo.Native.dll` + `opencv_world455*.dll`
-- `src\VisionPlatform\bin\{配置}\VisionPlatform.exe`（构建脚本会把算法 DLL 与 OpenCV 运行时复制过来）
+- `bin\x64\{配置}\VisionPlatform.exe`（与算法 DLL、OpenCV 运行时、`Modules\` 同目录）
 
 ### 4. 运行
-直接运行 `src\VisionPlatform\bin\Debug\VisionPlatform.exe`，或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
+直接运行 `bin\x64\Debug\VisionPlatform.exe`（需同目录有 `Modules\VisionPlatform.Modules.dll`），或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
 
 ### 5. 打开解决方案
-双击 `VisionSystem.sln`（**唯一解决方案**）即可在 VS2022 中开发全部四个项目。
+双击 `VisionSystem.sln`（**唯一解决方案**）即可在 VS2022 中开发全部七个项目。
+
+### 6. 版本管理
+
+版本号的**唯一真源**是 `src/SharedVersion.cs`：它通过
+`<Compile Include="..\SharedVersion.cs"><Link>Properties\SharedVersion.cs</Link></Compile>`
+链接进全部 5 个 C# 项目（宿主 / 显示控件 / Framework / Modules / UI.Controls），改一次即全部生效。
+
+```bat
+version.bat            :: 查看当前版本
+version.bat 1.0.0.1    :: 设置版本（同步 AssemblyVersion / AssemblyFileVersion /
+                       :: AssemblyInformationalVersion，并更新本文件顶部的「当前版本」）
+```
+
+改完重新执行 `build.bat`。`Application.ProductVersion`、资源管理器里的「文件版本」、
+以及 `bin\x64\<配置>\VisionPlatform.exe` 的属性都会显示新版本。
+`src/VisionPlatform/Properties/AssemblyInfo.cs` 等文件**不再**各自写版本号，避免漏改。
 
 ---
 
@@ -221,6 +250,7 @@ build.bat Release    :: 编译 Release | x64
 - [知识图谱 docs/README.md](docs/README.md) —— **先看这里**：概念关系图、「概念 → 唯一权威出处」表、旧文档→新章节映射、图表索引
 - [增量需求总览.md](docs/需求/增量需求总览.md) —— 5 次增量 PRD 合并：目标、需求编号总表、验收口径
 - [增量架构设计.md](docs/架构/增量架构设计.md) —— 6 份架构设计合并：关键决策、接口要点、落地红线；§7 是跨增量公共约定的唯一出处
+- [VisionPlatform解耦重构.md](docs/架构/VisionPlatform解耦重构.md) —— 本次解耦改造：耦合点分析、目标架构、前后对比、逐文件修改记录、扩展指南
 - [参考资料汇编.md](docs/参考资料/参考资料汇编.md) —— 形状匹配论文/开源资料 + VisionPro 界面参考图实测
 - [使用说明.md](docs/参考资料/使用说明.md) —— 操作方式、集成到现有项目、OpenCV 对接、常见问题
 - [平台架构.md](docs/平台架构.md) —— 分层架构、模块职责、C++↔C# 调用规范（**待更新：架构复用率改造**）

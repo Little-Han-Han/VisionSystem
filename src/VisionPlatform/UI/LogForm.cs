@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Windows.Forms;
 using VisionPlatform.Data;
 
@@ -7,165 +8,39 @@ namespace VisionPlatform.UI
 {
     /// <summary>
     /// 日志查看：按日期范围 + 级别筛选，查看 NG（不良品）、软件报错（异常堆栈）与每日良率汇总。
-    /// 数据来自 SQLite 日志库（<see cref="LogDb"/>）。控件全部在构造函数内创建并绑定事件，
-    /// 不依赖 Designer 序列化，避免「重序列化丢失事件订阅」的已知坑。
+    /// 数据来自 SQLite 日志库（<see cref="LogDb"/>）。
+    /// <para>
+    /// 【界面代码在 <c>LogForm.Designer.cs</c>】设计器只认"字段 + 属性赋值 + 具名事件处理器"；
+    /// 旧版把手写控件树和 <c>OnQuery(...)</c> 都放在 <c>InitializeComponent</c> 里，
+    /// 设计器执行构造期查询时没有日志库 → 报
+    /// "未能分析 InitializeComponent，未将对象引用设置到对象的实例"。
+    /// </para>
+    /// <para>
+    /// 【运行期初始化】日期默认值、主题、首次查询都在构造函数里、且在
+    /// <see cref="LicenseManager"/> 判定为非设计期之后执行；设计视图只看到静态界面。
+    /// </para>
     /// </summary>
     public partial class LogForm : Form
     {
-        private DateTimePicker _dtpFrom;
-        private DateTimePicker _dtpTo;
-        private ComboBox _cmbLevel;
-        private Button _btnQuery;
-        private Label _lblSummary;
-        private DataGridView _dgvDaily;
-        private DataGridView _dgvDetail;
-
         /// <summary>级别下拉显示文本 ↔ 日志库 level 值（固定集合，非用户输入，可安全拼接 SQL）。</summary>
         private static readonly string[] LevelValues = { "", "OK", "NG", "ERROR", "INFO", "WARN" };
 
         public LogForm()
         {
             InitializeComponent();
-        }
 
-        private void InitializeComponent()
-        {
-            this.SuspendLayout();
+            // 设计器实例化窗体时会执行构造函数：跳过数据库查询与运行时主题绑定，
+            // 否则设计视图里没有 LogDb / ConfigStore，会直接抛在 InitializeComponent 之后。
+            if (LicenseManager.UsageMode == LicenseUsageMode.Designtime) return;
 
-            this.Text = "日志查看";
-            this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
-            this.ForeColor = System.Drawing.Color.Gainsboro;
-            this.ClientSize = new System.Drawing.Size(900, 620);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.ShowInTaskbar = false;
-
-            var table = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 4
-            };
-            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
-            table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-            // ---------- 筛选条 ----------
-            var panelFilter = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                AutoSize = true,
-                Padding = new Padding(4)
-            };
-
-            var lblFrom = new Label { Text = "起始日期：", AutoSize = true, ForeColor = System.Drawing.Color.Silver, TextAlign = System.Drawing.ContentAlignment.MiddleLeft };
-            // DateTimePicker 不在 UiStyle 的主题白名单里（原生控件），显式给深色底，避免深色窗体上出现一块浅色。
-            _dtpFrom = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Short,
-                Value = DateTime.Today.AddDays(-7),
-                Size = new System.Drawing.Size(110, 23),
-                BackColor = System.Drawing.Color.FromArgb(44, 44, 54),
-                ForeColor = System.Drawing.Color.Gainsboro
-            };
-
-            var lblTo = new Label { Text = "结束日期：", AutoSize = true, ForeColor = System.Drawing.Color.Silver, TextAlign = System.Drawing.ContentAlignment.MiddleLeft };
-            _dtpTo = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Short,
-                Value = DateTime.Today,
-                Size = new System.Drawing.Size(110, 23),
-                BackColor = System.Drawing.Color.FromArgb(44, 44, 54),
-                ForeColor = System.Drawing.Color.Gainsboro
-            };
-
-            var lblLevel = new Label { Text = "级别：", AutoSize = true, ForeColor = System.Drawing.Color.Silver, TextAlign = System.Drawing.ContentAlignment.MiddleLeft };
-            _cmbLevel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Size = new System.Drawing.Size(110, 23) };
-            _cmbLevel.Items.AddRange(new object[] { "全部", "OK（判定通过）", "NG（判定失败）", "软件报错", "信息", "警告" });
-            _cmbLevel.SelectedIndex = 0;
-
-            _btnQuery = new Button { Text = "查询", Size = new System.Drawing.Size(80, 26), UseVisualStyleBackColor = true };
-            _btnQuery.Click += OnQuery;
-
-            panelFilter.Controls.Add(lblFrom);
-            panelFilter.Controls.Add(_dtpFrom);
-            panelFilter.Controls.Add(lblTo);
-            panelFilter.Controls.Add(_dtpTo);
-            panelFilter.Controls.Add(lblLevel);
-            panelFilter.Controls.Add(_cmbLevel);
-            panelFilter.Controls.Add(_btnQuery);
-
-            // ---------- 汇总标签 ----------
-            _lblSummary = new Label
-            {
-                Dock = DockStyle.Fill,
-                ForeColor = System.Drawing.Color.Gainsboro,
-                Padding = new Padding(6, 2, 2, 2),
-                Text = "（点击「查询」查看汇总）"
-            };
-
-            // ---------- 每日汇总表 ----------
-            _dgvDaily = MakeGrid();
-            _dgvDaily.Columns.Add(Col("日期", 110));
-            _dgvDaily.Columns.Add(Col("检测数", 80));
-            _dgvDaily.Columns.Add(Col("OK", 70));
-            _dgvDaily.Columns.Add(Col("NG", 70));
-            _dgvDaily.Columns.Add(Col("良率", 80));
-            _dgvDaily.Columns.Add(Col("软件报错", 90));
-
-            // ---------- 明细表 ----------
-            _dgvDetail = MakeGrid();
-            _dgvDetail.Columns.Add(Col("时间", 150));
-            _dgvDetail.Columns.Add(Col("流程", 110));
-            _dgvDetail.Columns.Add(Col("级别", 80));
-            _dgvDetail.Columns.Add(Col("消息", 320));
-            _dgvDetail.Columns.Add(Col("详情（异常堆栈）", 240));
-
-            table.Controls.Add(panelFilter, 0, 0);
-            table.Controls.Add(_lblSummary, 0, 1);
-            table.Controls.Add(_dgvDaily, 0, 2);
-            table.Controls.Add(_dgvDetail, 0, 3);
-
-            this.Controls.Add(table);
-
-            this.ResumeLayout(false);
-            this.PerformLayout();
+            _dtpFrom.Value = DateTime.Today.AddDays(-7);
+            _dtpTo.Value = DateTime.Today;
 
             UiStyle.ApplyForm(this);
             UiTitleBar.Attach(this);
 
-            // 首次打开默认查最近 7 天
+            // 首次打开默认查最近 7 天（保留"构造即查询"的既有行为）
             OnQuery(this, EventArgs.Empty);
-        }
-
-        private static DataGridView MakeGrid()
-        {
-            var g = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                ReadOnly = true,
-                RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                BackgroundColor = System.Drawing.Color.FromArgb(30, 30, 38),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                Font = new System.Drawing.Font("Consolas", 9F)
-            };
-            return g;
-        }
-
-        private static DataGridViewColumn Col(string text, int width)
-        {
-            return new DataGridViewTextBoxColumn
-            {
-                HeaderText = text,
-                Width = width,
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                Resizable = DataGridViewTriState.True
-            };
         }
 
         private void OnQuery(object sender, EventArgs e)
@@ -176,7 +51,9 @@ namespace VisionPlatform.UI
             {
                 var t = from; from = to; to = t;
             }
-            string level = LevelValues[_cmbLevel.SelectedIndex];
+
+            int levelIndex = _cmbLevel.SelectedIndex;
+            string level = (levelIndex >= 0 && levelIndex < LevelValues.Length) ? LevelValues[levelIndex] : "";
 
             List<LogDb.DailyRow> daily = LogDb.QueryDaily(from, to, level);
             List<LogDb.LogRow> detail = LogDb.QueryDetail(from, to, level);

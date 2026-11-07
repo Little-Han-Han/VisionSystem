@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -23,35 +24,15 @@ namespace VisionPlatform.UI
     /// 【禁止直接 File.Copy / File.Delete】所有磁盘写操作一律走 <see cref="OcrCharStore"/>，
     /// 这样"迁移只读源目录"这条硬约束才守得住（在窗体里散着写，漏一处就破功）。
     /// </para>
-    /// <para>单文件手写 <c>InitializeComponent</c>，不建 Designer —— 与 <c>TemplateForm</c> 同一理由。</para>
+    /// <para>
+    /// 【界面代码在 <c>OcrTemplateForm.Designer.cs</c>】设计器只认"字段 + 属性赋值 + 具名事件处理器"：
+    /// lambda、局部变量、辅助方法调用都不可序列化。运行期逻辑（扫描 / 主题 / 按钮语义色）
+    /// 一律放在构造函数里，并用 <see cref="LicenseManager"/> 跳过设计期，避免设计器执行 IO。
+    /// </para>
     /// </summary>
-    public sealed class OcrTemplateForm : Form
+    public sealed partial class OcrTemplateForm : Form
     {
         private readonly string _initialDir;
-
-        private TextBox txtDir;
-        private UiButton btnBrowseDir;
-        private UiButton btnOpenDir;
-        private UiButton btnRescan;
-
-        private ListView listChars;
-        private Label lblFailures;
-        private PictureBox picPreview;
-        private Label lblPreviewInfo;
-
-        private ImageViewer viewer;
-        private UiButton btnLoadImage;
-        private UiButton btnDrawRoi;
-
-        private TextBox txtLabel;
-        private Label lblLabelBytes;
-        private RadioButton rdoAppend;
-        private RadioButton rdoReplace;
-        private UiButton btnAdd;
-        private UiButton btnDelete;
-        private UiButton btnClearAll;
-        private UiButton btnMigrate;
-        private Label lblStatus;
 
         private OcrCharLibrary _lib = new OcrCharLibrary();
         private ImageList _thumbs;
@@ -68,6 +49,9 @@ namespace VisionPlatform.UI
         /// <summary>解析后的绝对路径。</summary>
         public string ResolvedDir { get { return ResolveDir(CurrentDir); } }
 
+        /// <summary>供 VS 设计器实例化用的无参构造（设计期不读目录、不做任何 IO）。</summary>
+        public OcrTemplateForm() : this("") { }
+
         /// <summary>创建窗体。</summary>
         /// <param name="dir">节点当前的 <c>TemplateDir</c> 参数值。</param>
         public OcrTemplateForm(string dir)
@@ -76,7 +60,20 @@ namespace VisionPlatform.UI
 
             InitializeComponent();
 
-            txtDir.Text = _initialDir;
+            // 设计视图只搭界面：不绑原生控件事件、不套运行时主题、不扫描磁盘。
+            // （设计器会真的执行构造函数，任何 IO / 静态服务调用都可能让它报
+            //   "未能分析 InitializeComponent" 之类的错误。）
+            if (IsDesignTime()) return;
+
+            viewer.ShapeCreated += OnViewerShapeCreated;
+            ApplyButtonKinds();
+            ApplyThemeColors();
+
+            // 初始目录只写进输入框，不触发 TextChanged（否则构造期会额外扫一次）
+            _loading = true;
+            try { txtDir.Text = _initialDir; }
+            finally { _loading = false; }
+
             UiStyle.ApplyForm(this);
 
             // ApplyForm 之后再做显式配色（面板与状态文字）
@@ -86,212 +83,29 @@ namespace VisionPlatform.UI
             ScanAsync();
         }
 
-        // =====================================================================
-        //  界面
-        // =====================================================================
-
-        private void InitializeComponent()
+        /// <summary>设计器实例化（VS 设计视图）时为 true。</summary>
+        private static bool IsDesignTime()
         {
-            SuspendLayout();
-
-            Text = "字符模板库";
-            ClientSize = new Size(1080, 720);
-            MinimumSize = new Size(900, 600);
-            StartPosition = FormStartPosition.CenterParent;
-            ShowInTaskbar = false;
-            FormBorderStyle = FormBorderStyle.Sizable;
-            KeyPreview = true;
-
-            // ---------------- 顶条：目录 ----------------
-            var top = new FlowLayoutPanel();
-            top.Dock = DockStyle.Top;
-            top.Height = 44;
-            top.FlowDirection = FlowDirection.LeftToRight;
-            top.WrapContents = false;
-            top.Padding = new Padding(8, 8, 8, 8);
-
-            var lblDir = new Label();
-            lblDir.Text = "模板目录";
-            lblDir.AutoSize = false;
-            lblDir.Size = new Size(64, 26);
-            lblDir.TextAlign = ContentAlignment.MiddleLeft;
-            lblDir.Margin = new Padding(0, 2, 4, 0);
-
-            txtDir = new TextBox();
-            txtDir.Size = new Size(560, 26);
-            txtDir.Margin = new Padding(0, 2, 8, 0);
-            txtDir.TextChanged += OnDirTextChanged;
-
-            btnBrowseDir = MakeButton("浏览…", 76);
-            btnBrowseDir.Click += OnBrowseDir;
-            btnOpenDir = MakeButton("打开", 60);
-            btnOpenDir.Click += OnOpenDir;
-            btnRescan = MakeButton("重扫", 60);
-            btnRescan.Click += (s, e) => ScanAsync();
-
-            top.Controls.Add(lblDir);
-            top.Controls.Add(txtDir);
-            top.Controls.Add(btnBrowseDir);
-            top.Controls.Add(btnOpenDir);
-            top.Controls.Add(btnRescan);
-
-            // ---------------- 底部：入库区 ----------------
-            var bottom = new FlowLayoutPanel();
-            bottom.Dock = DockStyle.Bottom;
-            bottom.Height = 96;
-            bottom.FlowDirection = FlowDirection.LeftToRight;
-            bottom.WrapContents = false;
-            bottom.Padding = new Padding(8, 4, 8, 4);
-
-            var lblTag = new Label();
-            lblTag.Text = "标签";
-            lblTag.AutoSize = false;
-            lblTag.Size = new Size(40, 26);
-            lblTag.TextAlign = ContentAlignment.MiddleLeft;
-            lblTag.Margin = new Padding(0, 2, 4, 0);
-
-            txtLabel = new TextBox();
-            txtLabel.Size = new Size(110, 26);
-            txtLabel.Margin = new Padding(0, 2, 6, 0);
-            txtLabel.TextChanged += OnLabelTextChanged;
-
-            lblLabelBytes = new Label();
-            lblLabelBytes.Text = "0 字符";
-            lblLabelBytes.AutoSize = false;
-            lblLabelBytes.Size = new Size(112, 26);
-            lblLabelBytes.TextAlign = ContentAlignment.MiddleLeft;
-            lblLabelBytes.Margin = new Padding(0, 2, 10, 0);
-
-            rdoAppend = new RadioButton();
-            rdoAppend.Text = "追加样本";
-            rdoAppend.Checked = true;
-            rdoAppend.AutoSize = true;
-            rdoAppend.Margin = new Padding(0, 4, 10, 0);
-
-            rdoReplace = new RadioButton();
-            rdoReplace.Text = "覆盖主样本";
-            rdoReplace.AutoSize = true;
-            rdoReplace.Margin = new Padding(0, 4, 10, 0);
-
-            btnAdd = MakeButton("入库", 72);
-            btnAdd.Kind = UiButtonKind.Start;
-            btnAdd.Click += OnAdd;
-            btnDelete = MakeButton("删除该字符", 104);
-            btnDelete.Kind = UiButtonKind.Stop;
-            btnDelete.Click += OnDelete;
-            btnClearAll = MakeButton("清空目录", 88);
-            btnClearAll.Kind = UiButtonKind.Stop;
-            btnClearAll.Click += OnClearAll;
-            btnMigrate = MakeButton("迁移到…", 88);
-            btnMigrate.Click += OnMigrate;
-
-            bottom.Controls.Add(lblTag);
-            bottom.Controls.Add(txtLabel);
-            bottom.Controls.Add(lblLabelBytes);
-            bottom.Controls.Add(rdoAppend);
-            bottom.Controls.Add(rdoReplace);
-            bottom.Controls.Add(btnAdd);
-            bottom.Controls.Add(btnDelete);
-            bottom.Controls.Add(btnClearAll);
-            bottom.Controls.Add(btnMigrate);
-
-            // ---------------- 左：列表 + 失败清单 ----------------
-            var left = new Panel();
-            left.Dock = DockStyle.Left;
-            left.Width = 430;
-            left.Padding = new Padding(8, 4, 4, 4);
-
-            listChars = new ListView();
-            listChars.Dock = DockStyle.Fill;
-            listChars.View = View.Details;
-            listChars.FullRowSelect = true;
-            listChars.MultiSelect = false;
-            listChars.HideSelection = false;
-            listChars.Columns.Add("标签", 110);
-            listChars.Columns.Add("样本", 50);
-            listChars.Columns.Add("尺寸", 90);
-            listChars.Columns.Add("时间", 120);
-            listChars.SelectedIndexChanged += OnCharSelected;
-
-            lblFailures = new Label();
-            lblFailures.Dock = DockStyle.Bottom;
-            lblFailures.Height = 84;
-            lblFailures.TextAlign = ContentAlignment.TopLeft;
-            lblFailures.AutoEllipsis = false;
-
-            left.Controls.Add(listChars);
-            left.Controls.Add(lblFailures);
-
-            // ---------------- 右：图像区 + 提取预览 ----------------
-            var right = new Panel();
-            right.Dock = DockStyle.Fill;
-            right.Padding = new Padding(4, 4, 8, 4);
-
-            var rightTop = new FlowLayoutPanel();
-            rightTop.Dock = DockStyle.Top;
-            rightTop.Height = 40;
-            rightTop.FlowDirection = FlowDirection.LeftToRight;
-            rightTop.WrapContents = false;
-
-            btnLoadImage = MakeButton("载入图片", 96);
-            btnLoadImage.Click += OnLoadImage;
-            btnDrawRoi = MakeButton("框选字符", 96);
-            btnDrawRoi.Kind = UiButtonKind.Grab;
-            btnDrawRoi.Click += OnDrawRoi;
-
-            lblPreviewInfo = new Label();
-            lblPreviewInfo.Text = "在图上框选一个字符 → 填标签 → 入库";
-            lblPreviewInfo.AutoSize = false;
-            lblPreviewInfo.Size = new Size(360, 26);
-            lblPreviewInfo.TextAlign = ContentAlignment.MiddleLeft;
-            lblPreviewInfo.Margin = new Padding(8, 4, 0, 0);
-            lblPreviewInfo.ForeColor = UiTheme.ColorTextSecondary;
-
-            rightTop.Controls.Add(btnLoadImage);
-            rightTop.Controls.Add(btnDrawRoi);
-            rightTop.Controls.Add(lblPreviewInfo);
-
-            viewer = new ImageViewer();
-            viewer.Dock = DockStyle.Fill;
-            viewer.OwnsImage = true;
-            viewer.ShapeCreated += OnViewerShapeCreated;
-
-            picPreview = new PictureBox();
-            picPreview.Dock = DockStyle.Right;
-            picPreview.Width = 140;
-            picPreview.SizeMode = PictureBoxSizeMode.Zoom;
-            picPreview.BackColor = UiTheme.ColorViewBg;
-
-            right.Controls.Add(viewer);
-            right.Controls.Add(picPreview);
-            right.Controls.Add(rightTop);
-
-            // ---------------- 状态条 ----------------
-            lblStatus = new Label();
-            lblStatus.Dock = DockStyle.Bottom;
-            lblStatus.Height = 26;
-            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblStatus.Padding = new Padding(8, 0, 8, 0);
-            lblStatus.Text = "就绪：在右侧图上框选【单个字符】→ 填标签 → 入库（一个模板只装一个字符）";
-
-            Controls.Add(right);
-            Controls.Add(left);
-            Controls.Add(top);
-            Controls.Add(bottom);
-            Controls.Add(lblStatus);
-
-            ResumeLayout(false);
-            PerformLayout();
+            return LicenseManager.UsageMode == LicenseUsageMode.Designtime;
         }
 
-        private static UiButton MakeButton(string text, int width)
+        /// <summary>
+        /// 按钮语义色。放在运行期而不是 InitializeComponent：
+        /// 自定义枚举属性（<see cref="UiButtonKind"/>）写进设计器代码容易被反序列化器丢弃。
+        /// </summary>
+        private void ApplyButtonKinds()
         {
-            var b = new UiButton();
-            b.Text = text;
-            b.Kind = UiButtonKind.Neutral;
-            b.Size = new Size(width, 28);
-            b.Margin = new Padding(0, 2, 6, 2);
-            return b;
+            btnAdd.Kind = UiButtonKind.Start;
+            btnDelete.Kind = UiButtonKind.Stop;
+            btnClearAll.Kind = UiButtonKind.Stop;
+            btnDrawRoi.Kind = UiButtonKind.Grab;
+        }
+
+        /// <summary>依赖主题静态值的颜色，运行期统一套；设计器代码只保留中性默认色。</summary>
+        private void ApplyThemeColors()
+        {
+            lblPreviewInfo.ForeColor = UiTheme.ColorTextSecondary;
+            picPreview.BackColor = UiTheme.ColorViewBg;
         }
 
         // =====================================================================
@@ -351,6 +165,12 @@ namespace VisionPlatform.UI
                 reason = ex.Message;
                 return false;
             }
+        }
+
+        /// <summary>「重扫」按钮：设计器只认具名处理器，lambda 无法被序列化。</summary>
+        private void OnRescan(object sender, EventArgs e)
+        {
+            ScanAsync();
         }
 
         private void OnBrowseDir(object sender, EventArgs e)

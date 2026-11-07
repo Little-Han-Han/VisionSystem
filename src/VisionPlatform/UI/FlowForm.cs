@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Core;
 using VisionPlatform.Flow;
+using VisionPlatform.Framework.Modules;
 using VisionSystem.Controls;
 using VisionSystem.Controls.Geometry;
 
@@ -1324,96 +1325,106 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            if (type == FlowNodeType.LineCaliper)
+            // 预览由模块声明驱动（LayoutPreviewSpec），本窗体不再按节点类型分支。
+            FlowModuleInfo module = FlowModule.FindByType(type);
+            if (module == null || module.Module == null || module.Module.Ui.Previews.Count == 0)
             {
-                int count = node.GetInt("CaliperCount", 10);
-                double len = node.GetDouble("ProjectionLength", 20);
-                double hw = node.GetDouble("FilterHalfWidth", 2);
-
-                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutLine(
-                    node.GetDouble("X1", 100), node.GetDouble("Y1", 100),
-                    node.GetDouble("X2", 300), node.GetDouble("Y2", 100),
-                    count, len, hw);
-
-                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
-                    "卡尺 {0} 个 · 投影 {1:0.#}px · 宽度 {2:0.#}px（未运行：示意布局）",
-                    count, len, Math.Max(1.0, hw * 2)));
+                flowPreview.ClearNodeLayout();
                 return;
             }
 
-            // 边缘对：与直线卡尺同一套布局（扫描线 + 每格投影窗），只是提示文案不同
-            if (type == FlowNodeType.EdgePair)
+            var shapes = new List<IGeometryShape>();
+            string note = "";
+
+            foreach (LayoutPreviewSpec spec in module.Module.Ui.Previews)
             {
-                int count = node.GetInt("CaliperCount", 10);
-                double len = node.GetDouble("ProjectionLength", 30);
-                double hw = node.GetDouble("FilterHalfWidth", 2);
+                if (spec == null) continue;
+                string prefix = spec.Prefix ?? "";
 
-                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutLine(
-                    node.GetDouble("X1", 100), node.GetDouble("Y1", 100),
-                    node.GetDouble("X2", 300), node.GetDouble("Y2", 100),
-                    count, len, hw);
+                if (spec.Kind == LayoutPreviewKind.LineCaliper)
+                {
+                    int count = PreviewInt(node, type, prefix + "CaliperCount");
+                    double len = PreviewDouble(node, type, prefix + "ProjectionLength");
+                    double hw = PreviewDouble(node, type, prefix + "FilterHalfWidth");
 
-                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
-                    "边缘对：卡尺 {0} 个 · 投影 {1:0.#}px（投影长度要大于被测线宽）", count, len));
-                return;
+                    shapes.AddRange(FlowShapes.CaliperLayoutLine(
+                        PreviewDouble(node, type, prefix + "X1"),
+                        PreviewDouble(node, type, prefix + "Y1"),
+                        PreviewDouble(node, type, prefix + "X2"),
+                        PreviewDouble(node, type, prefix + "Y2"),
+                        count, len, hw));
+
+                    if (string.IsNullOrEmpty(note) && !string.IsNullOrEmpty(spec.Note))
+                        note = string.Format(CultureInfo.InvariantCulture, spec.Note,
+                            count, len, Math.Max(1.0, hw * 2));
+                }
+                else if (spec.Kind == LayoutPreviewKind.CircleCaliper)
+                {
+                    int count = PreviewInt(node, type, prefix + "CaliperCount");
+                    double len = PreviewDouble(node, type, prefix + "ProjectionLength");
+                    double hw = PreviewDouble(node, type, prefix + "FilterHalfWidth");
+
+                    shapes.AddRange(FlowShapes.CaliperLayoutCircle(
+                        PreviewDouble(node, type, prefix + "Cx"),
+                        PreviewDouble(node, type, prefix + "Cy"),
+                        PreviewDouble(node, type, prefix + "InnerRadius"),
+                        PreviewDouble(node, type, prefix + "OuterRadius"),
+                        PreviewDouble(node, type, prefix + "StartAngle"),
+                        PreviewDouble(node, type, prefix + "AngleSpan"),
+                        count, len, hw));
+
+                    if (string.IsNullOrEmpty(note) && !string.IsNullOrEmpty(spec.Note))
+                        note = string.Format(CultureInfo.InvariantCulture, spec.Note,
+                            count, len, Math.Max(1.0, hw * 2));
+                }
             }
 
-            // 交点卡尺：两组扫描线一起画，用户一眼能看出两条线是否交叉在视野内
-            if (type == FlowNodeType.LineIntersect)
-            {
-                var shapes = new List<IGeometryShape>();
-                shapes.AddRange(FlowShapes.CaliperLayoutLine(
-                    node.GetDouble("Line1X1", 100), node.GetDouble("Line1Y1", 100),
-                    node.GetDouble("Line1X2", 300), node.GetDouble("Line1Y2", 100),
-                    node.GetInt("Line1CaliperCount", 10),
-                    node.GetDouble("Line1ProjectionLength", 20),
-                    node.GetDouble("FilterHalfWidth", 2)));
-                shapes.AddRange(FlowShapes.CaliperLayoutLine(
-                    node.GetDouble("Line2X1", 200), node.GetDouble("Line2Y1", 50),
-                    node.GetDouble("Line2X2", 200), node.GetDouble("Line2Y2", 250),
-                    node.GetInt("Line2CaliperCount", 10),
-                    node.GetDouble("Line2ProjectionLength", 20),
-                    node.GetDouble("FilterHalfWidth", 2)));
+            if (string.IsNullOrEmpty(note)) note = "（未运行：示意布局）";
+            flowPreview.ShowNodeLayout(shapes, note);
+        }
 
-                flowPreview.ShowNodeLayout(shapes,
-                    "交点卡尺：两组扫描线（已接「直线1 / 直线2」端子的一侧不用这里的参数）");
-                return;
-            }
+        /// <summary>按参数表默认值兜底读数值（节点缺键时与新建节点表现一致）。</summary>
+        private static double PreviewDouble(FlowNode node, FlowNodeType type, string key)
+        {
+            double def;
+            if (!double.TryParse(NodeParamSchema.DefaultOf(type, key), NumberStyles.Float,
+                                 CultureInfo.InvariantCulture, out def)) def = 0;
+            return node.GetDouble(key, def);
+        }
 
-            if (type == FlowNodeType.CircleCaliper)
-            {
-                int count = node.GetInt("CaliperCount", 20);
-                double len = node.GetDouble("ProjectionLength", 20);
-                double hw = node.GetDouble("FilterHalfWidth", 2);
-
-                List<IGeometryShape> shapes = FlowShapes.CaliperLayoutCircle(
-                    node.GetDouble("Cx", 320), node.GetDouble("Cy", 240),
-                    node.GetDouble("InnerRadius", 80), node.GetDouble("OuterRadius", 120),
-                    node.GetDouble("StartAngle", 0), node.GetDouble("AngleSpan", 360),
-                    count, len, hw);
-
-                flowPreview.ShowNodeLayout(shapes, string.Format(CultureInfo.InvariantCulture,
-                    "环形卡尺 {0} 个 · 投影 {1:0.#}px · 宽度 {2:0.#}px（未运行：示意布局）",
-                    count, len, Math.Max(1.0, hw * 2)));
-                return;
-            }
-
-            flowPreview.ClearNodeLayout();
+        private static int PreviewInt(FlowNode node, FlowNodeType type, string key)
+        {
+            int def;
+            if (!int.TryParse(NodeParamSchema.DefaultOf(type, key), NumberStyles.Integer,
+                              CultureInfo.InvariantCulture, out def)) def = 0;
+            return node.GetInt(key, def);
         }
 
         // =====================================================================
         //  模板状态卡片与模板制作窗（FR-01/03/05，DEF-02/03）
         // =====================================================================
 
-        /// <summary>节点对应的模板算法键；不是匹配类节点返回 null。</summary>
+        /// <summary>节点对应的模板算法键；不是匹配类节点返回 null（由模块声明）。</summary>
         private static string TemplateAlgorithmOf(FlowNode node)
         {
             FlowNodeType type;
             if (node == null || !node.TryGetType(out type)) return null;
 
-            if (type == FlowNodeType.ShapeMatch) return "ShapeMatch";
-            if (type == FlowNodeType.TemplateMatch) return "TemplateMatch";
-            return null;
+            FlowModuleInfo module = FlowModule.FindByType(type);
+            if (module == null || module.Module == null) return null;
+
+            string alg = module.Module.Ui.TemplateAlgorithm;
+            return string.IsNullOrEmpty(alg) ? null : alg;
+        }
+
+        /// <summary>模块声明的横幅种类（空 = 无横幅）。</summary>
+        private static string BannerKindOf(FlowNode node)
+        {
+            FlowNodeType type;
+            if (node == null || !node.TryGetType(out type)) return "";
+
+            FlowModuleInfo module = FlowModule.FindByType(type);
+            return (module != null && module.Module != null) ? (module.Module.Ui.BannerKind ?? "") : "";
         }
 
         /// <summary>
@@ -1495,7 +1506,8 @@ namespace VisionPlatform.UI
             }
 
             FlowNodeType type;
-            if (!node.TryGetType(out type) || type != FlowNodeType.Ocr)
+            if (node == null || !node.TryGetType(out type)
+                || !string.Equals(BannerKindOf(node), "ocr", StringComparison.Ordinal))
             {
                 MessageBox.Show(this, "节点「" + node.Name + "」不是字符识别节点，没有字符模板库。", "字符模板库",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1536,8 +1548,7 @@ namespace VisionPlatform.UI
             FlowNode node = nodeParamPanel.Node;
             string algorithm = TemplateAlgorithmOf(node);
 
-            FlowNodeType nodeType;
-            bool isOcr = node != null && node.TryGetType(out nodeType) && nodeType == FlowNodeType.Ocr;
+            bool isOcr = string.Equals(BannerKindOf(node), "ocr", StringComparison.Ordinal);
 
             if (algorithm == null && !isOcr)
             {

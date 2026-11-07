@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -92,8 +92,8 @@ namespace VisionPlatform.UI
             Type t = c.GetType();
             if (t.Namespace == "VisionPlatform.UI" &&
                 (t.Name == "FlowCanvasControl" || t.Name == "FlowPreviewPanel" ||
-                 t.Name == "NodeParamPanel" || t.Name == "UiTabControl" ||
-                 t.Name == "UiTitleBar"))
+                 t.Name == "NodeParamPanel" || t.Name == "ParamListControl" ||
+                 t.Name == "UiTabControl" || t.Name == "UiTitleBar"))
                 return true;
 
             return false;

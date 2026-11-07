@@ -1508,37 +1508,17 @@ namespace VisionPlatform.UI
             }
         }
 
-        /// <summary>节点头部左侧的类型色条（区分"采集/定位/测量/输出"）。</summary>
+        /// <summary>节点头部左侧的类型色条（由模块声明提供，画布不认识具体节点类型）。</summary>
         private static Color TypeStripeColor(FlowNode n)
         {
             FlowNodeType t;
             if (n == null || !n.TryGetType(out t)) return UiTheme.ColorTextSecondary;
 
-            switch (t)
-            {
-                case FlowNodeType.ImageSource: return Color.FromArgb(110, 210, 235);
-                case FlowNodeType.Preprocess:
-                case FlowNodeType.ImageFilter: return Color.FromArgb(140, 200, 170);
-                case FlowNodeType.ShapeMatch:
-                case FlowNodeType.TemplateMatch:
-                case FlowNodeType.PositionCorrect: return Color.FromArgb(190, 150, 245);
-                case FlowNodeType.Blob:
-                case FlowNodeType.ColorExtractor:
-                case FlowNodeType.ObjectDetect:
-                case FlowNodeType.Ocr: return Color.FromArgb(255, 185, 95);
-                case FlowNodeType.LineCaliper:
-                case FlowNodeType.CircleCaliper:
-                case FlowNodeType.LineIntersect:
-                case FlowNodeType.EdgePair:
-                case FlowNodeType.PointPointMeasure:
-                case FlowNodeType.PointLineMeasure:
-                case FlowNodeType.LineLineMeasure:
-                case FlowNodeType.FitLine:
-                case FlowNodeType.FitCircle:
-                case FlowNodeType.Sharpness: return Color.FromArgb(140, 220, 150);
-                case FlowNodeType.Script: return Color.FromArgb(220, 180, 255);
-                default: return Color.FromArgb(160, 170, 190);
-            }
+            FlowModuleInfo module = FlowModule.FindByType(t);
+            if (module == null || module.Module == null) return UiTheme.ColorTextSecondary;
+
+            Color c = module.Module.Ui.StripeColor;
+            return (c.A == 0 && c.R == 0 && c.G == 0 && c.B == 0) ? UiTheme.ColorTextSecondary : c;
         }
 
         /// <summary>端子符号：小方块（VisionPro 风格），方块中心即连线端点。</summary>

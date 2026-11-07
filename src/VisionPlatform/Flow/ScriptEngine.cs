@@ -402,6 +402,9 @@ namespace VisionPlatform.Flow
                     cp.ReferencedAssemblies.Add("System.Core.dll");
                     cp.ReferencedAssemblies.Add("System.Data.dll");
                     cp.ReferencedAssemblies.Add(typeof(ScriptEngine).Assembly.Location);
+                    // 数据类型（FlowPortKind / ParamItem / 参数表）已下沉到 Framework：
+                    // 脚本里写 api.Xxx.Kind == FlowPortKind.Number 必须能解析，否则编译期报 CS0012。
+                    cp.ReferencedAssemblies.Add(typeof(VisionPlatform.Flow.FlowPortKind).Assembly.Location);
 
                     string source = WrapperHead + script + WrapperTail;
                     CompilerResults r = provider.CompileAssemblyFromSource(cp, source);

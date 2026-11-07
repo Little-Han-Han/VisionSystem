@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 using VisionPlatform.Core;
@@ -12,6 +12,10 @@ namespace VisionPlatform.UI
         public SplashForm()
         {
             InitializeComponent();
+
+            // 版本号来自 src/SharedVersion.cs（AssemblyInformationalVersion），
+            // 与 README / 文件属性同源，避免界面写死一份。
+            lblTitle.Text = "VisionPlatform  v" + Application.ProductVersion;
         }
 
         public void SetProgress(int percent, string text)

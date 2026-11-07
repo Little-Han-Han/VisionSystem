@@ -5,9 +5,12 @@ REM ==============================================================
 REM  VisionSystem - single solution build script
 REM
 REM  Projects (all under VisionSystem.sln):
-REM    VisionAlgo.Native      C++ / OpenCV   algorithm DLL   (x64)
-REM    VisionSystem.Controls  C#  image viewer control library
-REM    VisionPlatform         C#  industrial vision software
+REM    VisionAlgo.Native         C++ / OpenCV  algorithm DLL        (x64)
+REM    VisionSystem.Controls     C#  image viewer control library
+REM    VisionPlatform.Framework  C#  module contracts / registry
+REM    VisionPlatform.Modules    C#  built-in module package (-> Modules)
+REM    VisionPlatform.UI.Controls C# reusable UI controls / param list
+REM    VisionPlatform           C#  industrial vision software (host)
 REM
 REM  Usage:
 REM    build.bat            Debug   | x64

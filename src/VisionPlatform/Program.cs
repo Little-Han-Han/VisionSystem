@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows.Forms;
 using VisionPlatform.Core;
 using VisionPlatform.Data;
@@ -65,6 +65,16 @@ namespace VisionPlatform
             UiStyle.ForceOverride = UiTheme.IsLight;
 
             Logger.Info("===== VisionPlatform 启动 =====");
+            Logger.Info("软件版本：" + Application.ProductVersion);
+
+            // 模块包（算法模块的声明：端子 / 参数表 / 界面提示）按需从 Modules 目录动态加载。
+            // 宿主不编译期引用模块包：少一个可选模块不会让软件起不来，日志里能看到原因。
+            Framework.Modules.FlowModuleRegistry.Log = delegate(string msg) { Logger.Info(msg); };
+            Framework.Modules.FlowModuleRegistry.EnsureLoaded();
+            Logger.Info(string.Format("模块包：已注册 {0} 个模块，加载失败 {1} 项（目录 {2}）",
+                Framework.Modules.FlowModuleRegistry.Count,
+                Framework.Modules.FlowModuleRegistry.LoadErrors,
+                Framework.Modules.FlowModuleRegistry.ModuleDirectory));
 
             // 恢复算法参数：优先加载上次使用的配方；无命名配方时直接用保存的检测参数快照
             RestoreAlgorithmConfig();
