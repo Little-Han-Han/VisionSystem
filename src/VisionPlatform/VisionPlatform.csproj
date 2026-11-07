@@ -89,6 +89,7 @@
     <Compile Include="UI\ScriptEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Flow\FlowRateLimit.cs" />
     <Compile Include="Flow\FlowRunController.cs" />
     <Compile Include="Flow\FlowRunManager.cs" />
     <Compile Include="Flow\FlowRunner.cs" />

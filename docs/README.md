@@ -85,6 +85,9 @@ flowchart LR
 | 项目分层与依赖方向（改造后） | [VisionPlatform 解耦重构 §2.2](架构/VisionPlatform解耦重构.md) | 顶层 [README 整体软件架构](../README.md) |
 | 参数列表控件 `ParamListControl` / `IParamValueStore` | [VisionPlatform 解耦重构 §3.3](架构/VisionPlatform解耦重构.md) | `src/VisionPlatform.UI.Controls/` |
 | 新增算法模块的操作步骤 | [VisionPlatform 解耦重构 §7.1](架构/VisionPlatform解耦重构.md) | — |
+| 流程拓扑（DAG）/ 分支汇合 / 流程内并行边界 | [流程拓扑与并发](架构/流程拓扑与并发.md) | `FlowOrder` / `FlowValidator` / `FlowRunManager` |
+| 运行性能 / 帧率上限 / 日志与拷贝开销 | [性能优化](架构/性能优化.md) | `Logger` / `FlowRateLimit` / `FlowRunSlot` |
+
 | 分层架构、模块职责、P/Invoke 规范（**改造前快照**） | [平台架构](平台架构.md)（待更新） | 改造后结构见 [解耦重构 §2](架构/VisionPlatform解耦重构.md)；公共约定见 [架构 §7](架构/增量架构设计.md#arch-common) |
 | 已知问题、占位实现、TODO | [遗留问题](遗留问题.md)（待更新） | 各增量章节的「落地红线」 |
 
@@ -134,7 +137,9 @@ docs/
 │   └── 增量需求总览.md          5 次增量 PRD 合并
 ├── 架构/
 │   ├── 增量架构设计.md          6 份架构设计合并；§7 公共约定唯一出处
-│   └── VisionPlatform解耦重构.md 模块化/UI 复用改造：耦合点、前后对比、修改记录
+│   ├── VisionPlatform解耦重构.md 模块化/UI 复用改造：耦合点、前后对比、修改记录
+│   ├── 流程拓扑与并发.md         DAG 串行 / 多流程并行 / 条件分支与流程内并行扩展路线
+│   └── 性能优化.md               软件层开销实测、限帧/日志/帧拷贝优化、优化路线
 ├── 参考资料/
 │   ├── 参考资料汇编.md          形状匹配资料 + VisionPro 参考图实测
 │   └── 使用说明.md              操作 / 集成 / OpenCV 对接

@@ -26,6 +26,13 @@ namespace VisionPlatform.Modules
                     Add(list, "FolderPath", "");
                     Add(list, "FolderPersist", "0");   // 0 = 只在本次运行内递增，1 = 落盘记住位置
                     Add(list, "TimeoutMs", "3000");
+                    // 相机采集参数（预留）：当前只保存到流程配置，不下发相机；
+                    // 接入厂商 SDK 后按这些 Key 读取即可，无需迁移旧配置。
+                    Add(list, "Exposure", "10000");          // 曝光，微秒
+                    Add(list, "Gain", "0");                  // 增益，dB
+                    Add(list, "TriggerMode", "Continuous");  // Continuous / Software / Hardware
+                    Add(list, "TriggerSource", "Line0");     // Line0 / Line1 / Software
+                    Add(list, "TriggerDelay", "0");          // 触发延时，微秒
                     // ROI 裁剪：宽或高为 0 = 全图
                     Add(list, "RoiX", "0");
                     Add(list, "RoiY", "0");

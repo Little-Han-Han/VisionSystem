@@ -98,6 +98,7 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
       <OpenMPSupport>true</OpenMPSupport>
       <!-- 源文件含中文注释，按 UTF-8 解析，避免 GBK 代码页下出现 C4819 / C2447 -->
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

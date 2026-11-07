@@ -205,6 +205,22 @@ namespace VisionPlatform.Modules
                 "关闭：位置只在本次软件运行内递增（重启回到第一张）；开启：退出后仍从上次的位置继续"));
             t.Fields.Add(Int("TimeoutMs", "抓帧超时(ms)", 100, 60000, "3000"));
 
+            t.Fields.Add(Group("相机采集（预留：仅保存，暂不下发）"));
+            t.Fields.Add(Dbl("Exposure", "曝光 (µs)", 1m, 10000000m, 1, 100m, "10000",
+                "相机曝光时间，单位微秒。当前版本仅写入流程配置，不下发到相机"));
+            t.Fields.Add(Dbl("Gain", "增益 (dB)", 0m, 48m, 2, 0.1m, "0",
+                "相机模拟/数字增益。当前仅保存，接入厂商 SDK 后生效"));
+            t.Fields.Add(Enum("TriggerMode", "触发模式", "Continuous",
+                new[] { "连续采集", "软触发", "硬触发" },
+                new[] { "Continuous", "Software", "Hardware" },
+                "连续采集 = 自由运行；软触发 = 每次执行发一次软触发；硬触发 = 外部 IO 信号"));
+            t.Fields.Add(Enum("TriggerSource", "触发源", "Line0",
+                new[] { "Line0", "Line1", "软件" },
+                new[] { "Line0", "Line1", "Software" },
+                "硬触发时的输入线；软触发模式忽略本项"));
+            t.Fields.Add(Dbl("TriggerDelay", "触发延时 (µs)", 0m, 1000000m, 1, 10m, "0",
+                "收到触发信号后延时多久再曝光。当前仅保存"));
+
             t.Fields.Add(Group("ROI 裁剪（宽或高为 0 = 全图）"));
             t.Fields.Add(Int("RoiX", "X", -100000, 100000, "0"));
             t.Fields.Add(Int("RoiY", "Y", -100000, 100000, "0"));
@@ -216,7 +232,8 @@ namespace VisionPlatform.Modules
                 new[] { "0°", "90°", "180°", "270°" }, new[] { "0", "90", "180", "270" }));
             t.Fields.Add(Bool("Mirror", "水平镜像", "0"));
 
-            t.FooterNote = "裁剪后的图像即为下游节点的工作帧；节点里的 ROI 坐标仍按原始图像填写。";
+            t.FooterNote = "裁剪后的图像即为下游节点的工作帧；节点里的 ROI 坐标仍按原始图像填写。"
+                         + "「相机采集」一组当前只做配置保存与导出，不参与取帧；接入相机 SDK 后可直接按这些键下发。";
             return t;
         }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using VisionPlatform.Calibration;
@@ -232,6 +232,18 @@ namespace VisionPlatform.Core
         public int MaxParallelFlows { get; set; }
 
         /// <summary>
+        /// 单条流程的循环运行目标帧率（0 = 不限制，最大 1000）。
+        /// <para>
+        /// 【为什么默认 0】旧版把限帧硬编码为 33ms（≈30fps），算法只要快于 33ms 就会被
+        /// 人工压到 30fps，看起来"比 Halcon 慢"。现在默认不限制，按相机/算法实际能力跑；
+        /// 需要控制 CPU 或日志量时把它设成 30 / 60 即可。
+        /// </para>
+        /// <para>只影响 MainForm 的「全部启动」与 FlowForm 的连续运行，不影响单帧/单步。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int MaxFlowFps { get; set; }
+
+        /// <summary>
         /// 界面主题模式："Dark" / "Light"（大小写不敏感，其余值一律按 Dark 处理）。
         /// 由 <see cref="UiThemeManager"/> 写入，<see cref="Program.Main"/> 在首个窗体
         /// 创建之前读取并套用。
@@ -363,6 +375,12 @@ namespace VisionPlatform.Core
         /// <summary>最大并行流程数的默认值。</summary>
         public const int DefaultMaxParallelFlows = 4;
 
+        /// <summary>循环运行目标帧率默认值：0 = 不限制。</summary>
+        public const int DefaultMaxFlowFps = 0;
+
+        /// <summary>目标帧率上界（防止手改配置写出 1e9 之类的值）。</summary>
+        public const int MaxFlowFpsLimit = 1000;
+
         /// <summary>最大并行流程数的下界。</summary>
         public const int MinParallelFlows = 1;
 
@@ -376,6 +394,7 @@ namespace VisionPlatform.Core
             LogCollapsed = false;
             CurrentProduct = "";
             MaxParallelFlows = DefaultMaxParallelFlows;
+            MaxFlowFps = DefaultMaxFlowFps;
             Language = Lang.ZhCN;
             Theme = DefaultTheme;
             FlowResultPanelHeight = DefaultResultPanelHeight;
@@ -406,6 +425,14 @@ namespace VisionPlatform.Core
             return ClampMaxParallelFlows(value);
         }
 
+        /// <summary>归一化目标帧率：负数按 0（不限制），超过 1000 按 1000。</summary>
+        public static int NormalizeMaxFlowFps(int value)
+        {
+            if (value < 0) return 0;
+            if (value > MaxFlowFpsLimit) return MaxFlowFpsLimit;
+            return value;
+        }
+
         public UiSettings Clone()
         {
             var clone = new UiSettings();
@@ -414,6 +441,7 @@ namespace VisionPlatform.Core
             // 缺失值（0 → 4）比"抬到 1"更符合预期，故 Clone 也走归一化
             clone.CurrentProduct = CurrentProduct ?? "";
             clone.MaxParallelFlows = NormalizeMaxParallelFlows(MaxParallelFlows);
+            clone.MaxFlowFps = NormalizeMaxFlowFps(MaxFlowFps);
             // 缺失值归一化为默认语言；Lang.Normalize 会在保存端再做一次兜底
             clone.Language = string.IsNullOrWhiteSpace(Language) ? Lang.ZhCN : Language;
             // 主题同理：缺失即深色（漏掉这行会在保存时被清成 null，下次启动退回深色）
@@ -843,6 +871,7 @@ namespace VisionPlatform.Core
             // - AllowCameraShare 缺失即 false → 正是默认值（严格独占），无需额外处理
             if (cfg.Ui.CurrentProduct == null) cfg.Ui.CurrentProduct = "";
             cfg.Ui.MaxParallelFlows = UiSettings.NormalizeMaxParallelFlows(cfg.Ui.MaxParallelFlows);
+            cfg.Ui.MaxFlowFps = UiSettings.NormalizeMaxFlowFps(cfg.Ui.MaxFlowFps);
 
             // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有 Language 字段，
             // 反序列化后为 null，这里归一化为默认语言 zh-CN。

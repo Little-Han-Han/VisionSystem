@@ -1,6 +1,8 @@
-using System;
+﻿using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace VisionPlatform.Core
 {
@@ -14,6 +16,22 @@ namespace VisionPlatform.Core
     public static class Logger
     {
         private static readonly object Sync = new object();
+
+        // ---- 异步文件写入（每帧 RESULT 日志不再同步开关文件）----
+        // 同步 File.AppendAllText 实测 ~6.5ms/条（每次 open/close + 杀软扫描），
+        // 30fps 下就是 20% 的帧时间；这里改为"入队 + 后台批量追加"，
+        // 仍然保留 Logged / EntryLogged 同步事件（UI 与日志库行为不变）。
+        private static readonly ConcurrentQueue<string> FileQueue = new ConcurrentQueue<string>();
+        private static readonly AutoResetEvent FileSignal = new AutoResetEvent(false);
+        private static readonly object FileSync = new object();
+        private static readonly Thread FileThread;
+        private static volatile bool _fileStop;
+
+        static Logger()
+        {
+            FileThread = new Thread(FileLoop) { IsBackground = true, Name = "LoggerFileWriter" };
+            FileThread.Start();
+        }
 
         /// <summary>新日志产生时触发（参数为已格式化的整行文本）。**既有事件，保留不动**。</summary>
         public static event EventHandler<string> Logged;
@@ -72,17 +90,17 @@ namespace VisionPlatform.Core
             var entry = new LogEntry(level, flowName, message, detail);
             string line = entry.Format();
 
-            try
+            // ERROR 必须尽快落盘（崩溃现场就靠它）：先把已有队列刷完，再同步追加。
+            // 其余级别入队由后台线程批量写，单条成本从 ~6.5ms 降到微秒级。
+            if (level == LogLevel.Error)
             {
-                AppPaths.Ensure();
-                lock (Sync)
-                {
-                    File.AppendAllText(AppPaths.LogFile, line + Environment.NewLine, Encoding.UTF8);
-                }
+                Flush();
+                AppendText(line + Environment.NewLine);
             }
-            catch (Exception)
+            else
             {
-                // 日志写失败不应影响主流程
+                FileQueue.Enqueue(line);
+                FileSignal.Set();
             }
 
             // 既有订阅者（MainForm.OnLogged）保持收到过去完全一致的整行文本
@@ -104,6 +122,74 @@ namespace VisionPlatform.Core
             catch (Exception)
             {
                 // 单个订阅者异常不影响其它订阅者
+            }
+        }
+
+        // ---------------------- 异步文件写入 ----------------------
+
+        /// <summary>等待已入队的日志全部落盘（退出 / 崩溃前调用）。</summary>
+        public static void Flush()
+        {
+            for (int i = 0; i < 200 && !FileQueue.IsEmpty; i++)
+            {
+                FileSignal.Set();
+                Thread.Sleep(5);
+            }
+            lock (FileSync) { }   // 等正在进行的 Append 结束
+        }
+
+        /// <summary>停止后台写入线程并做最后一次落盘（程序退出时调用）。</summary>
+        public static void Shutdown()
+        {
+            _fileStop = true;
+            FileSignal.Set();
+
+            try { if (FileThread != null) FileThread.Join(1500); }
+            catch (Exception) { }
+
+            DrainAll();
+        }
+
+        private static void FileLoop()
+        {
+            while (!_fileStop)
+            {
+                FileSignal.WaitOne(200);   // 200ms 一批：既低延迟又不频繁开关文件
+                DrainAll();
+            }
+            DrainAll();
+        }
+
+        private static void DrainAll()
+        {
+            if (FileQueue.IsEmpty) return;
+
+            var sb = new StringBuilder();
+            string line;
+            int n = 0;
+            while (n < 2000 && FileQueue.TryDequeue(out line))
+            {
+                sb.AppendLine(line);
+                n++;
+            }
+            if (n == 0) return;
+
+            AppendText(sb.ToString());
+        }
+
+        private static void AppendText(string text)
+        {
+            try
+            {
+                AppPaths.Ensure();
+                lock (FileSync)
+                {
+                    File.AppendAllText(AppPaths.LogFile, text, Encoding.UTF8);
+                }
+            }
+            catch (Exception)
+            {
+                // 日志写失败不应影响主流程
             }
         }
     }

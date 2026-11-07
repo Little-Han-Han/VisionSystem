@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -43,8 +43,8 @@ namespace VisionPlatform.Flow
     /// </summary>
     public sealed class FlowRunSlot : IDisposable
     {
-        /// <summary>连续运行的最小周期（ms），保证 ≤30 fps。</summary>
-        public const int MinCycleMs = 33;
+        /// <summary>连续运行最小周期（ms）；0 = 不限制，由 UiSettings.MaxFlowFps 换算。</summary>
+        private int _minCycleMs;
 
         private readonly object _sync = new object();
 
@@ -308,6 +308,7 @@ namespace VisionPlatform.Flow
         private void Loop()
         {
             var cycle = new Stopwatch();
+            _minCycleMs = FlowRateLimit.ResolveMinCycleMs();
 
             try
             {
@@ -328,6 +329,9 @@ namespace VisionPlatform.Flow
 
                         // FR-PAR-09：连续运行不逐节点存帧
                         session = _runner.Begin(_flow, camera, false);
+                        // 并行生产槽不看"每个节点当时的画面"：关掉节点帧克隆，
+                        // 省掉每帧 N 次整幅拷贝与随之而来的大对象内存压力。
+                        session.CaptureProgressFrames = false;
 
                         if (session.Aborted)
                         {
@@ -375,14 +379,9 @@ namespace VisionPlatform.Flow
                         }
                     }
 
-                    // 限帧 ≤30 fps
+                    // 限帧：按配置的目标帧率补等待；0 = 不限制（只让出时间片）
                     cycle.Stop();
-                    int wait = MinCycleMs - (int)cycle.ElapsedMilliseconds;
-                    if (wait > 0)
-                    {
-                        try { Thread.Sleep(wait); }
-                        catch (Exception) { }
-                    }
+                    FlowRateLimit.Wait((int)cycle.ElapsedMilliseconds, _minCycleMs);
                 }
             }
             finally

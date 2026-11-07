@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using VisionPlatform.Core;
 
@@ -191,6 +191,19 @@ namespace VisionPlatform.Flow
                 if (slot.Count <= 1) continue;
 
                 FlowNode node = FindNode(byId, slot.NodeId);
+
+                // 汇总口（FlowPortDef.MultiIn = true，如「结果输出.Any」「脚本.Any」）允许
+                // 多路分支同时汇入；这是 DAG 扇出/汇聚能跑通的前提，不能按单输入处理。
+                if (node != null)
+                {
+                    FlowNodeType nt;
+                    if (node.TryGetType(out nt))
+                    {
+                        FlowPortDef def = FlowPortSchema.Find(nt, FlowPortDir.In, slot.PortKey);
+                        if (def != null && def.MultiIn) continue;
+                    }
+                }
+
                 result.Add(new FlowIssue(FlowIssueLevel.Error, CodeMultiInput,
                     "输入端子「" + FlowOrder.Label(node) + "." + PortLabel(node, FlowPortDir.In, slot.PortKey)
                     + "」连接了多条连线，一个输入端子只能接一条。", slot.NodeId, slot.PortKey));

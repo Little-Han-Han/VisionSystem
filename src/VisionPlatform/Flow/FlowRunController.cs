@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -156,7 +156,7 @@ namespace VisionPlatform.Flow
     }
 
     /// <summary>
-    /// 流程运行编排器（单帧 / 单步 / 连续）：后台线程执行、覆盖式投递、限帧 ≤30 fps、
+    /// 流程运行编排器（单帧 / 单步 / 连续）：后台线程执行、覆盖式投递、按配置限帧（默认不限）、
     /// 帧率与平均耗时统计。
     ///
     /// 【线程约定】<see cref="ProgressReady"/> 与 <see cref="OutputReady"/> 均在<strong>工作线程</strong>
@@ -178,12 +178,12 @@ namespace VisionPlatform.Flow
             /// <summary>单步运行（每点一次前进一个节点）。</summary>
             Step,
 
-            /// <summary>连续运行（≤30 fps 循环整链）。</summary>
+            /// <summary>连续运行（按配置限帧，默认不限）。</summary>
             Loop
         }
 
-        /// <summary>连续运行的最小周期（ms），保证 ≤30 fps。</summary>
-        public const int MinCycleMs = 33;
+        /// <summary>连续运行最小周期（ms）；0 = 不限制，由 UiSettings.MaxFlowFps 换算。</summary>
+        private int _minCycleMs;
 
         private readonly FlowRunner _runner;
         private readonly object _sync = new object();
@@ -267,7 +267,7 @@ namespace VisionPlatform.Flow
             Start(RunMode.Once, delegate { RunToCore(flow, camera, nodeId); });
         }
 
-        /// <summary>连续运行：以 ≤30 fps 循环执行整链，每周期结束投递一次快照。</summary>
+        /// <summary>连续运行：按配置目标帧率循环执行整链（默认不限），每周期结束投递一次快照。</summary>
         public void StartLoop(FlowDefinition flow, ICamera camera)
         {
             lock (_sync)
@@ -409,6 +409,8 @@ namespace VisionPlatform.Flow
 
         private void Start(RunMode mode, ThreadStart body)
         {
+            _minCycleMs = FlowRateLimit.ResolveMinCycleMs();
+
             lock (_sync)
             {
                 if (_mode == RunMode.Loop) return;      // 连续运行中不接受其它模式
@@ -619,8 +621,9 @@ namespace VisionPlatform.Flow
                     // 连续运行关掉逐节点留帧：避免每周期 N 份 Bitmap 堆积
                     DropCycleOverlay();     // 上一周期残留的效果层作废
 
-                    // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）
-                    s = _runner.Begin(flow, camera, false, false);
+                    // 循环内 Begin 传 false：不清空 Auto 基准（已在上面清过一次）；
+                    // captureSourceFrame=true：预览面板要显示"原图"。
+                    s = _runner.Begin(flow, camera, false, false, true);
 
                     if (s.Aborted)
                     {
@@ -698,14 +701,9 @@ namespace VisionPlatform.Flow
                     }
                 }
 
-                // 限帧：补到 ≥33 ms（≤30 fps）
+                // 限帧：按配置的目标帧率补等待；0 = 不限制（只让出时间片）
                 cycleWatch.Stop();
-                int wait = MinCycleMs - (int)cycleWatch.ElapsedMilliseconds;
-                if (wait > 0)
-                {
-                    try { Thread.Sleep(wait); }
-                    catch (Exception) { }
-                }
+                FlowRateLimit.Wait((int)cycleWatch.ElapsedMilliseconds, _minCycleMs);
             }
         }
 

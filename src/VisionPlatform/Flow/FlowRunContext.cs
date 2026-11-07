@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -312,7 +312,7 @@ namespace VisionPlatform.Flow
         /// <summary>取图用的相机；本地图片模式下可为 null。</summary>
         public ICamera Camera { get; set; }
 
-        /// <summary>单链节点顺序。</summary>
+        /// <summary>拓扑序节点列表（DAG：扇出 / 汇合均按此顺序串行执行）。</summary>
         public List<FlowNode> Chain { get; set; }
 
         /// <summary>下一个待执行节点的下标。</summary>
@@ -320,6 +320,20 @@ namespace VisionPlatform.Flow
 
         /// <summary>当前工作帧（可能被预处理节点替换）。</summary>
         public Bitmap Current { get; set; }
+
+        /// <summary>
+        /// 是否保存"刚采进来的原图"副本（<see cref="SourceFrame"/>）。
+        /// <para>只有需要显示原图的流程预览才置 true；并行生产运行置 false，
+        /// 省掉每帧一次整幅 Bitmap 克隆。</para>
+        /// </summary>
+        public bool CaptureSourceFrame { get; set; }
+
+        /// <summary>
+        /// 是否为节点保留"它当时处理的画面"（<see cref="FlowNodeProgress.Frame"/>）。
+        /// <para>单步 / 预览需要；并行槽（MainForm 全部启动）不看节点帧，置 false
+        /// 可省掉每帧 N 次克隆与随之而来的大对象内存压力。</para>
+        /// </summary>
+        public bool CaptureProgressFrames { get; set; } = true;
 
         /// <summary>图像源节点产出的原始帧副本（供「原始图像」预览模式）。</summary>
         public Bitmap SourceFrame { get; set; }

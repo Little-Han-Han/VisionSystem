@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -128,14 +128,15 @@ namespace VisionPlatform.Flow
         // =====================================================================
 
         /// <summary>
-        /// 建立一次运行会话：校验单链拓扑并准备上下文。
+        /// 建立一次运行会话：校验拓扑（DAG）并准备上下文。
         /// 失败时返回 <see cref="FlowRunSession.Aborted"/> = true 的会话，原因见
         /// <see cref="FlowRunSession.ErrorMessage"/>。
         /// </summary>
         /// <param name="flow">待执行流程。</param>
         /// <param name="camera">取图相机；图像源为「本地图片」时允许为 null。</param>
         /// <param name="captureFrames">是否为每个节点保存输出帧副本（单步预览需要）。</param>
-        public FlowRunSession Begin(FlowDefinition flow, ICamera camera, bool captureFrames = false, bool clearAutoRefs = true)
+        public FlowRunSession Begin(FlowDefinition flow, ICamera camera, bool captureFrames = false,
+                                    bool clearAutoRefs = true, bool captureSourceFrame = false)
         {
             // 每次「运行」开始前清空位置修正 Auto 基准缓存，避免上一轮示教的基准泄漏到
             // 本轮，造成仿射变换基准错位（图像偏移 / 修正缺失）。
@@ -149,6 +150,8 @@ namespace VisionPlatform.Flow
             s.Flow = flow;
             s.Camera = camera;
             s.CaptureFrames = captureFrames;
+            s.CaptureSourceFrame = captureSourceFrame;
+            s.CaptureProgressFrames = true;
 
             if (flow == null)
             {
@@ -893,6 +896,7 @@ namespace VisionPlatform.Flow
         private static void EnsureNodeFrame(FlowRunSession s, FlowNodeProgress p)
         {
             if (p == null || p.Frame != null || s == null || s.Current == null) return;
+            if (!s.CaptureProgressFrames) return;   // 并行槽不看节点帧：不克隆
             try { p.Frame = (Bitmap)s.Current.Clone(); }
             catch (Exception) { p.Frame = null; }
         }
@@ -1523,8 +1527,13 @@ namespace VisionPlatform.Flow
                 s.ReplaceFrame(work);          // 所有权移交会话
                 workIsClone = false;           // 已交出，不再由本方法释放
 
-                if (s.SourceFrame != null) { s.SourceFrame.Dispose(); s.SourceFrame = null; }
-                s.SourceFrame = (Bitmap)work.Clone();
+                // 原图副本只在"流程预览要显示原图"时保存；生产并行运行不需要，
+                // 否则每帧白白多一次整幅克隆（5MP 约 15MB）。
+                if (s.CaptureSourceFrame)
+                {
+                    if (s.SourceFrame != null) { s.SourceFrame.Dispose(); s.SourceFrame = null; }
+                    s.SourceFrame = (Bitmap)work.Clone();
+                }
 
                 s.OffsetX = cropped ? roiX : 0.0;
                 s.OffsetY = cropped ? roiY : 0.0;

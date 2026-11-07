@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using VisionPlatform.Camera;
@@ -11,7 +11,7 @@ namespace VisionPlatform.Flow
     ///
     /// 【隔离】每条运行中的流程一个 <see cref="FlowRunSlot"/>，槽各自持有
     /// <see cref="FlowRunner"/> / 线程 / 会话，互不共享（共享知识 26）。
-    /// 【并行只做流程维度隔离】单链拓扑与校验文案一行不改。
+    /// 【并行只做流程维度隔离】拓扑（DAG）校验与文案一行不改。
     /// 【关窗铁律】<c>StopAll → JoinAll → Dispose 各槽 Runner → CloseAll()</c>（共享知识 30）。
     ///
     /// 状态字典读写一律加锁，<see cref="Snapshot"/> 返回副本（共享知识 29.3）。
@@ -94,7 +94,7 @@ namespace VisionPlatform.Flow
         // =====================================================================
 
         /// <summary>
-        /// 启动一条流程。校验顺序：Enabled → 单链拓扑 → 相机已打开 → 相机租约 →
+        /// 启动一条流程。校验顺序：Enabled → 拓扑（DAG） → 相机已打开 → 相机租约 →
         /// 并行上限 → 未重复启动；任一失败返回中文原因且不启动。
         /// </summary>
         public static OpResult StartOne(string flowId)
@@ -116,7 +116,7 @@ namespace VisionPlatform.Flow
             if (!flow.Enabled)
                 return OpResult.Fail("流程「" + flow.Name + "」已停用，请在流程编排中启用后再启动");
 
-            // 2) 单链拓扑
+            // 2) 拓扑（DAG）
             string chainError;
             if (!FlowRunner.Validate(flow, out chainError))
                 return OpResult.Fail("流程「" + flow.Name + "」拓扑校验未通过：" + chainError);

@@ -133,8 +133,11 @@ namespace VisionPlatform
             }
 
             Camera.CameraManager.Instance.CloseAll();
-            LogDb.Shutdown();
+
+            // 先写退出日志并刷盘，再停日志库：保证最后一行一定落到文件里。
             Logger.Info("===== VisionPlatform 退出 =====");
+            Logger.Shutdown();
+            LogDb.Shutdown();
         }
 
         /// <summary>根据配置文件中的算法参数，恢复上次使用的配方或检测参数快照。</summary>

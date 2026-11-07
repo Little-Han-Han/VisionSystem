@@ -20,7 +20,7 @@ namespace VisionPlatform.UI
 
     /// <summary>
     /// 流程编排页：工具箱拖拽源 / 画布 / 节点参数面板 / 底部流程管理与绑定。
-    /// 所有编辑即时写回 <see cref="ConfigStore"/>；运行单链流程并把结果经
+    /// 所有编辑即时写回 <see cref="ConfigStore"/>；运行流程（按 DAG 拓扑序）并把结果经
     /// <see cref="FlowOutputChannel"/> 回传主界面。
     /// </summary>
     public partial class FlowForm : Form
@@ -2300,7 +2300,7 @@ namespace VisionPlatform.UI
             string viewErr = CheckView(f);
 
             var sb = new StringBuilder();
-            sb.AppendLine(chainOk ? "单链拓扑：通过" : ("单链拓扑：不通过 —— " + chainErr));
+            sb.AppendLine(chainOk ? "拓扑（DAG）：通过" : ("拓扑（DAG）：不通过 —— " + chainErr));
             sb.AppendLine("相机：" + (camErr == null ? "正常（已打开）" : camErr));
             sb.AppendLine("视图：" + (viewErr == null ? "正常" : ("越界，运行时会跳过显示（视图 " + f.ViewIndex + "）")));
 
@@ -2328,7 +2328,7 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
-        /// 运行前置检查：流程存在 → 执行器可用 → 单链拓扑合法 → 相机就绪（本地图片源可无相机）。
+        /// 运行前置检查：流程存在 → 执行器可用 → 拓扑（DAG）合法 → 相机就绪（本地图片源可无相机）。
         /// 通过时返回流程并给出相机；不通过时已提示用户并返回 null。
         /// </summary>
         private FlowDefinition PrepareRun(out ICamera camera)
