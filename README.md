@@ -21,15 +21,15 @@
 四层结构，自底向上：
 
 ```
-┌─ 算法层    VisionAlgo.Native  (C++/OpenCV) ── 预处理 / 匹配 / 测量 / 检测 / OCR / 相机采集
+┌─ 算法层    VisionAlgo.Native  (C++/OpenCV) ── 预处理 / 匹配 / 测量 / 检测 / OCR / 条码 / 相机采集
 │           导出为 x64 DLL，按 va_ 前缀 C 接口暴露
 ├─ P/Invoke 边界  VisionPlatform/Native/VisionAlgo.cs、NativeCamera.cs
 │           （界面与算法之间唯一的接触面：结构体一一映射、零拷贝传入、输出由 C# 分配）
 ├─ 契约层    VisionPlatform.Framework ── 模块契约 / 注册表 / 动态加载 / 公共数据类型（无 WinForms）
-├─ 模块层    VisionPlatform.Modules   ── 28 个算法模块的端子 / 默认参数 / 参数表 / 界面声明（运行时加载）
+├─ 模块层    VisionPlatform.Modules   ── 30 个流程模块的端子 / 默认参数 / 参数表 / 界面声明（运行时加载）
 ├─ 业务层    VisionPlatform           ── 配置 / 相机 / 流程执行 / 通讯 / 配方 / 检测引擎
 └─ 表现层    VisionPlatform/UI + VisionPlatform.UI.Controls + VisionSystem.Controls
-            窗体、可复用主题与参数列表控件、图像显示控件库
+            窗体、可复用主题与参数列表控件、图像/点云显示控件库
 ```
 
 **核心约束**：界面不直接碰算法，算法不认识界面；节点差异由模块包**声明**（端子 / 参数表 / 界面提示），
@@ -38,25 +38,32 @@
 
 **多流程并行**：`FlowRunManager` 为每条流程维护一个 `FlowRunSlot`（独立线程 + 独立原生算法上下文 `va::Context`），「全部启动」并行跑所有流程；相机按 `CameraLease` 独占（默认严格独占，避免并发取帧打崩厂商 SDK），同相机取帧由 `CameraGrabGate` 串行化。
 
-**一次检测的数据流**：相机 `GrabOne()` → `FlowRunner` 按节点链执行（图像源 → 各算法节点 → 汇总判定）→ 结果以灰度图 + 几何图形叠加形式回显到 `ImageViewer`，并刷新 OK/NG 统计。
+**一次检测的数据流**：相机 `GrabOne()`（或读取点云/图片文件夹等本地源）→ `FlowRunner` 按节点链执行
+（图像源 / 点云源 → 各算法节点 → 汇总判定）→ 结果以灰度图 + 几何图形叠加回显到 `ImageViewer`
+（点云自动切 3D 模式，X/Y/Z 坐标轴 + 三维旋转），并刷新 OK/NG 统计。
+
+**运行闸门与触发式运行**：`CommRuntime` 是通讯唯一闸门 —— 主界面「运行」才 `Activate()`，
+暂停/停止 `Suspend()`；**非运行态不连接 / 不心跳 / 不轮询 / 不写状态位**。
+产线默认**触发式运行**：外部触发走 `FlowRunManager.Trigger(flow)` 单发一轮（执行中重复触发丢弃、不排队），
+连续模式才按帧率循环。多流程分区：第 i 条流程 = `基址 + i × 步长`，触发侧与发送侧步长必须一致。
 
 ### 模块职责
 
 | 层 | 项目 / 目录 | 职责 |
 |---|---|---|
-| 算法层 | `VisionAlgo.Native` | C++ / OpenCV：预处理、Blob、清晰度、圆/直线拟合、模板/形状匹配、目标检测、OCR、本机相机采集 |
+| 算法层 | `VisionAlgo.Native` | C++ / OpenCV：预处理、Blob、清晰度、圆/直线拟合、模板/形状匹配、目标检测、OCR、条码、本机相机采集 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs`、`Native/NativeCamera.cs` | 唯一接触 C++ 处；结构体映射、零拷贝传入、相机帧经 `VA_Image`（BGR，`stride` 如实传递） |
 | 契约层 | `VisionPlatform.Framework` | `IFlowNodeModule` / `IFlowModulePackage`、`FlowModuleRegistry`、`ModuleLoader`、公共数据类型（`FlowNodeType` / `ParamItem` / 参数表 / 端子） |
-| 模块层 | `VisionPlatform.Modules` | 28 个算法模块的清单、默认参数、参数表、端子、界面提示；输出到 `Modules\`，由宿主反射加载 |
-| 业务层 | `VisionPlatform/Core` | Logger / AppPaths / Json / OpResult / AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore |
+| 模块层 | `VisionPlatform.Modules` | 30 个流程模块的清单、默认参数、参数表、端子、界面提示；输出到 `Modules\`，由宿主反射加载 |
+| 业务层 | `VisionPlatform/Core` | Logger（SQLite 日志库）/ AppPaths / Json / OpResult / AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore / PerfProbe |
 |  | `VisionPlatform/Camera` | 相机接口与**本机摄像头 `LocalCamera`** / 模拟 `SimCamera` / 海康 `HikCamera`（占位）/ CameraManager |
-|  | `VisionPlatform/Flow` | 流程模型、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`、结果通道 `FlowOutputChannel`；`FlowModule` / `NodeParamSchema` / `FlowPortSchema` 为模块门面 |
-|  | `VisionPlatform/Communication` | TCP 客户端/服务端、Modbus TCP、`CommState` |
-|  | `VisionPlatform/Recipe` | 配方模型与 JSON 存储 |
+|  | `VisionPlatform/Flow` | 流程模型、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`（触发式 `Trigger` / 连续双模式）、结果通道 `FlowOutputChannel`、节点复制粘贴 `FlowPasteService`、图片/点云文件夹游标 |
+|  | `VisionPlatform/Communication` | TCP 客户端/服务端、`ModbusTcpClient`（MBAP+PDU 自实现）；**运行闸门 `CommRuntime`**、常驻任务引擎 `CommJobEngine`（心跳 / Ready-Busy / 结果推送 / 外部触发 `EdgeLoop`）、点位映射 `CommPointMapper`、消息模板 `CommTemplate`、发送队列 `CommSendQueue`、协议插件框架 `CommProtocolRegistry` |
+|  | `VisionPlatform/Recipe` | 配方 `Recipe` / `RecipeStore`（**保存配方 = 保存整个工程**）、工程包导入导出 `ProjectBundle`（破坏性导入前自动备份）、示例方案 `SampleProject` |
 |  | `VisionPlatform/Vision` | 检测配置、`InspectionEngine` |
-| 显示层 | `VisionSystem.Controls` | 图像显示、几何图形、OpenCV 互操作 |
-| 通用界面层 | `VisionPlatform.UI.Controls` | `UiTheme` / `UiStyle`、按钮 / 表格 / 树 / 标题栏、声明式参数列表 `ParamListControl` |
-| 表现层 | `VisionPlatform/UI` | 登录、主运行界面、流程编排、系统设置及各功能窗体 |
+| 显示层 | `VisionSystem.Controls` | 图像显示（2D/3D 合用：`ImageViewer` + `PointCloud/GlPointView` OpenGL 点云）、几何图形、OpenCV 互操作 |
+| 通用界面层 | `VisionPlatform.UI.Controls` | `UiTheme` / `UiStyle`、按钮 / 表格 / 树 / 标题栏、声明式参数列表 `ParamListControl`、数值框统一策略 `NumericInputPolicy` |
+| 表现层 | `VisionPlatform/UI` | 登录、主运行界面、流程编排、通讯（含自动化任务 / 动作编辑器）、OCR 字符训练、系统设置及各功能窗体 |
 
 ---
 
@@ -66,8 +73,25 @@
 - **相机管理**：统一相机接口 `ICamera`；**本机摄像头 `LocalCamera`**（USB / 笔记本内置，OpenCV `VideoCapture` 接入，**零第三方依赖**，支持实时预览）；模拟相机 `SimCamera` 跑通全流程；海康 `HikCamera` 为占位实现（见尚未完善）
 - **主运行界面 `MainForm`**：布局可调的多显示视图（1x1 / 1x2 / 2x1 / 2x2 / 3x2 / 3x3，最多 9 个），每个视图可单独绑定相机；单帧 / 同步采集；**多流程循环运行**（全部启动 / 暂停 / 停止）；数据统计（总数 / OK / NG / 良率 / 节拍）；各流程统计表（含每条流程实时状态：运行中 / 已中止 / 已停止 等）；日志区支持 `全部 / 结果 / 仅异常 / 实拍 / 模拟` 过滤（只影响显示，文件与日志库仍记录全部）
 - **流程编排 `FlowForm`**（VisionMaster 风格）：多流程（增删改切）、工具箱拖拽生成节点、节点间有向连线（DAG：一个输出可接多个下游、多路汇聚按拓扑序串行执行）、每流程绑定相机与显示视图、运行回显；运行状态日志保留最近 200 条（双击可放大/复制）；另保留 `AlgoForm` 作为离线单图算法调试工作台
-- **通讯**：TCP 客户端/服务端、`ModbusTcpClient`（自行实现 MBAP+PDU，支持 0x03/0x06/0x10 及多数据类型）；
-  另有点位表 / 消息模板 / 常驻任务（心跳、Ready-Busy、结果推送、跨流程汇总）与协议插件框架
+- **通讯**：TCP 客户端/服务端、`ModbusTcpClient`（自行实现 MBAP+PDU，支持 0x01/03/05/06/10 及多数据类型）；
+  **运行闸门 `CommRuntime`**（非运行态不连接 / 不心跳 / 不轮询 / 不写状态位）、点位表 / 消息模板 /
+  常驻任务引擎（心跳、Ready-Busy、结果推送、外部触发 `PointEdge`、跨流程汇总）与协议插件框架；
+  多流程分区（第 i 条流程 = 基址 + i×步长，触发与发送两侧步长必须一致）
+- **触发式运行（产线默认）**：外部触发 `FlowRunManager.Trigger` 单发一轮 —— 执行中重复触发**丢弃不排队**
+  （过期画面的结果不回传 PLC）；连续模式才按帧率循环；软件打开默认运行模式
+- **配方 = 工程包**：一个方案目录 = `recipe.json + comm.json + flows.json + 模板 + 方案说明 + _backup`；
+  `RecipeStore.Save` 同时写通讯与工程文件；**工程包导入是破坏性操作**，导入前自动备份（保留 5 份）；
+  示例方案用真实类型构造生成（`SmokeUi --create-sample`），绝不手写 JSON
+- **节点复制粘贴**：进程级剪贴板跨流程粘贴，Id 重生成、目标流程内改名去重、模板/OCR 模型资产目录复制；
+  画布支持多选（Ctrl+点击）、框选整组对齐落点、Ctrl+C/V / Del
+- **OCR 字符训练**：`OcrCharTrainForm` + `OcrTrainSession` —— 逐字符截图训练、模板库管理、
+  训练快照存证；一个字符一张模板（文件名即标签）
+- **数值框统一策略 `NumericInputPolicy`**：滚轮永不改值（进程级 `IMessageFilter` + 控件双层拦截）、
+  上下步长按 `DecimalPlaces` 0/1/≥2 → 1/0.1/0.01（不按存储类型）、显式类型 `SetValueType`
+- **3D 点云**（1.0.9.x 新增）：读取点云节点（PLY / PCD / 16bit 深度图按内参反投影）；
+  `ImageViewer` **2D/3D 合用** —— 点云自动切 3D 模式，左键旋转 / 滚轮缩放 / 双击复位；
+  **X/Y/Z 坐标轴**（X 红 / Y 绿 / Z 蓝，标签实时跟随）；OpenGL 零依赖（opengl32 P/Invoke 自建 wgl 上下文）
+  且带**质量闸门** —— 无显卡驱动时自动降级内置逐点光栅渲染（HUD 标「软件渲染」），无 GPU 也能正常出图
 - **配方**：`Recipe` + `RecipeStore`，JSON 存取、当前配方切换自动同步参数
 - **系统设置**：图片保存路径 / 格式（PNG/JPEG/BMP/TIFF）/ 保留天数（自动清理）/ 检测后自动保存与仅存 NG / 循环运行前是否要求通讯已连接
 - **配置持久化**：系统 / 算法 / 界面 / 流程 四类参数落到本地 JSON（`<程序目录>/appconfig.json`（如 `bin\x64\Release\appconfig.json`）），重启自动加载
@@ -77,7 +101,7 @@
 
 ## 已实现算法清单
 
-工具箱共 **28 个流程模块**（由 `VisionPlatform.Modules` 动态加载），按分类如下。
+工具箱共 **30 个流程模块**（由 `VisionPlatform.Modules` 动态加载），按分类如下。
 每个模块的端子、参数表、默认值都在模块包内声明，新增模块不需要改宿主界面。
 
 ### 采集
@@ -123,9 +147,17 @@
 - **目标深度估计 DlDepth**：单目深度图（0~1 归一化）。
 - **OCR(深度学习) OcrDl**：PaddleOCR 两阶段（DB 文本检测 + CRNN 识别）。
 
+### 3D 视觉
+- **读取点云 PointCloudSource**：PLY（ascii / binary_little_endian）、PCD（ascii / binary，含 RGB 解包）、
+  16bit 深度图按内参反投影（X=(u-Cx)·Z/Fx，GDI+ 会压 8bit 所以走内置 PNG 解析）三选一，
+  另支持点云文件夹自然序轮播；输出 `点云` + `点数`；只含点云的流程不需要相机、不报「缺少图像源」。
+  显示见「图像显示控件库」（2D/3D 合用查看器 + 坐标轴 + GL 质量闸门）。
+
 ### 输出与通信
 - **结果输出 ResultOutput**：汇总整链 OK / NG 与摘要，流程终点。
-- **发送数据 SendData**：按名称绑定通讯，发送固定 / 格式化文本或写 Modbus 寄存器。
+- **发送数据 SendData**：按名称绑定通讯，目标 TCP 发文本、目标 Modbus 写寄存器（必须配 `DataMode=ModbusWrite`
+  + 寄存器地址）；**坐标/角度回传用 `MbMap` 批量写**（`OkNg:20:UInt16; PosX:30:Int32; ...`），
+  多流程分区按流程序号 × 步长自动偏移。
 - **接收数据 ReceiveData**：读最近一条 TCP 文本或 Modbus 保持寄存器。
 - **脚本 Script**：C# 脚本读取全部上游输出并计算，结果写回摘要 / 端口。
 
@@ -138,6 +170,8 @@
 
 **P0 — 需补充环境才能完成**
 - **海康相机 `HikCamera` 为占位实现**：已完整实现 `ICamera` 契约与 SDK 探测逻辑，但未安装 MVS SDK，真实取流未接（源码以 `// TODO(SDK):` 标注）。可用模拟相机 `SIM-0` 跑通全链路。
+- **3D 相机实时采集未接**：点云目前从文件 / 深度图 / 文件夹读取（显示与节点链路已完整），
+  3D 相机实时取流等用户提供型号 / SDK 后接入。
 
 **P1 — 功能不完整**
 - **登录为内置账号表**，生产环境应换数据库 / LDAP / 域认证；**未做权限细分**（操作员/管理员角色未与界面功能绑定）。
@@ -165,17 +199,23 @@
 VisionSystem/                              唯一解决方案根目录
 ├── VisionSystem.sln                       单一解决方案（7 个项目 + Solution Items）
 ├── build.bat                              一键构建（含代理变量清理）
+├── version.bat                            版本号工具（真源：src/SharedVersion.cs）
 ├── README.md                              本文件
 ├── ThirdParty/                            所有外部依赖，按用途分次级目录
 │   ├── OpenCV/                            OpenCV 4.5.5（include / lib/x64 已入库，bin/x64 需自备）
 │   ├── OpenVino2025.4.1/                  OpenVINO CPU 推理运行时
 │   ├── SQLite/                            日志库原生 DLL
+│   ├── ZXing/                             zxing-cpp 源码（lib/ 为现场构建产物，不入库）
+│   ├── Communication/                     通讯协议第三方依赖占位（OPC UA SDK 放这里）
 │   └── HikVision/                         海康 MVS SDK（当前为空）
 ├── bin/x64/{Debug,Release}/               算法 DLL 与 OpenCV 运行时（构建产物）
+├── tools/                                 版本号脚本 / Modbus 从站模拟器 / 配置合并等工具
 ├── docs/                                  文档（入口：docs/README.md 知识图谱）
 │   ├── README.md                          知识图谱：概念图 / 唯一权威出处 / 文档地图
 │   ├── 平台架构.md                        架构、分层、模块职责（改造前快照）
-│   ├── 架构/VisionPlatform解耦重构.md      模块化与 UI 复用改造：耦合点、前后对比、修改记录
+│   ├── 架构/                              解耦重构 / 通讯架构重构方案 / 性能优化 / 流程拓扑与并发
+│   ├── 算法/                              算法更新记录
+│   ├── 案例/                              通讯配置完整案例（含 TCP 模拟器与示例 JSON）
 │   ├── API参考.md                         控件库完整 API 清单（待更新）
 │   ├── 遗留问题.md                        已知问题、TODO、占位实现（待更新）
 │   ├── 需求/增量需求总览.md                5 次增量 PRD 合并
@@ -183,37 +223,56 @@ VisionSystem/                              唯一解决方案根目录
 │   ├── 参考资料/                          参考资料汇编 + 使用说明
 │   └── 图表/                              6 份 Mermaid 类图 / 时序图
 └── src/
+    ├── SharedVersion.cs                   版本号唯一真源（链接进全部 C# 项目）
     ├── VisionAlgo.Native/                 【C++ / OpenCV】算法 DLL
     │   ├── include/
     │   │   ├── vision_algo.h              聚合头
-    │   │   └── algo/                      算法头文件（preprocess / blob / fit / match / shape / measure / detect / ocr / filter / color / camera）
+    │   │   └── algo/                      算法头文件（preprocess / blob / fit / match / shape /
+    │   │                                  measure / detect / ocr / ocrdl / dl / barcode / camera）
     │   ├── src/
     │   │   ├── vision_algo.cpp            导出层：句柄校验 + 转发
     │   │   └── algo/                      算法实现
     │   ├── Common/                        公共：导出宏/错误码/类型/生命周期/内部工具
-    │   ├── VisionAlgo.Native.vcxproj
-    │   └── VisionAlgo.Native.vcxproj.filters
-    ├── VisionSystem.Controls/              【C#】图像显示控件库
-    │   ├── ImageViewer.cs                  核心控件
-    │   ├── Geometry/                       IGeometryShape / ShapeHandle / 各形状 / ShapeCollection
-    │   ├── Interop/                        CvInterop（OpenCV 数据互操作）
-    │   └── Rendering/                      Viewport（坐标变换）/ RenderOptions
+    │   └── VisionAlgo.Native.vcxproj
+    ├── VisionSystem.Controls/              【C#】显示控件库（图像 + 点云）
+    │   ├── ImageViewer.cs                 核心控件（SetImage 回 2D / SetPointCloud 进 3D）
+    │   ├── PointCloud/                    PointCloudData / PointCloudFileReader（PLY/PCD/16bit PNG）/
+    │   │                                  GlPointView（OpenGL 点云 + 坐标轴 + 内置渲染兜底）
+    │   ├── Geometry/                      IGeometryShape / ShapeHandle / 各形状 / ShapeCollection
+    │   ├── Interop/                       CvInterop（OpenCV 数据互操作）
+    │   └── Rendering/                     Viewport（坐标变换）/ RenderOptions
+    ├── VisionPlatform.Framework/          【C#】契约层：模块契约 / FlowNodeType / 端子 / 参数表 / 分类
+    ├── VisionPlatform.Modules/            【C#】模块层：30 个模块的 BuiltIn 清单 / 默认值 / 端子 / 参数表
+    ├── VisionPlatform.UI.Controls/        【C#】通用界面层：UiTheme / UiStyle / UiTree / UiGrid /
+    │                                      ParamListControl / NumericInputPolicy / 数值框与树主题
+    ├── SmokeUi/                           回归测试台（1162 项用例 + --create-sample / 探针；不入 sln，
+    │                                      用 _build_smoke.bat 构建）
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
-        ├── Core/                          Logger / AppPaths / Json / OpResult /
-        │                                 AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore
+        ├── Core/                          Logger（SQLite）/ AppPaths / Json / OpResult /
+        │                                 AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore / PerfProbe
         ├── Native/                        VisionAlgo（P/Invoke 封装）/ NativeCamera
         ├── Camera/                        ICamera / LocalCamera / SimCamera / HikCamera / CameraManager
-        ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient / CommState
-        ├── Recipe/                        Recipe / RecipeStore
+        ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient /
+        │                                 CommRuntime（运行闸门）/ CommJobEngine / CommHub / CommPointMapper /
+        │                                 CommTemplate / CommSendQueue / CommProtocolRegistry / CommState
+        ├── Flow/                          FlowRunner / FlowRunManager（触发式 Trigger）/ FlowValidator /
+        │                                 FlowPasteService / ProjectBundle 相关 / ImageFolderSource /
+        │                                 NodeOutputSchema / NodeResultText / OCR 训练会话
+        ├── Recipe/                        Recipe / RecipeStore / ProjectBundle（工程包）/ SampleProject
         ├── Vision/                        InspectionConfig / InspectionResult / InspectionEngine
         ├── Models/                        User
-        └── UI/                            MainForm / CameraForm / AlgoForm / CommForm /
-                                           RecipeForm / SettingsForm / LoginForm / SplashForm / FlowForm
-                                           （各自 .cs + .Designer.cs）
+        └── UI/                            MainForm / FlowForm / FlowCanvasControl / FlowPreviewPanel /
+                                           CommForm / CommAutomationForm / CommActionEditorForm /
+                                           OcrCharTrainForm / ScriptEditorForm / RecipeForm /
+                                           SettingsForm / LoginForm / SplashForm 等
 ```
 
-> **说明**：所有窗体均采用 **Designer 模式**，拆分为 `XxxForm.cs`（业务逻辑）与 `XxxForm.Designer.cs`（布局）。C++ 项目通过 `.vcxproj.filters` 维护解决方案资源管理器中的文件夹层级。
+> **说明**：项目分层与依赖方向 —— `VisionAlgo.Native`（算法）→ `VisionPlatform.Framework`（契约）←
+> `VisionPlatform.Modules`（模块包）/ `VisionPlatform.UI.Controls`（通用控件）← `VisionPlatform`（宿主）；
+> 模块包对 Framework 的 ProjectReference 必须 `Private=false`，否则 LoadFrom 后类型标识不一致、模块静默不注册。
+> 所有窗体均采用 **Designer 模式**，拆分为 `XxxForm.cs`（业务逻辑）与 `XxxForm.Designer.cs`（布局）。
+> C++ 项目通过 `.vcxproj.filters` 维护解决方案资源管理器中的文件夹层级。
 
 ---
 
@@ -235,7 +294,8 @@ xcopy /Y "%OPENCV%\x64\vc15\bin\opencv_world455d.dll"  ThirdParty\OpenCV\bin\x64
 （只跑 Release 时只需 `opencv_world455.dll`；调试需要 `455d.dll`。）
 
 > `ThirdParty/` 按用途分目录：`OpenCV/`（4.5.5 头文件 + 导入库）、`OpenVino2025.4.1/runtime/`（CPU 推理运行时）、
-> `SQLite/`（日志库原生 DLL）、`HikVision/`（海康 MVS SDK，当前为空）、`Communication/`（当前无第三方依赖）。
+> `SQLite/`（日志库原生 DLL）、`ZXing/`（条码库 zxing-cpp 源码，`lib/` 为现场构建产物）、
+> `Communication/`（通讯协议第三方依赖占位，如 OPC UA SDK）、`HikVision/`（海康 MVS SDK，当前为空）。
 > 工程统一用 `$(ProjectDir)..\..\ThirdParty\...` 相对路径引用，不依赖系统 PATH；未安装 MVS SDK 时
 > 海康相机为占位实现，可用模拟相机 `SIM-0` 跑通全流程。
 
@@ -250,6 +310,15 @@ build.bat Release    :: 编译 Release | x64
 构建成功后产物位于：
 - `bin\x64\{配置}\VisionAlgo.Native.dll` + `opencv_world455*.dll`
 - `bin\x64\{配置}\VisionPlatform.exe`（与算法 DLL、OpenCV 运行时、`Modules\` 同目录）
+
+回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1162 项 UI / 软件层用例）：
+
+```bat
+_build_smoke.bat Debug     :: 或 Release；先构建 SmokeUi
+:: 必须先把根产物拷进 SmokeUi 输出目录，否则会报"找不到 va_ocr_recognize_ex 入口点"（假失败）
+cp -f bin/x64/Debug/*.dll src/SmokeUi/bin/Debug/
+src\SmokeUi\bin\Debug\SmokeUi.exe        :: 全量回归；--create-sample 生成示例方案
+```
 
 ### 4. 运行
 直接运行 `bin\x64\Debug\VisionPlatform.exe`（需同目录有 `Modules\VisionPlatform.Modules.dll`），或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
@@ -302,6 +371,7 @@ version.bat 1.0.0.1    :: 设置版本（同步 AssemblyVersion / AssemblyFileVe
 - [增量需求总览.md](docs/需求/增量需求总览.md) —— 5 次增量 PRD 合并：目标、需求编号总表、验收口径
 - [增量架构设计.md](docs/架构/增量架构设计.md) —— 6 份架构设计合并：关键决策、接口要点、落地红线；§7 是跨增量公共约定的唯一出处
 - [CHANGELOG.md](CHANGELOG.md) —— 版本更新记录（新增 / 修复 / 性能 / 升级提示）
+- [算法更新记录.md](docs/算法/算法更新记录.md) —— 原生算法层的接口与实现变更记录
 - [通讯架构重构方案.md](docs/架构/通讯架构重构方案.md) —— 点位/消息/任务模型、心跳与 Ready/Busy、TCP/Modbus/OPC UA 扩展方案
 - [通讯配置完整案例](docs/案例/通讯配置完整案例.md) —— 双相机双流程、心跳/Ready-Busy/组合结果，含示例 JSON 与 TCP 模拟器
 - [性能优化.md](docs/架构/性能优化.md) —— 软件层开销实测、限帧/日志/帧拷贝优化、与 Halcon/Cognex 的差距分析
