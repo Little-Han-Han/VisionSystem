@@ -64,7 +64,11 @@ CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);";
             }
 
             _running = true;
-            _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "LogDbWriter" };
+            _worker = new Thread(delegate() { PerfProbe.Mark("日志库写盘"); WorkerLoop(); })
+            {
+                IsBackground = true,
+                Name = "LogDbWriter"
+            };
             _worker.Start();
 
             if (retentionDays > 0) CleanupRetention(retentionDays);

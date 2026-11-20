@@ -34,6 +34,7 @@ namespace VisionPlatform.Framework.Modules
         public const string Segmentation = "Segmentation";
         public const string Recognition = "Recognition";
         public const string DeepLearning = "DeepLearning";
+        public const string ThreeD = "ThreeD";
         public const string Output = "Output";
 
         /// <summary>全部分类（顺序即工具箱顺序）。</summary>
@@ -46,7 +47,8 @@ namespace VisionPlatform.Framework.Modules
             new ModuleCategory(Segmentation,     "分割与拟合",    5),
             new ModuleCategory(Recognition,      "识别",          6),
             new ModuleCategory(DeepLearning,     "深度学习",      7),
-            new ModuleCategory(Output,           "输出与通信",    8)
+            new ModuleCategory(ThreeD,           "3D 视觉",       8),
+            new ModuleCategory(Output,           "输出与通信",    9)
         };
 
         /// <summary>按 Key 取分类；未知返回 null。</summary>
@@ -72,5 +74,6 @@ namespace VisionPlatform.Framework.Modules
         public static readonly Color Measurement = Color.FromArgb(140, 220, 150);
         public static readonly Color Script = Color.FromArgb(220, 180, 255);
         public static readonly Color Output = Color.FromArgb(160, 170, 190);
+        public static readonly Color ThreeD = Color.FromArgb(100, 150, 235);
     }
 }

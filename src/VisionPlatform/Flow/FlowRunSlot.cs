@@ -21,6 +21,13 @@ namespace VisionPlatform.Flow
         /// <summary>运行中。</summary>
         Running,
 
+        /// <summary>
+        /// 等待外部触发（触发式运行：流程已就绪、相机已占用，但还没收到触发信号）。
+        /// <para>与 <see cref="Running"/> 的区别只在于"这一轮还没开始"：
+        /// 对 PLC 而言 Busy/Ready 的语义按 Running 之后的执行阶段计算，等待时 Ready=1。</para>
+        /// </summary>
+        Waiting,
+
         /// <summary>已暂停。</summary>
         Paused,
 
@@ -46,6 +53,24 @@ namespace VisionPlatform.Flow
         /// <summary>连续运行最小周期（ms）；0 = 不限制，由 UiSettings.MaxFlowFps 换算。</summary>
         private int _minCycleMs;
 
+        /// <summary>
+        /// 触发式运行：线程启动后<strong>不自动跑</strong>，等 <see cref="Trigger"/> 放行才执行一轮，
+        /// 跑完回到等待。产线模式（PLC 发一次触发 → 走一次流程 → 回结果）用这个。
+        /// </summary>
+        private readonly bool _triggeredMode;
+
+        /// <summary>触发放行信号（仅触发式运行使用）。</summary>
+        private readonly ManualResetEventSlim _triggerGate = new ManualResetEventSlim(false);
+
+        /// <summary>本槽是否正在执行一轮（1 = 执行中）。触发来早了/重复来，直接丢弃。</summary>
+        private int _executing;
+
+        /// <summary>累计触发次数（诊断用）。</summary>
+        private long _triggerCount;
+
+        /// <summary>累计因"执行中/已暂停"被丢弃的触发次数。</summary>
+        private long _triggerDropped;
+
         private readonly object _sync = new object();
 
         private FlowRunner _runner;
@@ -62,6 +87,8 @@ namespace VisionPlatform.Flow
         private int _okCount;
         private int _ngCount;
         private int _cycles;
+        private long _cycleId;
+        private long _publishCycleId;
         private Stopwatch _runWatch;
 
         private bool _leaseHeld;
@@ -83,8 +110,18 @@ namespace VisionPlatform.Flow
         public int ViewIndex { get; private set; }
 
         public FlowRunSlot(FlowDefinition flow)
+            : this(flow, false)
+        {
+        }
+
+        /// <param name="triggeredMode">
+        /// true = 触发式（启动后等触发，触发一次跑一轮）；false = 连续运行（原有行为，调试用）。
+        /// </param>
+        public FlowRunSlot(FlowDefinition flow, bool triggeredMode)
         {
             if (flow == null) throw new ArgumentNullException("flow");
+
+            _triggeredMode = triggeredMode;
 
             FlowId = flow.Id ?? "";
             FlowName = string.IsNullOrEmpty(flow.Name) ? "未命名流程" : flow.Name;
@@ -92,6 +129,18 @@ namespace VisionPlatform.Flow
             CameraId = flow.CameraId ?? "";
             ViewIndex = flow.ViewIndex;
         }
+
+        /// <summary>是否触发式运行（等待外部触发）。</summary>
+        public bool TriggeredMode
+        {
+            get { return _triggeredMode; }
+        }
+
+        /// <summary>累计触发次数 / 被丢弃次数（诊断用）。</summary>
+        public long TriggerCount { get { return Interlocked.Read(ref _triggerCount); } }
+
+        /// <summary>累计被丢弃的触发次数（执行中重复触发 / 已暂停时触发）。</summary>
+        public long TriggerDropped { get { return Interlocked.Read(ref _triggerDropped); } }
 
         // ---------------------- 状态读取（一律走锁）----------------------
 
@@ -158,6 +207,7 @@ namespace VisionPlatform.Flow
             {
                 FlowSlotStatus s = Status;
                 return s == FlowSlotStatus.Starting || s == FlowSlotStatus.Running
+                       || s == FlowSlotStatus.Waiting
                        || s == FlowSlotStatus.Paused || s == FlowSlotStatus.Stopping;
             }
         }
@@ -244,7 +294,7 @@ namespace VisionPlatform.Flow
             th.Name = "FlowSlot-" + FlowName;
             _thread = th;
 
-            lock (_sync) { _status = FlowSlotStatus.Running; }
+            lock (_sync) { _status = _triggeredMode ? FlowSlotStatus.Waiting : FlowSlotStatus.Running; }
 
             th.Start();
             return true;
@@ -258,8 +308,8 @@ namespace VisionPlatform.Flow
 
             lock (_sync)
             {
-                if (_status == FlowSlotStatus.Running || _status == FlowSlotStatus.Paused
-                    || _status == FlowSlotStatus.Starting)
+                if (_status == FlowSlotStatus.Running || _status == FlowSlotStatus.Waiting
+                    || _status == FlowSlotStatus.Paused || _status == FlowSlotStatus.Starting)
                 {
                     _status = FlowSlotStatus.Stopping;
                 }
@@ -273,9 +323,40 @@ namespace VisionPlatform.Flow
 
             lock (_sync)
             {
-                if (paused && _status == FlowSlotStatus.Running) _status = FlowSlotStatus.Paused;
-                else if (!paused && _status == FlowSlotStatus.Paused) _status = FlowSlotStatus.Running;
+                if (paused && (_status == FlowSlotStatus.Running || _status == FlowSlotStatus.Waiting))
+                {
+                    _status = FlowSlotStatus.Paused;
+                }
+                else if (!paused && _status == FlowSlotStatus.Paused)
+                {
+                    _status = _triggeredMode ? FlowSlotStatus.Waiting : FlowSlotStatus.Running;
+                }
             }
+
+            // 暂停时把还没被消费的触发信号清掉：恢复后不应该"补跑"一次
+            if (paused) _triggerGate.Reset();
+        }
+
+        /// <summary>
+        /// 触发一轮执行（仅触发式运行有效）。
+        /// <para>【丢弃策略】正在执行 / 已暂停 / 已停止时直接返回 false，不排队 ——
+        /// 产线上"上一轮还没走完又来一次触发"属于节拍异常，堆积执行比丢弃更危险
+        /// （会把过期画面的结果回给 PLC）。丢弃次数记在 <see cref="TriggerDropped"/> 里。</para>
+        /// </summary>
+        public bool Trigger()
+        {
+            if (!_triggeredMode) return false;
+            if (_stop || _pause) { Interlocked.Increment(ref _triggerDropped); return false; }
+
+            if (Interlocked.CompareExchange(ref _executing, 1, 0) != 0)
+            {
+                Interlocked.Increment(ref _triggerDropped);
+                return false;
+            }
+
+            Interlocked.Increment(ref _triggerCount);
+            _triggerGate.Set();
+            return true;
         }
 
         /// <summary>等待线程结束；返回是否在超时前结束。</summary>
@@ -300,6 +381,8 @@ namespace VisionPlatform.Flow
             ReleaseLease();
             DisposeRunner();
 
+            try { _triggerGate.Dispose(); } catch (Exception) { }
+
             lock (_sync) { _status = FlowSlotStatus.Idle; }
         }
 
@@ -307,6 +390,14 @@ namespace VisionPlatform.Flow
 
         private void Loop()
         {
+            // 性能归因：把本槽线程登记为「流程:<名>」，探针才能按线程报 CPU
+            PerfProbe.Mark("流程:" + FlowName);
+
+            // OpenMP 的线程数是"按线程"生效的：必须在真正跑算法的工作线程里再设一次，
+            // 否则算法里的 #pragma omp parallel for 仍会按物理核数开满（实测空烧 8~11 个核）。
+            if (FlowRunManager.AlgoThreads > 0)
+                Native.VisionAlgo.SetThreads(FlowRunManager.AlgoThreads);
+
             var cycle = new Stopwatch();
             _minCycleMs = FlowRateLimit.ResolveMinCycleMs();
 
@@ -320,7 +411,33 @@ namespace VisionPlatform.Flow
                         continue;
                     }
 
+                    if (_triggeredMode)
+                    {
+                        // 触发式：等外部信号才跑一轮。边等边看停止标志，不占 CPU。
+                        lock (_sync)
+                        {
+                            if (_status == FlowSlotStatus.Running) _status = FlowSlotStatus.Waiting;
+                        }
+
+                        while (!_stop && !_triggerGate.Wait(100))
+                        {
+                            // 暂停期间先不放行：等用户「继续」后再消费触发
+                            if (_pause) { _triggerGate.Reset(); Interlocked.Exchange(ref _executing, 0); }
+                        }
+
+                        if (_stop) break;
+
+                        _triggerGate.Reset();
+
+                        // 等待期间被暂停 / 触发已丢弃：本轮不执行，回到等待
+                        if (_pause) { Interlocked.Exchange(ref _executing, 0); continue; }
+
+                        lock (_sync) { _status = FlowSlotStatus.Running; }
+                    }
+
                     cycle.Restart();
+                    long cycleId = System.Threading.Interlocked.Increment(ref _cycleId);
+                    _publishCycleId = cycleId;
 
                     FlowRunSession session = null;
                     try
@@ -335,7 +452,7 @@ namespace VisionPlatform.Flow
 
                         if (session.Aborted)
                         {
-                            Logger.Error(FlowName, "流程无法运行：" + session.ErrorMessage);
+                            Logger.Error(LogFlowName(), "流程无法运行：" + session.ErrorMessage);
                             SetFaulted(session.ErrorMessage);
                             break;
                         }
@@ -352,20 +469,20 @@ namespace VisionPlatform.Flow
                         {
                             Publish(result, session);
                             RecordVerdict(result.Passed, result.ElapsedMs, result.Summary);
-                            Logger.Result(FlowName, result.Passed,
+                            Logger.Result(LogFlowName(), result.Passed,
                                 (result.Summary ?? "") + "  " + result.ElapsedMs + "ms");
                         }
                         else
                         {
                             string msg = result != null ? (result.Message ?? "流程执行失败") : "流程执行失败";
-                            Logger.Error(FlowName, "流程执行失败：" + msg);
+                            Logger.Error(LogFlowName(), "流程执行失败：" + msg);
                             SetFaulted(msg);
                             break;
                         }
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error(FlowName, "流程执行异常：" + ex.Message);
+                        Logger.Error(LogFlowName(), "流程执行异常：" + ex.Message);
                         SetFaulted("流程执行异常：" + ex.Message);
                         break;
                     }
@@ -377,6 +494,19 @@ namespace VisionPlatform.Flow
                             try { session.Dispose(); }
                             catch (Exception) { }
                         }
+
+                        // 触发式：本轮回执完，允许下一次触发
+                        if (_triggeredMode) Interlocked.Exchange(ref _executing, 0);
+                    }
+
+                    if (_triggeredMode)
+                    {
+                        // 触发式不做帧率限速：节拍由外部触发决定，跑完立刻回到等待
+                        lock (_sync)
+                        {
+                            if (_status == FlowSlotStatus.Running) _status = FlowSlotStatus.Waiting;
+                        }
+                        continue;
                     }
 
                     // 限帧：按配置的目标帧率补等待；0 = 不限制（只让出时间片）
@@ -424,6 +554,15 @@ namespace VisionPlatform.Flow
         /// <summary>
         /// 发布一次结果到全局通道（帧所有权随事件移交订阅者；无订阅者时本槽释放）。
         /// </summary>
+        /// <summary>日志来源标签：模拟（SIM-0 / 本地图片）与实拍分开，主界面据此过滤。</summary>
+        private string LogFlowName()
+        {
+            bool sim = _flow != null
+                       && (string.Equals(_flow.CameraId, "SIM-0", StringComparison.OrdinalIgnoreCase)
+                           || !FlowRunner.NeedsCamera(_flow));
+            return (sim ? "[模拟] " : "[实拍] ") + FlowName;
+        }
+
         private void Publish(FlowRunResult result, FlowRunSession session)
         {
             Bitmap frame = session != null ? session.Current : null;
@@ -435,10 +574,12 @@ namespace VisionPlatform.Flow
                 Shapes = result != null ? result.Shapes : null,
                 Passed = result != null && result.Passed,
                 Summary = result != null ? (result.Summary ?? "") : "",
+                ElapsedMs = result != null ? result.ElapsedMs : 0,
                 CameraName = CameraNameOf(_flow),
                 FlowId = FlowId,
                 FlowName = FlowName,
-                Product = Product
+                Product = Product,
+                CycleId = _publishCycleId
             };
 
             if (session != null) session.Current = null;   // 已交出，会话不再释放
@@ -547,6 +688,7 @@ namespace VisionPlatform.Flow
                 switch (Status)
                 {
                     case FlowSlotStatus.Starting: return "启动中";
+                    case FlowSlotStatus.Waiting:  return "等待触发";
                     case FlowSlotStatus.Running:  return "运行中";
                     case FlowSlotStatus.Paused:   return "已暂停";
                     case FlowSlotStatus.Stopping: return "停止中";

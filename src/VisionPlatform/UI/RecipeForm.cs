@@ -79,6 +79,29 @@ namespace VisionPlatform.UI
 
             var r = RecipeStore.Load(name);
             if (!r.Success) { MessageBox.Show(this, r.Message); return; }
+
+            // 工程包：方案目录里若有 comm.json / flows.json，问一次是否把通讯与流程一起切过来。
+            // 默认不静默覆盖 —— 有人只想换算法参数，不想动正在跑的流程。
+            ProjectBundle.Contents bundle = ProjectBundle.Inspect(name);
+            if (bundle.HasProject)
+            {
+                string q = "该方案包含工程配置：" + Environment.NewLine + bundle.ToString()
+                    + Environment.NewLine + Environment.NewLine
+                    + "是否一并应用到当前工程？" + Environment.NewLine
+                    + "（会替换当前通讯与流程；导入前自动备份到方案目录的 " + ProjectBundle.BackupFolder + "）";
+
+                if (MessageBox.Show(this, q, "应用工程配置",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    OpResult imp = ProjectBundle.Import(name);
+                    MessageBox.Show(this, imp.Message);
+                    if (!imp.Success) return;
+
+                    // 流程列表变了，勾选区要按新配置重建
+                    ShowCurrent();
+                }
+            }
+
             Logger.Info("加载配方：" + name);
         }
 

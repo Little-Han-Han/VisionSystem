@@ -22,6 +22,7 @@
 #include "va_error.h"
 
 #include <cmath>
+#include <cstdio>
 #include <sstream>
 #include <vector>
 
@@ -340,27 +341,47 @@ int LineCaliper(Context* ctx,
     if (out_line != 0) { out_line->x1 = 0.0; out_line->y1 = 0.0; out_line->x2 = 0.0; out_line->y2 = 0.0; }
 
     if (gray == 0 || param == 0 || out_points == 0 || out_count == 0 || out_line == 0 || out_rms == 0) {
-        SetError(ctx, "null argument");
-        return VA_ERR_ARG;
+        return SetErrorEx(ctx, VA_ERR_ARG, "卡尺", "image / param / out",
+                          "存在空指针", "全部必填",
+                          "卡尺：入参为空（图像 / 参数 / 输出缓冲区必须全部提供）");
     }
 
     const int n = param->caliper_count;
-    if (n < 1) { SetError(ctx, "caliper_count must be >= 1"); return VA_ERR_ARG; }
-    if (max_count < n) { SetError(ctx, "output buffer smaller than caliper_count"); return VA_ERR_SIZE; }
+    if (n < 1)
+    {
+        char val[32], msg[160];
+        std::snprintf(val, sizeof(val), "%d", n);
+        std::snprintf(msg, sizeof(msg), "卡尺：卡尺个数必须 >= 1（当前 %d）", n);
+        return SetErrorEx(ctx, VA_ERR_PARAM_RANGE, "卡尺", "Spec.Count", val, ">= 1", msg);
+    }
+    if (max_count < n)
+    {
+        char val[32], msg[192];
+        std::snprintf(val, sizeof(val), "%d", max_count);
+        std::snprintf(msg, sizeof(msg),
+                      "卡尺：输出缓冲区太小（容量 %d < 卡尺个数 %d），请把容量按卡尺个数分配", max_count, n);
+        return SetErrorEx(ctx, VA_ERR_BUFFER_TOO_SMALL, "卡尺", "max_count", val, ">= caliper_count", msg);
+    }
 
     try
     {
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return VA_ERR_ARG;
         if (g.channels() != 1) {
-            SetError(ctx, "line caliper requires single channel gray image");
+            SetErrorEx(ctx, VA_ERR_CHANNEL, "卡尺/直线", "图像通道数", "彩色图", "单通道灰度",
+                        "直线卡尺：只接受单通道灰度图（上游请先接「预处理」转灰度）");
             return VA_ERR_TYPE;
         }
 
         const double dx = param->x2 - param->x1;
         const double dy = param->y2 - param->y1;
         const double segLen = std::sqrt(dx * dx + dy * dy);
-        if (segLen < 1e-6) { SetError(ctx, "scan segment is degenerated"); return VA_ERR_ARG; }
+        if (segLen < 1e-6)
+        {
+            SetErrorEx(ctx, VA_ERR_SCAN_DEGENERATE, "卡尺/直线", "起点/终点", "两点重合", "两点距离 > 0",
+                        "直线卡尺：扫描线退化（起点与终点重合），请检查 X/Y 起点与终点参数");
+            return VA_ERR_ARG;
+        }
 
         // ② 等分投放：法线 = 扫描方向顺时针旋转 90°（图像 y 轴向下）
         const double ux = dx / segLen;
@@ -413,7 +434,8 @@ int LineCaliper(Context* ctx,
         // ⑦ 拟合 + ⑧ 残差
         double vx = 0.0, vy = 0.0, cx = 0.0, cy = 0.0;
         if (!FitLineTls(pts, vx, vy, cx, cy)) {
-            SetError(ctx, "line fit failed: points are degenerated");
+            SetErrorEx(ctx, VA_ERR_FIT_DEGENERATE, "卡尺/直线", "拟合点集", "点几乎全部重合", "至少 2 个不同位置的点",
+                        "直线卡尺：拟合失败（有效边缘点几乎全部重合，方向无定义）；请调低边缘阈值或放宽卡尺间距");
             return VA_ERR_INTERNAL;
         }
         double rms = LineRms(pts, vx, vy, cx, cy);
@@ -475,20 +497,35 @@ int CircleCaliper(Context* ctx,
     if (out_circle != 0) { out_circle->cx = 0.0; out_circle->cy = 0.0; out_circle->radius = 0.0; out_circle->residual = 0.0; }
 
     if (gray == 0 || param == 0 || out_points == 0 || out_count == 0 || out_circle == 0 || out_rms == 0) {
-        SetError(ctx, "null argument");
-        return VA_ERR_ARG;
+        return SetErrorEx(ctx, VA_ERR_ARG, "卡尺", "image / param / out",
+                          "存在空指针", "全部必填",
+                          "卡尺：入参为空（图像 / 参数 / 输出缓冲区必须全部提供）");
     }
 
     const int n = param->caliper_count;
-    if (n < 1) { SetError(ctx, "caliper_count must be >= 1"); return VA_ERR_ARG; }
-    if (max_count < n) { SetError(ctx, "output buffer smaller than caliper_count"); return VA_ERR_SIZE; }
+    if (n < 1)
+    {
+        char val[32], msg[160];
+        std::snprintf(val, sizeof(val), "%d", n);
+        std::snprintf(msg, sizeof(msg), "卡尺：卡尺个数必须 >= 1（当前 %d）", n);
+        return SetErrorEx(ctx, VA_ERR_PARAM_RANGE, "卡尺", "Spec.Count", val, ">= 1", msg);
+    }
+    if (max_count < n)
+    {
+        char val[32], msg[192];
+        std::snprintf(val, sizeof(val), "%d", max_count);
+        std::snprintf(msg, sizeof(msg),
+                      "卡尺：输出缓冲区太小（容量 %d < 卡尺个数 %d），请把容量按卡尺个数分配", max_count, n);
+        return SetErrorEx(ctx, VA_ERR_BUFFER_TOO_SMALL, "卡尺", "max_count", val, ">= caliper_count", msg);
+    }
 
     try
     {
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return VA_ERR_ARG;
         if (g.channels() != 1) {
-            SetError(ctx, "circle caliper requires single channel gray image");
+            SetErrorEx(ctx, VA_ERR_CHANNEL, "卡尺/圆", "图像通道数", "彩色图", "单通道灰度",
+                        "圆卡尺：只接受单通道灰度图（上游请先接「预处理」转灰度）");
             return VA_ERR_TYPE;
         }
 
@@ -550,7 +587,8 @@ int CircleCaliper(Context* ctx,
         // ⑦ 拟合 + ⑧ 残差
         double cx = 0.0, cy = 0.0, r = 0.0;
         if (!FitCircleAls(pts, cx, cy, r)) {
-            SetError(ctx, "circle fit failed: points are degenerated or collinear");
+            SetErrorEx(ctx, VA_ERR_FIT_DEGENERATE, "卡尺/圆", "拟合点集", "点共线或集中在小段圆弧", "角度跨度覆盖 > 90°",
+                        "圆卡尺：拟合失败（有效边缘点共线或集中于同一小段圆弧）；请增大角度跨度或放宽半径");
             return VA_ERR_INTERNAL;
         }
         double rms = CircleRms(pts, cx, cy, r);

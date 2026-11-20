@@ -21,7 +21,10 @@ int Sharpness(Context* ctx, const VA_Image* gray, double* outScore)
         }
 
         cv::Mat lap;
-        cv::Laplacian(g, lap, CV_64F);
+        // CV_32F 足够：拉普拉斯核是整数（0/1/-4），8U 输入下 32F 累加无损。
+        // 原来用 CV_64F，全图多占一倍内存带宽，而 meanStdDev 内部本来就是 double 累加，
+        // 换 32F 后方差数值只差 ~1e-15 相对量级。
+        cv::Laplacian(g, lap, CV_32F);
 
         cv::Scalar mean, stddev;
         cv::meanStdDev(lap, mean, stddev);

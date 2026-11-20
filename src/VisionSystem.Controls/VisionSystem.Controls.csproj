@@ -52,6 +52,9 @@
     <Compile Include="Geometry\ShapeCollection.cs" />
     <Compile Include="Geometry\ShapeHandle.cs" />
     <Compile Include="ImageViewer.cs" />
+    <Compile Include="PointCloud\PointCloudData.cs" />
+    <Compile Include="PointCloud\PointCloudFileReader.cs" />
+    <Compile Include="PointCloud\GlPointView.cs" />
     <Compile Include="Interop\CvInterop.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="..\SharedVersion.cs">

@@ -82,12 +82,14 @@ namespace VisionPlatform.Flow
 
         /// <summary>字符识别字符框（橙色）。</summary>
         public static readonly Color ColorOcr = Color.FromArgb(255, 152, 0);
-
         /// <summary>OCR 作用区域框（暗橙，虚线；只标"看的是哪一块"，不抢字符框的注意力）。</summary>
         public static readonly Color ColorOcrRegion = Color.FromArgb(200, 150, 90, 30);
 
         /// <summary>OCR 合并字符串框（亮黄绿；一行一个框 + 整行文本）。</summary>
         public static readonly Color ColorOcrString = Color.FromArgb(190, 255, 110);
+
+        /// <summary>条码 / 二维码框：品红，与 NCC（琥珀）、OCR（橙）都能一眼分开。</summary>
+        public static readonly Color ColorBarcode = Color.FromArgb(236, 120, 255);
 
         /// <summary>
         /// 辅助图形的 <see cref="IGeometryShape.Name"/> 标记：<strong>受「轮廓」开关控制</strong>的那一类
@@ -331,6 +333,31 @@ namespace VisionPlatform.Flow
             return r;
         }
 
+        /// <summary>
+        /// 条码 / 二维码结果框（旋转矩形）。
+        /// <para>码本身是矩形，透视畸变一般很小时用旋转矩形比四点多边形更稳（不会因一个角点抖动变形）。</para>
+        /// </summary>
+        /// <param name="cx">中心 X（图像坐标）。</param>
+        /// <param name="cy">中心 Y。</param>
+        /// <param name="width">框宽。</param>
+        /// <param name="height">框高。</param>
+        /// <param name="angle">角度（度，顺时针为正）。</param>
+        /// <param name="primary">是否为第 1 个码。</param>
+        /// <param name="label">框标签（一般为 <c>码制 文本</c>）；空 = 不画。</param>
+        public static RotatedRectShape BarcodeBox(double cx, double cy, double width, double height,
+                                                  double angle, bool primary, string label = null)
+        {
+            var r = new RotatedRectShape(new PointF((float)cx, (float)cy),
+                                         (float)Math.Max(1.0, width),
+                                         (float)Math.Max(1.0, height),
+                                         (float)angle);
+            r.StrokeColor = primary ? ColorBarcode : Color.FromArgb(150, ColorBarcode);
+            r.LineWidth = primary ? BoldLine : ThinLine;
+            r.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
+            return r;
+        }
+
         /// <summary>模板匹配 NCC 结果框（轴对齐矩形，仅平移匹配）。</summary>
         /// <param name="rect">结果框。</param>
         /// <param name="primary">是否为第 1 目标。</param>
@@ -339,6 +366,31 @@ namespace VisionPlatform.Flow
         {
             var r = new RectangleShape(Math.Max(1f, rect.X), Math.Max(1f, rect.Y),
                                        Math.Max(1f, rect.Width), Math.Max(1f, rect.Height));
+            r.StrokeColor = primary ? ColorNccMatch : Color.FromArgb(150, ColorNccMatch);
+            r.LineWidth = primary ? BoldLine : ThinLine;
+            r.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) r.Label = label;
+            return r;
+        }
+
+        /// <summary>
+        /// 模板匹配 NCC 结果框（**旋转矩形**，支持角度 / 缩放搜索）。
+        /// <para>与 <see cref="MatchBox"/> 的区别只有配色：NCC 用彩色区分，一眼能看出是哪个算法出的框。</para>
+        /// </summary>
+        /// <param name="cx">匹配框中心 X（图像坐标）。</param>
+        /// <param name="cy">匹配框中心 Y。</param>
+        /// <param name="width">框宽（图像像素）。</param>
+        /// <param name="height">框高。</param>
+        /// <param name="angle">角度（度，顺时针为正）。</param>
+        /// <param name="primary">是否为第 1 目标。</param>
+        /// <param name="label">框标签；空 = 不画。</param>
+        public static RotatedRectShape NccMatchBox(double cx, double cy, double width, double height,
+                                                   double angle, bool primary, string label = null)
+        {
+            var r = new RotatedRectShape(new PointF((float)cx, (float)cy),
+                                         (float)Math.Max(1.0, width),
+                                         (float)Math.Max(1.0, height),
+                                         (float)angle);
             r.StrokeColor = primary ? ColorNccMatch : Color.FromArgb(150, ColorNccMatch);
             r.LineWidth = primary ? BoldLine : ThinLine;
             r.IsEditable = false;
@@ -491,6 +543,50 @@ namespace VisionPlatform.Flow
             r.IsEditable = false;
             r.Name = "OcrChar";
             if (!string.IsNullOrEmpty(labelText)) r.Label = labelText;
+            return r;
+        }
+
+        /// <summary>
+        /// 字符识别的字符框（<strong>旋转矩形</strong>：中心 + 尺寸 + 角度）。
+        /// <para>
+        /// 与 <see cref="OcrBox"/> 的分工：ROI / 位姿带角度时，字符框在整帧上就是斜的 ——
+        /// 此时必须用本方法。沿用轴对齐版本会"中心对、四角全错"，
+        /// 现场看到的就是「分割出来的字符框位置和形状都不对」。
+        /// </para>
+        /// </summary>
+        /// <param name="center">框中心（图像坐标）。</param>
+        /// <param name="angleDeg">角度（度，顺时针为正）。</param>
+        public static RotatedRectShape OcrCharRotBox(PointF center, double width, double height,
+                                                     double angleDeg, string labelText)
+        {
+            var r = new RotatedRectShape(center,
+                                         (float)Math.Max(1.0, width),
+                                         (float)Math.Max(1.0, height),
+                                         (float)angleDeg);
+            r.StrokeColor = ColorOcr;
+            r.LineWidth = NormalLine;
+            r.IsEditable = false;
+            r.Name = "OcrChar";
+            if (!string.IsNullOrEmpty(labelText)) r.Label = labelText;
+            return r;
+        }
+
+        /// <summary>
+        /// OCR 合并字符串框（<strong>旋转矩形</strong>）：一行一个框 + 整行文本。
+        /// 旋转 ROI 下与 <see cref="OcrStringBox"/> 同职责，只是框本身跟着转。
+        /// </summary>
+        public static RotatedRectShape OcrStringRotBox(PointF center, double width, double height,
+                                                       double angleDeg, string text)
+        {
+            var r = new RotatedRectShape(center,
+                                         (float)Math.Max(1.0, width),
+                                         (float)Math.Max(1.0, height),
+                                         (float)angleDeg);
+            r.StrokeColor = ColorOcrString;
+            r.LineWidth = BoldLine;
+            r.IsEditable = false;
+            r.Name = "OcrString";
+            if (!string.IsNullOrEmpty(text)) r.Label = text;
             return r;
         }
 

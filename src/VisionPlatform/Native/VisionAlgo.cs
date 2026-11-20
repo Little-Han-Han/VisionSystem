@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using VisionPlatform.Core;
 
 namespace VisionPlatform.Native
@@ -101,6 +103,58 @@ namespace VisionPlatform.Native
         public double height;
         public double score;
         public double angle;
+        public double scale;
+        public double cx;
+        public double cy;
+    }
+
+    /// <summary>NCC 匹配参数（对应 C 端 VA_MatchParam）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_MatchParam
+    {
+        public double angle_start;
+        public double angle_end;
+        public double angle_step;
+        public double scale_min;
+        public double scale_max;
+        public double scale_step;
+        public int    pyramid_levels;
+        public double min_score;
+        public int    max_matches;
+        public double max_overlap;
+        public int    subpixel;
+    }
+
+    /// <summary>条码识别参数（对应 C 端 VA_BarcodeParam）。码类型是单选。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_BarcodeParam
+    {
+        public int    code_type;     // 见 BarcodeCodeType
+        public int    max_count;
+        public int    try_harder;
+        public int    try_rotate;
+        public int    try_downscale;
+        public int    try_invert;
+        public int    is_pure;
+    }
+
+    /// <summary>单个条码结果（对应 C 端 VA_Barcode）。字段顺序必须与 C 端逐字节一致。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_Barcode
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1024)] public byte[] text;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 24)]   public byte[] format;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]    public byte[] ec_level;
+        public double cx;
+        public double cy;
+        public double x;
+        public double y;
+        public double w;
+        public double h;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public double[] px;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public double[] py;
+        public double angle;
+        public int    text_truncated;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -243,6 +297,10 @@ namespace VisionPlatform.Native
         public int    norm_w;       /* 归一化宽；<=0 按 16 */
         public int    norm_h;       /* 归一化高；<=0 按 24 */
         public double accept_score; /* 匹配接受阈值 0~1，低于该值输出 '?' */
+        public double min_char_w;   /* 字符最小宽度（像素）；<=0 不限制 */
+        public double max_char_w;   /* 字符最大宽度（像素）；<=0 不限制 */
+        public double min_area;     /* 连通域最小面积（像素²）；<=0 不限制 */
+        public double max_area;     /* 连通域最大面积（像素²）；<=0 不限制 */
     }
 
     /// <summary>
@@ -266,6 +324,80 @@ namespace VisionPlatform.Native
     #endregion
 
     /// <summary>算法库返回码。</summary>
+    /// <summary>结构化错误详情（对应 C 端 VA_ErrorInfo）：错误码 + 哪一层 + 哪个参数 + 实际值 + 期望。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VA_ErrorInfo
+    {
+        public int    code;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]  public byte[] module;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]  public byte[] param;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)]  public byte[] value;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)]  public byte[] expect;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 512)] public byte[] message;
+    }
+
+    /// <summary>托管版错误详情：把 VA_ErrorInfo 的字节数组解码成字符串。</summary>
+    public sealed class ErrorInfo
+    {
+        /// <summary>VA_ERR_*（0 = 没出过错）。</summary>
+        public int Code { get; set; }
+        /// <summary>出问题的模块/步骤，如 "形状匹配"、"卡尺/直线"。</summary>
+        public string Module { get; set; }
+        /// <summary>出问题的参数名，如 "SearchX/Y/W/H"。</summary>
+        public string Param { get; set; }
+        /// <summary>该参数的实际值。</summary>
+        public string Value { get; set; }
+        /// <summary>期望口径。</summary>
+        public string Expect { get; set; }
+        /// <summary>整句（原生拼好的人读版本）。</summary>
+        public string Message { get; set; }
+
+        /// <summary>紧凑的结构化后缀，如 "［形状匹配 · SearchX/Y/W/H=(…) · 期望：…］"；无字段时返回空串。</summary>
+        public string Detail
+        {
+            get
+            {
+                var sb = new System.Text.StringBuilder();
+                if (!string.IsNullOrEmpty(Module)) sb.Append(Module);
+                if (!string.IsNullOrEmpty(Param))
+                {
+                    if (sb.Length > 0) sb.Append(" · ");
+                    sb.Append(Param);
+                    if (!string.IsNullOrEmpty(Value)) sb.Append('=').Append(Value);
+                }
+                string body = sb.ToString();
+                if (!string.IsNullOrEmpty(Expect))
+                {
+                    if (body.Length > 0) body += " · ";
+                    body += "期望：" + Expect;
+                }
+                return body.Length == 0 ? "" : "［" + body + "］";
+            }
+        }
+
+        internal static ErrorInfo FromNative(VA_ErrorInfo r)
+        {
+            return new ErrorInfo
+            {
+                Code = r.code,
+                Module = Decode(r.module),
+                Param = Decode(r.param),
+                Value = Decode(r.value),
+                Expect = Decode(r.expect),
+                Message = Decode(r.message)
+            };
+        }
+
+        private static string Decode(byte[] buf)
+        {
+            if (buf == null) return "";
+            int n = Array.IndexOf(buf, (byte)0);
+            if (n < 0) n = buf.Length;
+            return n <= 0 ? "" : Encoding.UTF8.GetString(buf, 0, n);
+        }
+    }
+
+    /// <summary>错误码常量（与 C 端 va_error.h 一一对应）。</summary>
     public static class VaResult
     {
         public const int OK = 0;
@@ -279,8 +411,56 @@ namespace VisionPlatform.Native
         public const int ErrCamera = 8;
         public const int ErrNoEdge = 9;
 
+        // ---- 细化码（10+）：按"失败发生在哪一层"分 ----
+        public const int ErrNoInput = 10;
+        public const int ErrRoi = 11;
+        public const int ErrImageTooSmall = 12;
+        public const int ErrChannel = 13;
+        public const int ErrParamRange = 14;
+        public const int ErrBufferTooSmall = 15;
+
+        public const int ErrTemplateTooSmall = 16;
+        public const int ErrTemplateNoFeature = 17;
+        public const int ErrModelNotLoaded = 18;
+        public const int ErrModelInfer = 19;
+
+        public const int ErrScanDegenerate = 20;
+        public const int ErrFitDegenerate = 21;
+        public const int ErrNoEdgeInRoi = 22;
+
+        public const int ErrBarcodeType = 24;
+        public const int ErrCalibNotReady = 25;
+        public const int ErrCameraOpen = 26;
+        public const int ErrCameraFrame = 27;
+
+        /// <summary>
+        /// 错误码 → 人读文本。
+        /// <para>
+        /// 【单一来源】文案只在原生 <c>va_error_string</c> 维护一份：以前这里另有一张中文表，
+        /// 结果同一个错误码在原生日志与界面里说法不一致。现在优先取原生文本，
+        /// 取不到（老版本 DLL / 加载失败）才退回下面的兜底表。
+        /// </para>
+        /// </summary>
         public static string ToString(int code)
         {
+            try
+            {
+                IntPtr p = NativeMethods.va_error_string(code);
+                if (p != IntPtr.Zero)
+                {
+                    int n = 0;
+                    while (n < 512 && Marshal.ReadByte(p, n) != 0) n++;
+                    if (n > 0)
+                    {
+                        byte[] buf = new byte[n];
+                        Marshal.Copy(p, buf, 0, n);
+                        string s = Encoding.UTF8.GetString(buf);
+                        if (!string.IsNullOrEmpty(s)) return s;
+                    }
+                }
+            }
+            catch (Exception) { }
+
             switch (code)
             {
                 case OK: return "成功";
@@ -293,6 +473,23 @@ namespace VisionPlatform.Native
                 case ErrTimeout: return "读帧超时";
                 case ErrCamera: return "相机错误";
                 case ErrNoEdge: return "有效边缘点不足";
+                case ErrNoInput: return "无输入帧";
+                case ErrRoi: return "ROI 非法";
+                case ErrImageTooSmall: return "图像太小";
+                case ErrChannel: return "通道数不支持";
+                case ErrParamRange: return "参数越界";
+                case ErrBufferTooSmall: return "输出缓冲区不足";
+                case ErrTemplateTooSmall: return "模板过小";
+                case ErrTemplateNoFeature: return "模板无特征";
+                case ErrModelNotLoaded: return "模型未加载";
+                case ErrModelInfer: return "推理失败";
+                case ErrScanDegenerate: return "扫描线退化";
+                case ErrFitDegenerate: return "拟合退化";
+                case ErrNoEdgeInRoi: return "区域内无边缘";
+                case ErrBarcodeType: return "码类型非法";
+                case ErrCalibNotReady: return "标定未就绪";
+                case ErrCameraOpen: return "相机打开失败";
+                case ErrCameraFrame: return "相机读帧失败";
                 default: return "未知错误 " + code;
             }
         }
@@ -305,6 +502,18 @@ namespace VisionPlatform.Native
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_get_version();
 
+        /// <summary>
+        /// 设置算法内部 OpenCV 的并行线程数（进程级全局）。返回真正生效的线程数。
+        /// <para>n ≤ 0 = 串行（关闭 OpenCV 内部并行）。宿主本来是"多流程各一线程"，
+        /// 内部再开满核会 N 倍超订，实测 3 流程吃满 12 核却只有 3 fps。</para>
+        /// </summary>
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_set_threads(int n);
+
+        /// <summary>设置本线程的算法软超时（毫秒，&lt;=0 清除）。见 <see cref="VisionAlgo.SetDeadline"/>。</summary>
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern void va_set_deadline_ms(int ms);
+
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern IntPtr va_create();
 
@@ -313,6 +522,14 @@ namespace VisionPlatform.Native
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_get_last_error(IntPtr handle, byte[] buffer, int size);
+
+        /// <summary>错误码 → 人读文本（UTF-8，库内静态存储）。这是全库唯一的错误码文案表。</summary>
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern IntPtr va_error_string(int code);
+
+        /// <summary>取最近一次错误的结构化详情（哪个模块 / 哪个参数 / 实际值 / 期望）。</summary>
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_get_error_info(IntPtr handle, out VA_ErrorInfo info);
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_preprocess(IntPtr handle, ref VA_Image src,
@@ -371,6 +588,23 @@ namespace VisionPlatform.Native
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_match_template(IntPtr handle, ref VA_Image gray,
                                                    out VA_MatchResult result);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_match_template_ex(IntPtr handle, ref VA_Image gray,
+                                                      ref VA_MatchParam param,
+                                                      [Out] VA_MatchResult[] results,
+                                                      int maxCount, out int outCount);
+
+        // ---- 条码 / 二维码 ----
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_barcode_read(IntPtr handle, ref VA_Image gray,
+                                                 ref VA_BarcodeParam param,
+                                                 [Out] VA_Barcode[] results,
+                                                 int maxCount, out int outCount);
+
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern IntPtr va_barcode_version();
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_edge_count(IntPtr handle, ref VA_Image gray,
@@ -503,6 +737,40 @@ namespace VisionPlatform.Native
 
         public bool IsValid { get { return _handle != IntPtr.Zero; } }
 
+        /// <summary>
+        /// 设置算法内部 OpenCV 的并行线程数（进程级全局，与实例无关）。返回真正生效的线程数。
+        /// <para>【什么时候调】宿主按"当前要并行跑几条流程"算一次即可：总线程数保持在
+        /// 物理核数量级，别让每条流程内部都开满核。0 表示串行（单核）。</para>
+        /// <para>算法库未加载 / 接口不存在时返回 -1，不影响调用方。</para>
+        /// </summary>
+        public static int SetThreads(int threads)
+        {
+            try { return NativeMethods.va_set_threads(threads); }
+            catch (Exception) { return -1; }
+        }
+
+        /// <summary>
+        /// 设置<strong>当前线程</strong>的算法软超时（毫秒，&lt;=0 清除）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 【为什么是"软"超时】库内全是同步 C++ 调用，宿主无法从外部杀死正在跑的算法线程；
+        /// 硬杀会把正在写的 Mat / 模板状态留在半路，下一次调用就是野指针。
+        /// 所以由算法在自己<b>检查点</b>（每个扫描位置 / 每个字符 / 每个姿态 / 每层金字塔）
+        /// 读一次时钟，到点主动返回 <c>VA_ERR_ALGO_TIMEOUT</c>。
+        /// </para>
+        /// <para>
+        /// 【粒度】单次 OpenCV 调用（<c>matchTemplate</c> / OpenVINO 推理）内部不可中断，
+        /// 到点只能等它返回 —— 调用方仍须按实测耗时兜底判超时（见 FlowRunner 的节点超时）。
+        /// </para>
+        /// <para>算法库未加载 / 接口不存在（旧 DLL）时静默失败，不影响调用方。</para>
+        /// </remarks>
+        public static void SetDeadline(int milliseconds)
+        {
+            try { NativeMethods.va_set_deadline_ms(milliseconds <= 0 ? 0 : milliseconds); }
+            catch (Exception) { }
+        }
+
         public static int LibraryVersion
         {
             get
@@ -524,6 +792,32 @@ namespace VisionPlatform.Native
                 return System.Text.Encoding.UTF8.GetString(buffer, 0, n);
             }
         }
+
+        /// <summary>
+        /// 最近一次错误的结构化详情（错误码 + 模块 + 参数 + 实际值 + 期望）。
+        /// <para>
+        /// 【为什么要有它】只拿一句拼接文本时，上层没法区分"是 ROI 越界"还是"模板没特征"，
+        /// 既不能按码做不同处理，也没法把"哪个参数、值多少"单独显示。这里把两者分开：
+        /// <see cref="ErrorInfo.Code"/> 用于判断，<see cref="ErrorInfo.Detail"/> 用于展示。
+        /// </para>
+        /// </summary>
+        public ErrorInfo LastErrorInfo
+        {
+            get
+            {
+                if (_handle == IntPtr.Zero) return new ErrorInfo();
+                try
+                {
+                    VA_ErrorInfo raw;
+                    int rc = NativeMethods.va_get_error_info(_handle, out raw);
+                    return (rc == VaResult.OK) ? ErrorInfo.FromNative(raw) : new ErrorInfo();
+                }
+                catch (Exception) { return new ErrorInfo(); }
+            }
+        }
+
+        /// <summary>最近一次错误码（VA_ERR_*，0 = 没出过错）。</summary>
+        public int LastErrorCode { get { return LastErrorInfo.Code; } }
 
         #region 算法方法
 
@@ -919,6 +1213,114 @@ namespace VisionPlatform.Native
             {
                 return OpResult<MatchResult>.Fail("模板匹配失败：" + ex.Message);
             }
+            }
+        }
+
+        /// <summary>
+        /// 模板匹配（支持角度 / 缩放搜索、多目标）。
+        /// <para>
+        /// 阈值在 C# 侧判定（这里按 0 传给原生），这样才能把"最高得分"如实报给用户 ——
+        /// 调阈值时那是唯一的依据，原生层直接按阈值过滤就把它丢了。
+        /// </para>
+        /// </summary>
+        public OpResult<List<MatchResult>> MatchTemplate(Bitmap gray, MatchParam param)
+        {
+            if (gray == null) return OpResult<List<MatchResult>>.Fail("输入图像为空");
+            if (param == null) param = MatchParam.Default();
+
+            // 统一转成 8bpp 灰度再交给算法库（彩色图按 Rec.601 亮度公式转换）
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+                    VA_MatchParam p = param.ToNative();
+                    p.min_score = 0.0;                 // 阈值判定留给调用方
+
+                    int maxCount = param.MaxMatches > 0 ? param.MaxMatches : 1;
+                    if (maxCount > 1000) maxCount = 1000;
+
+                    VA_MatchResult[] raw = new VA_MatchResult[maxCount];
+                    int count = 0;
+
+                    int rc = NativeMethods.va_match_template_ex(_handle, ref img, ref p,
+                                                                raw, maxCount, out count);
+                    if (rc != VaResult.OK)
+                        return OpResult<List<MatchResult>>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var list = new List<MatchResult>();
+                    for (int i = 0; i < count && i < raw.Length; i++)
+                        list.Add(MatchResult.FromNative(raw[i]));
+
+                    return OpResult<List<MatchResult>>.Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<MatchResult>>.Fail("模板匹配失败：" + ex.Message);
+                }
+            }
+        }
+
+        // ---------------------- 条码 / 二维码（zxing-cpp）----------------------
+
+        /// <summary>zxing-cpp 版本串，取不到返回空串。</summary>
+        public static string BarcodeLibraryVersion()
+        {
+            try
+            {
+                IntPtr p = NativeMethods.va_barcode_version();
+                return (p == IntPtr.Zero) ? "" : Marshal.PtrToStringAnsi(p);
+            }
+            catch (Exception) { return ""; }
+        }
+
+        /// <summary>
+        /// 识别图像中的全部条码 / 二维码（不需要模板，一次可识别多个）。
+        /// <para>返回成功且列表为空 = "没识别到码"（不是错误）；调用方据参数生成可行动的提示。</para>
+        /// </summary>
+        public OpResult<List<BarcodeResult>> ReadBarcodes(Bitmap gray, BarcodeParam param)
+        {
+            if (gray == null) return OpResult<List<BarcodeResult>>.Fail("输入图像为空");
+            if (param == null) param = BarcodeParam.Default();
+
+            using (var gi = new GrayInput(gray))
+            {
+                try
+                {
+                    VA_Image img = gi.Image;
+
+                    int maxCount = param.MaxCount;
+                    if (maxCount < 1) maxCount = 1;
+                    if (maxCount > 255) maxCount = 255;      // C 端 maxNumberOfSymbols 是 uint8
+
+                    VA_BarcodeParam p = new VA_BarcodeParam
+                    {
+                        code_type = param.CodeType,
+                        max_count = maxCount,
+                        try_harder = param.TryHarder ? 1 : 0,
+                        try_rotate = param.TryRotate ? 1 : 0,
+                        try_downscale = param.TryDownscale ? 1 : 0,
+                        try_invert = param.TryInvert ? 1 : 0,
+                        is_pure = param.IsPure ? 1 : 0
+                    };
+
+                    VA_Barcode[] raw = new VA_Barcode[maxCount];
+                    int count = 0;
+
+                    int rc = NativeMethods.va_barcode_read(_handle, ref img, ref p, raw, maxCount, out count);
+                    if (rc != VaResult.OK)
+                        return OpResult<List<BarcodeResult>>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var list = new List<BarcodeResult>();
+                    for (int i = 0; i < count && i < raw.Length; i++)
+                        list.Add(BarcodeResult.FromNative(raw[i]));
+
+                    return OpResult<List<BarcodeResult>>.Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<BarcodeResult>>.Fail("条码识别失败：" + ex.Message);
+                }
             }
         }
 
@@ -2645,15 +3047,250 @@ namespace VisionPlatform.Native
         public double Height { get; set; }
         public double Score { get; set; }
 
-        public MatchResult() { }
+        /// <summary>匹配角度（度，顺时针为正，与形状匹配同口径）。</summary>
+        public double Angle { get; set; }
+
+        /// <summary>匹配缩放（1 = 模板原尺寸）。</summary>
+        public double Scale { get; set; }
+
+        /// <summary>匹配框中心（旋转矩形的中心；画旋转框用这个）。</summary>
+        public double Cx { get; set; }
+        public double Cy { get; set; }
+
+        public MatchResult() { Scale = 1.0; }
+
+        /// <summary>兼容旧构造：只平移匹配（角度 0、缩放 1、中心取外接框中心）。</summary>
         public MatchResult(double x, double y, double w, double h, double score)
         {
             X = x; Y = y; Width = w; Height = h; Score = score;
+            Angle = 0.0; Scale = 1.0;
+            Cx = x + w * 0.5; Cy = y + h * 0.5;
+        }
+
+        internal static MatchResult FromNative(VA_MatchResult r)
+        {
+            return new MatchResult
+            {
+                X = r.x, Y = r.y, Width = r.width, Height = r.height,
+                Score = r.score, Angle = r.angle, Scale = r.scale,
+                Cx = r.cx, Cy = r.cy
+            };
         }
 
         public override string ToString()
         {
-            return string.Format("Match ({0:F1},{1:F1}) score={2:F3}", X, Y, Score);
+            return string.Format("Match ({0:F1},{1:F1}) score={2:F3} angle={3:F2}° scale={4:F3}",
+                                 Cx, Cy, Score, Angle, Scale);
+        }
+    }
+
+    /// <summary>条码/二维码的码类型（与原生 VA_BC_* 一一对应）。单选。</summary>
+    public static class BarcodeCodeType
+    {
+        public const int Auto = 0;
+        public const int Ean13 = 1;
+        public const int UpcA = 2;
+        public const int Codabar = 3;
+        public const int Code39 = 4;
+        public const int Code128 = 5;       // 含 GS1-128 / SSCC-18 / EAN-128
+        public const int Itf = 6;           // 含 ITF-14
+        public const int QrCode = 7;
+        public const int DataMatrix = 8;
+        public const int Aztec = 9;
+        public const int Pdf417 = 10;
+        public const int MaxiCode = 11;
+        public const int Ean8 = 12;
+        public const int UpcE = 13;
+        public const int Code93 = 14;
+        public const int MicroQrCode = 15;
+        public const int RmQrCode = 16;
+        public const int DataBar = 17;
+        public const int DataBarExpanded = 18;
+        public const int DataBarLimited = 19;
+        public const int DxFilmEdge = 20;
+        public const int MaxType = 20;
+    }
+
+    /// <summary>条码 / 二维码识别参数。</summary>
+    public class BarcodeParam
+    {
+        /// <summary>码类型（单选，见 <see cref="BarcodeCodeType"/>）。选具体类型更快，也不会把近亲码认错。</summary>
+        public int CodeType { get; set; }
+
+        /// <summary>最多返回几个码（1~255）。</summary>
+        public int MaxCount { get; set; }
+
+        /// <summary>更努力地找（更慢）：小码、低对比度、破损码才需要。</summary>
+        public bool TryHarder { get; set; }
+
+        /// <summary>也尝试其它方向（默认开；关掉只认正向）。</summary>
+        public bool TryRotate { get; set; }
+
+        /// <summary>额外做一轮降采样（大图更快，但小码会漏）。</summary>
+        public bool TryDownscale { get; set; }
+
+        /// <summary>也试反色（白码黑底 / 底色偏暗）。</summary>
+        public bool TryInvert { get; set; }
+
+        /// <summary>纯码模式：搜索区里只有一个正对镜头的码，跳过定位直接解码（最快）。</summary>
+        public bool IsPure { get; set; }
+
+        public static BarcodeParam Default()
+        {
+            return new BarcodeParam
+            {
+                CodeType = BarcodeCodeType.Auto,
+                MaxCount = 8,
+                TryHarder = false,
+                TryRotate = true,
+                TryDownscale = false,
+                TryInvert = true,
+                IsPure = false
+            };
+        }
+    }
+
+    /// <summary>单个条码 / 二维码的识别结果（坐标均为输入图像坐标）。</summary>
+    public class BarcodeResult
+    {
+        /// <summary>文本内容（UTF-8 解码后）。</summary>
+        public string Text { get; set; }
+
+        /// <summary>码制名，如 "QRCode" / "Code128"。</summary>
+        public string Format { get; set; }
+
+        /// <summary>纠错等级（QR 为 L/M/Q/H）；不适用时为空串。</summary>
+        public string EcLevel { get; set; }
+
+        public double Cx { get; set; }
+        public double Cy { get; set; }
+        public double X { get; set; }
+        public double Y { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+
+        /// <summary>旋转角（度，顺时针为正，与形状匹配同口径）。</summary>
+        public double Angle { get; set; }
+
+        /// <summary>四角点：左上、右上、右下、左下（顺时针）。画透视框用它。</summary>
+        public double[] Px { get; set; }
+        public double[] Py { get; set; }
+
+        public bool TextTruncated { get; set; }
+
+        internal static BarcodeResult FromNative(VA_Barcode r)
+        {
+            return new BarcodeResult
+            {
+                Text = DecodeUtf8(r.text),
+                Format = DecodeAscii(r.format),
+                EcLevel = DecodeAscii(r.ec_level),
+                Cx = r.cx, Cy = r.cy,
+                X = r.x, Y = r.y, Width = r.w, Height = r.h,
+                Angle = r.angle,
+                Px = r.px == null ? new double[4] : (double[])r.px.Clone(),
+                Py = r.py == null ? new double[4] : (double[])r.py.Clone(),
+                TextTruncated = r.text_truncated != 0
+            };
+        }
+
+        private static string DecodeUtf8(byte[] buf)
+        {
+            if (buf == null) return "";
+            int n = Array.IndexOf(buf, (byte)0);
+            if (n < 0) n = buf.Length;
+            return Encoding.UTF8.GetString(buf, 0, n);
+        }
+
+        private static string DecodeAscii(byte[] buf)
+        {
+            if (buf == null) return "";
+            int n = Array.IndexOf(buf, (byte)0);
+            if (n < 0) n = buf.Length;
+            return Encoding.ASCII.GetString(buf, 0, n);
+        }
+
+        public override string ToString()
+        {
+            return string.Format(CultureInfo.InvariantCulture, "{0} \"{1}\" @({2:F0},{3:F0})",
+                                 Format, Text, Cx, Cy);
+        }
+    }
+
+    /// <summary>NCC 模板匹配参数（角度 / 缩放 / 金字塔 / 多目标）。</summary>
+    public class MatchParam
+    {
+        public double AngleStart { get; set; }
+        public double AngleEnd { get; set; }
+        public double AngleStep { get; set; }
+        public double ScaleMin { get; set; }
+        public double ScaleMax { get; set; }
+        public double ScaleStep { get; set; }
+        public int PyramidLevels { get; set; }
+        public double MinScore { get; set; }
+        public int MaxMatches { get; set; }
+        public double MaxOverlap { get; set; }
+        public bool Subpixel { get; set; }
+
+        public static MatchParam Default()
+        {
+            return new MatchParam
+            {
+                AngleStart = 0.0,
+                AngleEnd = 0.0,          // 默认只搜平移（与旧版行为一致）
+                AngleStep = 1.0,
+                ScaleMin = 1.0,
+                ScaleMax = 1.0,
+                ScaleStep = 0.0,
+                PyramidLevels = 3,
+                MinScore = 0.8,
+                MaxMatches = 1,
+                MaxOverlap = 0.5,
+                Subpixel = true
+            };
+        }
+
+        /// <summary>姿态数 = 角度档 × 缩放档；用于给用户提示耗时量级。</summary>
+        public int PoseCount
+        {
+            get
+            {
+                double a0 = Math.Min(AngleStart, AngleEnd);
+                double a1 = Math.Max(AngleStart, AngleEnd);
+                double step = AngleStep > 0 ? AngleStep : 1.0;
+                int na = (int)Math.Floor((a1 - a0) / step + 1e-9) + 1;
+                if (na < 1) na = 1;
+                if (na > 3600) na = 3600;
+
+                int ns = 1;
+                if (ScaleStep > 1e-9 && Math.Abs(ScaleMax - ScaleMin) > 1e-9)
+                {
+                    double s0 = Math.Min(ScaleMin, ScaleMax);
+                    double s1 = Math.Max(ScaleMin, ScaleMax);
+                    ns = (int)Math.Floor((s1 - s0) / ScaleStep + 1e-9) + 1;
+                    if (ns < 1) ns = 1;
+                    if (ns > 64) ns = 64;
+                }
+                return na * ns;
+            }
+        }
+
+        internal VA_MatchParam ToNative()
+        {
+            return new VA_MatchParam
+            {
+                angle_start = AngleStart,
+                angle_end = AngleEnd,
+                angle_step = AngleStep,
+                scale_min = ScaleMin,
+                scale_max = ScaleMax,
+                scale_step = ScaleStep,
+                pyramid_levels = PyramidLevels,
+                min_score = MinScore,
+                max_matches = MaxMatches,
+                max_overlap = MaxOverlap,
+                subpixel = Subpixel ? 1 : 0
+            };
         }
     }
 
@@ -2976,6 +3613,18 @@ namespace VisionPlatform.Native
         /// <summary>最大宽高比 w/h；&lt;=0 不限制。</summary>
         public double MaxAspect { get; set; }
 
+        /// <summary>字符最小宽度（像素）；&lt;=0 不限制。</summary>
+        public double MinCharW { get; set; }
+
+        /// <summary>字符最大宽度（像素）；&lt;=0 不限制。</summary>
+        public double MaxCharW { get; set; }
+
+        /// <summary>连通域最小面积（像素²）；&lt;=0 不限制。细划痕用它比用宽高更有效。</summary>
+        public double MinArea { get; set; }
+
+        /// <summary>连通域最大面积（像素²）；&lt;=0 不限制。大块污渍用它过滤。</summary>
+        public double MaxArea { get; set; }
+
         /// <summary>同行相邻字符最大间隙（像素）；&lt;0 按 3。</summary>
         public int MaxGap { get; set; }
 
@@ -3018,6 +3667,10 @@ namespace VisionPlatform.Native
             p.norm_w = NormW;
             p.norm_h = NormH;
             p.accept_score = AcceptScore;
+            p.min_char_w = MinCharW;
+            p.max_char_w = MaxCharW;
+            p.min_area = MinArea;
+            p.max_area = MaxArea;
             return p;
         }
 

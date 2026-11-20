@@ -175,6 +175,10 @@ namespace VisionPlatform.UI
                 numeric.ForeColor = UiTheme.ColorTextPrimary;
                 numeric.Font = UiTheme.FontBody;
                 numeric.BorderStyle = BorderStyle.FixedSingle;
+                // 顺带套用数值框全局策略（禁滚轮改值 + 步长按值语义统一）。
+                // 走主题遍历的窗体都在这里覆盖到；被 IsSelfDrawn 跳过的子树
+                // （ParamListControl 等）在自己的控件创建点单独调用，滚轮另有全局过滤器兜底。
+                NumericInputPolicy.ApplyTo(numeric);
                 return;
             }
 

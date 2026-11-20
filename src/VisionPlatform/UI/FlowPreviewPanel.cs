@@ -1039,8 +1039,21 @@ namespace VisionPlatform.UI
                 snap.Overlay = null;
             }
 
-            ShowFrame(frameToShow, shapes, aux);
-            snap.Frame = null;      // 已交给视图持有（OwnsImage=true），此后不得再释放
+            // 点云快照：直接把查看器切到 3D 模式（与 2D 共用控件），本帧不做位图合成
+            if (snap.Cloud != null && snap.Cloud.Count > 0)
+            {
+                viewer.SetPointCloud(snap.Cloud);
+                snap.Cloud = null;          // 已交给视图持引用
+                snap.ReleaseFrame();
+                _curShapes = new List<IGeometryShape>();
+                _curAux = new List<IGeometryShape>();
+                RebuildShapes();
+            }
+            else
+            {
+                ShowFrame(frameToShow, shapes, aux);
+                snap.Frame = null;      // 已交给视图持有（OwnsImage=true），此后不得再释放
+            }
 
             // 【三处文案同源（UI-R09）】顶条、覆盖层、状态栏都走 NodeResultText，
             // 谁也不再就地拼字符串 —— 否则"同一个节点三个说法"会随下次改动长回来。

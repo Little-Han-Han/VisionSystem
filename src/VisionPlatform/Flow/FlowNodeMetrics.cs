@@ -35,6 +35,13 @@ namespace VisionPlatform.Flow
         /// <summary>角度（度）：NCC / 位置修正 / OCR 的 ROI 角；<c>NaN</c> = 不适用。</summary>
         public double AngleDeg = double.NaN;
 
+        /// <summary>
+        /// 匹配缩放（1 = 模板原尺寸）：仅 NCC 搜索了缩放时才有值；<c>NaN</c> = 不适用。
+        /// <para>刻意不放进 <see cref="HasAny"/>：它只是"角度之外的附加量"，
+        /// 单靠它不足以让结果区从 Summary 回落到指标行。</para>
+        /// </summary>
+        public double ScaleFactor = double.NaN;
+
         /// <summary>OCR 识别出的文本；null = 不适用。</summary>
         public string Text = null;
 

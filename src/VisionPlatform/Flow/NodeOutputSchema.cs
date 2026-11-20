@@ -150,6 +150,7 @@ namespace VisionPlatform.Flow
                     case FlowPortKind.Rect: return "矩形";
                     case FlowPortKind.Geometry: return "几何";
                     case FlowPortKind.BlobList: return "列表";
+                    case FlowPortKind.PointCloud: return "点云";
                     default: return "任意";
                 }
             }
@@ -207,6 +208,10 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.Script:
                     if (!string.IsNullOrEmpty(m.Text))
                         list.Add(new PortValue("Text", "脚本结果", FlowPortKind.Text, m.Text));
+                    break;
+
+                case FlowNodeType.PointCloudSource:
+                    AddNumber(list, "Count", "点数", m.TargetCount);
                     break;
             }
 

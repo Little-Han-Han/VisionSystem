@@ -622,6 +622,8 @@ namespace VisionPlatform.UI
             this.listLog.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.listLog.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listLog.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
+            // 单行日志经常很长（路径 / 整串摘要），不开横向滚动就只能看被裁掉的前半截
+            this.listLog.HorizontalScrollbar = true;
             this.listLog.IntegralHeight = false;
             this.listLog.ItemHeight = 16;
             this.listLog.Location = new System.Drawing.Point(6, 30);

@@ -200,6 +200,72 @@ namespace VisionPlatform.Flow
     /// </summary>
     public static class OcrCharStore
     {
+        /// <summary>
+        /// 扫描**单文件字符库**（<c>.ocrtpl</c>），产出与目录扫描同构的 <see cref="OcrCharLibrary"/>，
+        /// 让状态卡与"重新扫描"两条既有逻辑不用为"库文件"再写一套。
+        /// <para>
+        /// 【为什么 Entry 里没有图片路径】库把样本存成序列化条目，没有独立文件可给缩略图；
+        /// <c>PrimaryPath</c> 返回空串，卡片会自动退回占位图标（它已判空），计数与状态仍然正确。
+        /// </para>
+        /// </summary>
+        public static OcrCharLibrary ScanLibrary(string path)
+        {
+            var lib = new OcrCharLibrary
+            {
+                Dir = path ?? "",
+                ScannedAt = DateTime.Now
+            };
+
+            List<OcrCharSample> samples;
+            bool missing;
+            string err;
+            if (!OcrCharLibraryFile.Load(path, out samples, out missing, out err))
+            {
+                if (!missing)
+                {
+                    lib.FileCount = 1;
+                    lib.Failures.Add(new OcrCharFailure
+                    {
+                        FileName = Path.GetFileName(path ?? ""),
+                        Reason = err ?? "读取失败"
+                    });
+                }
+                return lib;
+            }
+
+            lib.FileCount = samples.Count;
+
+            var byLabel = new Dictionary<string, OcrCharEntry>(StringComparer.Ordinal);
+            for (int i = 0; i < samples.Count; i++)
+            {
+                OcrCharSample s = samples[i];
+                if (s == null) continue;
+
+                OcrCharEntry e;
+                if (!byLabel.TryGetValue(s.Label ?? "", out e))
+                {
+                    e = new OcrCharEntry { Label = s.Label ?? "" };
+                    byLabel[e.Label] = e;
+                }
+
+                e.Files.Add(new OcrCharFile
+                {
+                    Path = "",
+                    Label = e.Label,
+                    Ext = OcrCharLibraryFile.Extension,
+                    Length = s.Width * s.Height,
+                    LastWrite = DateTime.MinValue,
+                    PixelW = s.Width,
+                    PixelH = s.Height
+                });
+            }
+
+            foreach (KeyValuePair<string, OcrCharEntry> kv in byLabel) lib.Entries.Add(kv.Value);
+
+            lib.Entries.Sort((a, b) => string.CompareOrdinal(a.Label, b.Label));
+            return lib;
+        }
+
         /// <summary>支持的扩展名（顺序即"追加时的优先顺序"，也是缩略图取样的优先级）。</summary>
         public static readonly string[] Extensions = { ".png", ".bmp", ".tif", ".tiff", ".jpg", ".jpeg" };
 

@@ -49,6 +49,12 @@ namespace VisionPlatform.Flow
         public Bitmap Overlay;
 
         /// <summary>
+        /// 该节点产出的点云（读取点云节点）；预览面板据此把查看器切到 3D 模式。
+        /// 纯托管数据，无需释放手续。
+        /// </summary>
+        public VisionSystem.Controls.PointCloud.PointCloudData Cloud;
+
+        /// <summary>
         /// 该快照的帧必须留给 UI 异步使用（深度学习效果图）。
         /// <para>
         /// 默认快照广播后帧立即释放（内存只有 2 个快照的水位），但 UI 是 BeginInvoke 异步消费的，
@@ -186,6 +192,7 @@ namespace VisionPlatform.Flow
         private int _minCycleMs;
 
         private readonly FlowRunner _runner;
+        private long _cycleId;
         private readonly object _sync = new object();
 
         private Thread _thread;
@@ -197,6 +204,9 @@ namespace VisionPlatform.Flow
 
         // 覆盖式投递：预览由 33 ms Timer 拉取，绝不用 BeginInvoke 逐帧推送
         private FlowProgressSnapshot _pending;
+        /// <summary>最近一次 Finish 的结果（含本帧位姿修正量）；没跑过为 null。</summary>
+        public FlowRunResult LastResult { get; private set; }
+
         private Bitmap _original;          // 「原始图像」显示模式的相机原图（覆盖式，旧图即时释放）
 
         // 「选中节点」模式专用槽：单帧链 ~9ms 就在后台线程跑完，而预览每 33ms 才拉一次；
@@ -478,6 +488,7 @@ namespace VisionPlatform.Flow
                 }
 
                 FlowRunResult res = _runner.Finish(s);
+                LastResult = res;      // 供界面把 ROI 轮廓画到"工件现在的位置"
                 Bitmap previewFrame = CloneOrNull(s.Current);
                 PublishChainEnd(s, res, previewFrame, 0.0, 0.0);
 
@@ -505,7 +516,7 @@ namespace VisionPlatform.Flow
                         catch (Exception) { displayFrame = null; }
                     }
 
-                    PublishOutput(flow, camera, outFrame, res, displayFrame);
+                    PublishOutput(flow, camera, outFrame, res, displayFrame, s.CurrentCloud);
                     DropCycleOverlay();
                 }
             }
@@ -597,7 +608,7 @@ namespace VisionPlatform.Flow
             {
                 Bitmap outFrame = s.Current;
                 s.Current = null;
-                PublishOutput(flow, camera, outFrame, res);
+                PublishOutput(flow, camera, outFrame, res, null, s.CurrentCloud);
             }
 
             ResetStepSession();
@@ -684,7 +695,7 @@ namespace VisionPlatform.Flow
                         catch (Exception) { displayFrame = null; }
                     }
 
-                    PublishOutput(flow, camera, outFrame, res, displayFrame);
+                    PublishOutput(flow, camera, outFrame, res, displayFrame, s.CurrentCloud);
                     DropCycleOverlay();
                     }
                 }
@@ -781,6 +792,10 @@ namespace VisionPlatform.Flow
             snap.Frame = p.Frame;
             p.Frame = null;
 
+            // 点云引用移交（托管数据，无释放手续）
+            snap.Cloud = p.Cloud;
+            p.Cloud = null;
+
             // 位图叠加层（分割掩膜 / 深度伪彩）交给快照，由预览面板与**节点自己的帧**合成。
             // ⚠️ 绝不能在这里拿 s.Current 当底图：连续运行时 s.Current 是"最后处理完的那帧"，
             //    拿它合成会把图像源/上游节点的画面也变成下游处理后的图（真实踩过的坑）。
@@ -869,6 +884,9 @@ namespace VisionPlatform.Flow
                         snap.Shapes = new List<IGeometryShape>(last.Shapes);
                 }
             }
+
+            // 纯 3D 流程（没有帧只有点云）链尾也要把点云带出去
+            if (s != null && snap.Cloud == null) snap.Cloud = s.CurrentCloud;
 
             // 链尾帧原本是纯原图，「链尾结果」视图会把刚看到的掩膜/伪彩顶掉。
             // previewFrame 本身是 s.Current 的克隆，在这里叠加不会影响会话与输出。
@@ -997,7 +1015,8 @@ namespace VisionPlatform.Flow
         /// 回传主界面（沿用既有链路字段）。有订阅者时帧所有权移交，无订阅者时本类释放。
         /// </summary>
         private void PublishOutput(FlowDefinition flow, ICamera camera, Bitmap frame, FlowRunResult res,
-                                   Bitmap displayFrame = null)
+                                   Bitmap displayFrame = null,
+                                   VisionSystem.Controls.PointCloud.PointCloudData cloud = null)
         {
             var args = new FlowOutputEventArgs
             {
@@ -1007,9 +1026,12 @@ namespace VisionPlatform.Flow
                 Shapes = res != null ? res.Shapes : null,
                 Passed = res != null && res.Success && res.Passed,
                 Summary = res != null ? (res.Summary ?? "") : "",
+                ElapsedMs = res != null ? res.ElapsedMs : 0,
                 CameraName = (camera != null && camera.Info != null) ? camera.Info.Name : "本地图片",
                 FlowId = flow != null ? flow.Id : "",
-                FlowName = flow != null ? flow.Name : ""
+                FlowName = flow != null ? flow.Name : "",
+                CycleId = System.Threading.Interlocked.Increment(ref _cycleId),
+                Cloud = cloud
             };
 
             EventHandler<FlowOutputEventArgs> h = OutputReady;

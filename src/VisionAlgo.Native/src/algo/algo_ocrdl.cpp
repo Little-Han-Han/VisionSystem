@@ -29,10 +29,11 @@ void DetPreprocess(const cv::Mat& bgr, int inW, int inH, std::vector<float>& blo
     blob.assign((size_t)3 * inW * inH, 0.0f);
     const unsigned char* p = rgb.data;
     const int wh = inW * inH;
+    const float kInv255 = 1.0f / 255.0f;   // 乘倒数，避免 360 万次 divss
     for (int i = 0; i < wh; ++i) {
-        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] / 255.0f;
-        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] / 255.0f;
-        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] / 255.0f;
+        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] * kInv255;
+        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] * kInv255;
+        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] * kInv255;
     }
 }
 
@@ -56,10 +57,11 @@ void RecPreprocess(const cv::Mat& bgr, int recW, int recH, std::vector<float>& b
     blob.assign((size_t)3 * recW * recH, 0.0f);
     const unsigned char* p = rgb.data;
     const int wh = recW * recH;
+    const float kInv255 = 1.0f / 255.0f;
     for (int i = 0; i < wh; ++i) {
-        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] / 255.0f;
-        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] / 255.0f;
-        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] / 255.0f;
+        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] * kInv255;
+        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] * kInv255;
+        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] * kInv255;
     }
 }
 
@@ -129,6 +131,7 @@ int OcrDlCreate(Context* ctx, const char* det_model, const char* rec_model,
         }
 
         ov::Core core;
+        ApplyThreadBudget(core);
         std::shared_ptr<ov::Model> rec = core.read_model(rec_model);
 
         auto rs = rec->input().get_shape();

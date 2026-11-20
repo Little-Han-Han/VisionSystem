@@ -7,7 +7,9 @@ namespace va {
 int Preprocess(Context* ctx, const VA_Image* src, VA_Image* dst,
                const VA_PreprocessParam* param)
 {
-    if (src == 0 || dst == 0 || param == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (src == 0 || dst == 0 || param == 0)
+        return SetErrorEx(ctx, VA_ERR_ARG, "预处理", "src / dst / param", "存在空指针", "全部必填",
+                          "预处理：入参为空（输入图 / 输出图 / 参数必须全部提供）");
 
     try
     {

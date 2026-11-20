@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using VisionPlatform.Core;
 using VisionPlatform.Flow;
 
 namespace VisionPlatform.UI
@@ -57,6 +58,18 @@ namespace VisionPlatform.UI
 
         private FlowDefinition _flow;
         private string _selectedNodeId;
+
+        /// <summary>多选集合（含主选中 <see cref="_selectedNodeId"/>）。单选时只有 1 个元素。</summary>
+        private readonly List<string> _selectedNodeIds = new List<string>();
+
+        /// <summary>右键菜单（复制 / 粘贴 / 删除）。右键"单击"弹出，右键拖动仍是平移画布。</summary>
+        private ContextMenuStrip _contextMenu;
+
+        private Point _rightDownAt;
+        private bool _rightMoved;
+
+        /// <summary>右键菜单位置（画布坐标），粘贴时按它定位。</summary>
+        private PointF _menuAt;
         private int _selectedLinkIndex = -1;
 
         /// <summary>节点运行状态表（节点 Id → 状态 / 耗时）。仅在有运行记录后才写入。</summary>
@@ -107,6 +120,27 @@ namespace VisionPlatform.UI
             // 画布临时提示的自动消失计时器
             _toastTimer = new Timer { Interval = 2800 };
             _toastTimer.Tick += OnToastTick;
+
+            BuildContextMenu();
+        }
+
+        /// <summary>
+        /// 右键菜单：复制 / 粘贴 / 删除。
+        /// <para>右键本来用于平移画布，这里靠"按下到抬起是否移动过"区分：没动 = 菜单，动了 = 平移。</para>
+        /// </summary>
+        private void BuildContextMenu()
+        {
+            _contextMenu = new ContextMenuStrip();
+            _contextMenu.Items.Add("复制节点 (Ctrl+C)", null, delegate { CopySelection(); });
+            _contextMenu.Items.Add("粘贴到此处 (Ctrl+V)", null, delegate { PasteAt(_menuAt); });
+            _contextMenu.Items.Add(new ToolStripSeparator());
+            _contextMenu.Items.Add("删除 (Del)", null, delegate { DeleteSelected(); });
+            _contextMenu.Opening += delegate(object s2, System.ComponentModel.CancelEventArgs e2)
+            {
+                if (_contextMenu.Items.Count < 4) return;
+                _contextMenu.Items[1].Enabled = FlowPasteService.HasContent;
+                _contextMenu.Items[3].Enabled = _selectedNodeIds.Count > 0 || _selectedLinkIndex >= 0;
+            };
         }
 
         /// <summary>切换深浅色板时由 <see cref="UiThemeManager"/> 调用：重取图像区底色并重绘。</summary>
@@ -137,6 +171,7 @@ namespace VisionPlatform.UI
             {
                 _flow = value;
                 _selectedNodeId = null;
+                _selectedNodeIds.Clear();
                 _selectedLinkIndex = -1;
                 _runStatus.Clear();     // 换流程即复位画布状态，避免残留上一次运行的颜色
                 Invalidate();
@@ -149,10 +184,76 @@ namespace VisionPlatform.UI
         /// <summary>当前选中的连线序号（无选中为 -1）。</summary>
         public int SelectedLinkIndex { get { return _selectedLinkIndex; } }
 
-        /// <summary>当前选中的节点（无选中为 null）。</summary>
+        /// <summary>当前选中的节点（无选中为 null；多选时为主选中那个）。</summary>
         public FlowNode SelectedNode
         {
             get { return _flow != null ? _flow.FindNode(_selectedNodeId) : null; }
+        }
+
+        /// <summary>全部选中的节点（复制用；顺序即选中顺序）。</summary>
+        public List<FlowNode> SelectedNodes
+        {
+            get
+            {
+                var list = new List<FlowNode>();
+                if (_flow == null) return list;
+
+                for (int i = 0; i < _selectedNodeIds.Count; i++)
+                {
+                    FlowNode n = _flow.FindNode(_selectedNodeIds[i]);
+                    if (n != null) list.Add(n);
+                }
+                return list;
+            }
+        }
+
+        /// <summary>某个节点是否处于选中态（多选高亮用）。</summary>
+        private bool IsSelected(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return false;
+            return _selectedNodeIds.Contains(nodeId);
+        }
+
+        /// <summary>
+        /// 设置选中：<paramref name="additive"/> = true（Ctrl+点击）时切换该节点的选中态，
+        /// 否则清空其它选中只留它。
+        /// </summary>
+        private void SetSelection(FlowNode node, bool additive)
+        {
+            if (node == null)
+            {
+                ClearSelection();
+                return;
+            }
+
+            if (additive)
+            {
+                if (_selectedNodeIds.Contains(node.Id)) _selectedNodeIds.Remove(node.Id);
+                else _selectedNodeIds.Add(node.Id);
+
+                // 主选中取集合里最后一个（参数面板显示它）
+                _selectedNodeId = _selectedNodeIds.Count > 0 ? _selectedNodeIds[_selectedNodeIds.Count - 1] : null;
+                _selectedLinkIndex = -1;
+            }
+            else
+            {
+                _selectedNodeIds.Clear();
+                _selectedNodeIds.Add(node.Id);
+                _selectedNodeId = node.Id;
+                _selectedLinkIndex = -1;
+            }
+
+            RaiseNodeSelected(_selectedNodeId != null ? node : null);
+            Invalidate();
+        }
+
+        private void ClearSelection()
+        {
+            _selectedNodeIds.Clear();
+            _selectedNodeId = null;
+            _selectedLinkIndex = -1;
+            RaiseNodeSelected(null);
+            Invalidate();
         }
 
         public event EventHandler<FlowNodeEventArgs> NodeAdded;
@@ -181,6 +282,8 @@ namespace VisionPlatform.UI
 
             _flow.Nodes.Add(node);
             _selectedNodeId = node.Id;
+            _selectedNodeIds.Clear();
+            _selectedNodeIds.Add(node.Id);
             _selectedLinkIndex = -1;
 
             RaiseNodeAdded(node);
@@ -195,28 +298,37 @@ namespace VisionPlatform.UI
         {
             if (_flow == null) return;
 
-            if (!string.IsNullOrEmpty(_selectedNodeId))
+            if (_selectedNodeIds.Count > 0)
             {
-                FlowNode node = _flow.FindNode(_selectedNodeId);
-                if (node != null)
-                {
-                    // 先移除与该节点相关的连线
-                    for (int i = _flow.Links.Count - 1; i >= 0; i--)
-                    {
-                        FlowLink l = _flow.Links[i];
-                        if (l == null) continue;
-                        if (l.FromNodeId == node.Id || l.ToNodeId == node.Id)
-                        {
-                            _flow.Links.RemoveAt(i);
-                            RaiseLinkRemoved(l);
-                        }
-                    }
+                var ids = new HashSet<string>(_selectedNodeIds, StringComparer.Ordinal);
+                int removed = 0;
 
-                    _flow.Nodes.Remove(node);
-                    _selectedNodeId = null;
-                    RaiseChanged();
-                    Invalidate();
+                // 连到被删节点的连线一并清掉（否则会留下指向不存在节点的"鬼连线"）
+                for (int i = _flow.Links.Count - 1; i >= 0; i--)
+                {
+                    FlowLink l = _flow.Links[i];
+                    if (l == null) continue;
+                    if (!ids.Contains(l.FromNodeId ?? "") && !ids.Contains(l.ToNodeId ?? "")) continue;
+
+                    _flow.Links.RemoveAt(i);
+                    RaiseLinkRemoved(l);
                 }
+
+                for (int i = _flow.Nodes.Count - 1; i >= 0; i--)
+                {
+                    FlowNode n = _flow.Nodes[i];
+                    if (n == null || !ids.Contains(n.Id ?? "")) continue;
+
+                    _flow.Nodes.RemoveAt(i);
+                    removed++;
+                }
+
+                _selectedNodeIds.Clear();
+                _selectedNodeId = null;
+                _selectedLinkIndex = -1;
+
+                if (removed > 0) RaiseChanged();
+                Invalidate();
                 return;
             }
 
@@ -884,6 +996,44 @@ namespace VisionPlatform.UI
             ZoomAt(new PointF(e.X, e.Y), _viewZoom * factor);
         }
 
+        /// <summary>复制当前选中的节点（Ctrl+C / 右键菜单）。</summary>
+        public void CopySelection()
+        {
+            if (_flow == null) { ShowToast("请先打开一条流程", true); return; }
+
+            OpResult<int> r = FlowPasteService.Copy(_flow, SelectedNodes);
+            ShowToast(r.Message, !r.Success);
+        }
+
+        /// <summary>
+        /// 在指定画布坐标粘贴剪贴板内容；粘贴出来的节点自动成为新的选中集，
+        /// 并触发 <see cref="Changed"/>（FlowForm 会保存 + 重跑校验）。
+        /// </summary>
+        public void PasteAt(PointF canvasPoint)
+        {
+            if (_flow == null) { ShowToast("请先打开一条流程", true); return; }
+
+            var before = new HashSet<string>(StringComparer.Ordinal);
+            foreach (FlowNode n in _flow.Nodes) if (n != null) before.Add(n.Id ?? "");
+
+            OpResult<int> r = FlowPasteService.Paste(_flow, canvasPoint.X, canvasPoint.Y);
+            if (!r.Success) { ShowToast(r.Message, true); return; }
+
+            _selectedNodeIds.Clear();
+            foreach (FlowNode n in _flow.Nodes)
+            {
+                if (n == null) continue;
+                if (!before.Contains(n.Id ?? "")) _selectedNodeIds.Add(n.Id);
+            }
+            _selectedNodeId = _selectedNodeIds.Count > 0 ? _selectedNodeIds[_selectedNodeIds.Count - 1] : null;
+            _selectedLinkIndex = -1;
+
+            RaiseNodeSelected(SelectedNode);
+            RaiseChanged();
+            Invalidate();
+            ShowToast(r.Message, false);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
@@ -897,6 +1047,13 @@ namespace VisionPlatform.UI
                 _panStartX = _panX;
                 _panStartY = _panY;
                 Cursor = Cursors.SizeAll;
+
+                if (e.Button == MouseButtons.Right)
+                {
+                    _rightDownAt = e.Location;
+                    _rightMoved = false;
+                    _menuAt = ToCanvas(e.Location);
+                }
                 return;
             }
 
@@ -919,12 +1076,25 @@ namespace VisionPlatform.UI
             FlowNode node = HitTestNode(pt);
             if (node != null)
             {
-                _selectedNodeId = node.Id;
-                _selectedLinkIndex = -1;
+                bool additive = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                if (additive)
+                {
+                    // Ctrl+点击：只切换选中，不进入拖动（避免"想多选却把节点拖走"）
+                    SetSelection(node, true);
+                    return;
+                }
+
+                if (!IsSelected(node.Id) || _selectedNodeIds.Count > 1)
+                    SetSelection(node, false);      // 点未选中的节点 = 改单选；点已选中的多选成员 = 保持整组
+                else
+                {
+                    _selectedNodeId = node.Id;
+                    RaiseNodeSelected(node);
+                }
+
                 _dragKind = DragKind.MoveNode;
                 _dragNode = node;
                 _dragOffset = new PointF(pt.X - node.X, pt.Y - node.Y);
-                RaiseNodeSelected(node);
                 Invalidate();
                 return;
             }
@@ -941,9 +1111,7 @@ namespace VisionPlatform.UI
             }
 
             // 4) 空白 → 清空选择，并允许"按住左键拖空白"平移画布
-            _selectedNodeId = null;
-            _selectedLinkIndex = -1;
-            RaiseNodeSelected(null);
+            ClearSelection();
 
             _panning = true;
             _panStart = new PointF(e.X, e.Y);
@@ -956,6 +1124,13 @@ namespace VisionPlatform.UI
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+
+            if (_panning && (e.Button & MouseButtons.Right) == MouseButtons.Right && !_rightMoved)
+            {
+                int ddx = Math.Abs(e.X - _rightDownAt.X);
+                int ddy = Math.Abs(e.Y - _rightDownAt.Y);
+                if (ddx > 3 || ddy > 3) _rightMoved = true;
+            }
 
             // 画布平移优先
             if (_panning)
@@ -1028,6 +1203,13 @@ namespace VisionPlatform.UI
                 _panning = false;
                 Cursor = Cursors.Default;
                 Invalidate();
+
+                // 右键"单击"（按下到抬起没移动）→ 弹菜单；拖动过就是平移，不打扰
+                if (e.Button == MouseButtons.Right && !_rightMoved && _contextMenu != null)
+                {
+                    _menuAt = ToCanvas(e.Location);
+                    _contextMenu.Show(this, e.Location);
+                }
                 return;
             }
 
@@ -1176,6 +1358,21 @@ namespace VisionPlatform.UI
         {
             base.OnKeyDown(e);
 
+            if (e.Control && e.KeyCode == Keys.C)
+            {
+                CopySelection();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Control && e.KeyCode == Keys.V)
+            {
+                // 键盘粘贴没有鼠标位置：贴到画布中心附近，避免贴到看不见的地方
+                PasteAt(ToCanvas(new Point(Width / 2, Height / 2)));
+                e.Handled = true;
+                return;
+            }
+
             if (e.KeyCode == Keys.Delete)
             {
                 DeleteSelected();
@@ -1278,7 +1475,7 @@ namespace VisionPlatform.UI
 
             // 节点（含端子）
             foreach (FlowNode n in _flow.Nodes)
-                DrawNode(g, n, n.Id == _selectedNodeId);
+                DrawNode(g, n, IsSelected(n.Id));
 
             // 覆盖层用屏幕坐标（提示气泡不该跟着缩放变大变小）
             g.ResetTransform();

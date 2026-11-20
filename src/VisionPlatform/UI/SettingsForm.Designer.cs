@@ -32,6 +32,8 @@ namespace VisionPlatform.UI
             this.lblHint = new System.Windows.Forms.Label();
 
             this.groupRun = new System.Windows.Forms.GroupBox();
+            this.cmbRunMode = new System.Windows.Forms.ComboBox();
+            this.lblRunMode = new System.Windows.Forms.Label();
             this.chkRequireComm = new System.Windows.Forms.CheckBox();
             this.lblCommState = new System.Windows.Forms.Label();
             this.lblYieldAlarm = new System.Windows.Forms.Label();
@@ -186,6 +188,8 @@ namespace VisionPlatform.UI
             this.lblHint.Text = "目录结构：{保存路径}\\{日期}\\{时间}_{标签}_{OK或NG}{扩展名}";
 
             // ---------- groupRun ----------
+            this.groupRun.Controls.Add(this.cmbRunMode);
+            this.groupRun.Controls.Add(this.lblRunMode);
             this.groupRun.Controls.Add(this.lblYieldAlarmUnit);
             this.groupRun.Controls.Add(this.numYieldAlarm);
             this.groupRun.Controls.Add(this.lblYieldAlarm);
@@ -194,54 +198,72 @@ namespace VisionPlatform.UI
             this.groupRun.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.groupRun.Location = new System.Drawing.Point(12, 210);
             this.groupRun.Name = "groupRun";
-            this.groupRun.Size = new System.Drawing.Size(496, 124);
+            this.groupRun.Size = new System.Drawing.Size(496, 156);
             this.groupRun.TabIndex = 1;
             this.groupRun.TabStop = false;
-            this.groupRun.Text = "运行前置条件";
+            this.groupRun.Text = "运行方式与前置条件";
+
+            this.lblRunMode.AutoSize = true;
+            this.lblRunMode.ForeColor = System.Drawing.Color.Silver;
+            this.lblRunMode.Location = new System.Drawing.Point(14, 30);
+            this.lblRunMode.Name = "lblRunMode";
+            this.lblRunMode.Size = new System.Drawing.Size(67, 15);
+            this.lblRunMode.TabIndex = 0;
+            this.lblRunMode.Text = "运行模式：";
+
+            this.cmbRunMode.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
+            this.cmbRunMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbRunMode.ForeColor = System.Drawing.Color.Gainsboro;
+            this.cmbRunMode.FormattingEnabled = true;
+            this.cmbRunMode.Items.AddRange(new object[] { "触发式：等外部信号，触发一次跑一轮", "连续运行：自动循环（仅供调试）" });
+            this.cmbRunMode.Location = new System.Drawing.Point(88, 27);
+            this.cmbRunMode.Name = "cmbRunMode";
+            this.cmbRunMode.Size = new System.Drawing.Size(300, 23);
+            this.cmbRunMode.TabIndex = 1;
 
             this.chkRequireComm.AutoSize = true;
             this.chkRequireComm.ForeColor = System.Drawing.Color.Gainsboro;
-            this.chkRequireComm.Location = new System.Drawing.Point(14, 28);
+            this.chkRequireComm.Location = new System.Drawing.Point(14, 58);
             this.chkRequireComm.Name = "chkRequireComm";
             this.chkRequireComm.Size = new System.Drawing.Size(340, 19);
-            this.chkRequireComm.TabIndex = 0;
+            this.chkRequireComm.TabIndex = 2;
             this.chkRequireComm.Text = "循环运行前要求通讯已连接（TCP 客户端 / Modbus / 服务端）";
             this.chkRequireComm.UseVisualStyleBackColor = true;
 
             this.lblCommState.AutoSize = true;
             this.lblCommState.ForeColor = System.Drawing.Color.Gray;
-            this.lblCommState.Location = new System.Drawing.Point(14, 58);
+            this.lblCommState.Location = new System.Drawing.Point(14, 88);
             this.lblCommState.Name = "lblCommState";
             this.lblCommState.Size = new System.Drawing.Size(50, 15);
-            this.lblCommState.TabIndex = 1;
+            this.lblCommState.TabIndex = 3;
             this.lblCommState.Text = "当前：";
 
             this.lblYieldAlarm.AutoSize = true;
             this.lblYieldAlarm.ForeColor = System.Drawing.Color.Silver;
-            this.lblYieldAlarm.Location = new System.Drawing.Point(14, 86);
+            this.lblYieldAlarm.Location = new System.Drawing.Point(14, 118);
             this.lblYieldAlarm.Name = "lblYieldAlarm";
             this.lblYieldAlarm.Size = new System.Drawing.Size(88, 15);
-            this.lblYieldAlarm.TabIndex = 2;
+            this.lblYieldAlarm.TabIndex = 4;
             this.lblYieldAlarm.Text = "良率告警下限：";
 
             this.numYieldAlarm.BackColor = System.Drawing.Color.FromArgb(30, 30, 38);
             this.numYieldAlarm.DecimalPlaces = 1;
             this.numYieldAlarm.ForeColor = System.Drawing.Color.Gainsboro;
             this.numYieldAlarm.Increment = new decimal(new int[] { 5, 0, 0, 0 });
-            this.numYieldAlarm.Location = new System.Drawing.Point(108, 83);
+            this.numYieldAlarm.Location = new System.Drawing.Point(108, 115);
             this.numYieldAlarm.Maximum = new decimal(new int[] { 100, 0, 0, 0 });
             this.numYieldAlarm.Minimum = new decimal(new int[] { 0, 0, 0, 0 });
             this.numYieldAlarm.Name = "numYieldAlarm";
             this.numYieldAlarm.Size = new System.Drawing.Size(70, 23);
-            this.numYieldAlarm.TabIndex = 3;
+            this.numYieldAlarm.TabIndex = 5;
             this.numYieldAlarm.Value = new decimal(new int[] { 95, 0, 0, 0 });
 
             this.lblYieldAlarmUnit.AutoSize = true;
             this.lblYieldAlarmUnit.ForeColor = System.Drawing.Color.Gray;
-            this.lblYieldAlarmUnit.Location = new System.Drawing.Point(184, 86);
+            this.lblYieldAlarmUnit.Location = new System.Drawing.Point(184, 118);
             this.lblYieldAlarmUnit.Name = "lblYieldAlarmUnit";
             this.lblYieldAlarmUnit.Size = new System.Drawing.Size(260, 15);
-            this.lblYieldAlarmUnit.TabIndex = 4;
+            this.lblYieldAlarmUnit.TabIndex = 6;
             this.lblYieldAlarmUnit.Text = "%（低于此值良率转橙，低于一半转红；0 = 不告警）";
 
             // ---------- groupLog ----------
@@ -253,7 +275,7 @@ namespace VisionPlatform.UI
             this.groupLog.Controls.Add(this.txtDbPath);
             this.groupLog.Controls.Add(this.lblLogDbPath);
             this.groupLog.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.groupLog.Location = new System.Drawing.Point(12, 342);
+            this.groupLog.Location = new System.Drawing.Point(12, 374);
             this.groupLog.Name = "groupLog";
             this.groupLog.Size = new System.Drawing.Size(496, 110);
             this.groupLog.TabIndex = 2;
@@ -319,7 +341,7 @@ namespace VisionPlatform.UI
             this.groupTheme.Controls.Add(this.cmbTheme);
             this.groupTheme.Controls.Add(this.lblTheme);
             this.groupTheme.ForeColor = System.Drawing.Color.DeepSkyBlue;
-            this.groupTheme.Location = new System.Drawing.Point(12, 458);
+            this.groupTheme.Location = new System.Drawing.Point(12, 490);
             this.groupTheme.Name = "groupTheme";
             this.groupTheme.Size = new System.Drawing.Size(496, 64);
             this.groupTheme.TabIndex = 3;
@@ -387,9 +409,11 @@ namespace VisionPlatform.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(38, 38, 46);
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(520, 586);
+            this.ClientSize = new System.Drawing.Size(520, 618);
             this.Controls.Add(this.groupSave);
             this.Controls.Add(this.groupRun);
+            // 【别删】groupLog 曾经只 new 出来配置好却没挂到窗体上，导致「日志数据库」分组整块不显示。
+            this.Controls.Add(this.groupLog);
             this.Controls.Add(this.groupTheme);
             this.Controls.Add(this.panelButtons);
             this.ForeColor = System.Drawing.Color.Gainsboro;
@@ -431,6 +455,8 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.Label lblHint;
 
         private System.Windows.Forms.GroupBox groupRun;
+        private System.Windows.Forms.Label lblRunMode;
+        private System.Windows.Forms.ComboBox cmbRunMode;
         private System.Windows.Forms.CheckBox chkRequireComm;
         private System.Windows.Forms.Label lblCommState;
         private System.Windows.Forms.Label lblYieldAlarm;

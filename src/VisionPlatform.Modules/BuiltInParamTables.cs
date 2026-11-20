@@ -16,6 +16,45 @@ namespace VisionPlatform.Modules
         /// <summary>按类型取参数表；无参数表返回 null。</summary>
         public static NodeParamTable Create(FlowNodeType type)
         {
+            NodeParamTable t = CreateCore(type);
+            if (t != null && BuiltInDefaults.HasAlgoTimeout(type)) AppendRunControl(t, type);
+            return t;
+        }
+
+        /// <summary>
+        /// 给算法节点追加「运行控制」组：<c>TimeoutMs</c>（默认 500ms，0 = 不限）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 【为什么是统一追加而不是每个表各写一行】"所有算法都要有超时"是**运行期契约**，
+        /// 不是某个算法的参数。分散写 24 份，漏一个就是"这个节点不会超时"，
+        /// 而且漏的那一个永远不会有人去核对。统一挂在总入口上，新增算法自动获得。
+        /// </para>
+        /// <para>
+        /// 【为什么不做成 Advanced（折叠进「高级参数」）】现场一旦超时，第一件事就是找这个值；
+        /// 藏在折叠区里等于"看不见"，会退化成"算法莫名报错"的投诉。
+        /// </para>
+        /// </remarks>
+        private static void AppendRunControl(NodeParamTable t, FlowNodeType type)
+        {
+            if (t.Fields == null) return;
+
+            // 历史表里已经有同键（图像源 / 通讯节点的自有 TimeoutMs 语义不同，已在 HasAlgoTimeout 排除），
+            // 这里再挡一次，避免同一个键出现两行。
+            foreach (NodeParamField f in t.Fields)
+                if (f != null && string.Equals(f.Key, "TimeoutMs", StringComparison.Ordinal)) return;
+
+            // 脚本面板是"只留一个按钮"的极简设计（有一批 UI 断言在钉它）：
+            // 给它加个组头会显得空荡荡，只补一行数字即可，语义照样清楚。
+            if (type != FlowNodeType.Script) t.Fields.Add(Group("运行控制"));
+
+            t.Fields.Add(Int("TimeoutMs", "超时(ms)", 0, 600000, "500",
+                "0 = 不限。到点算法在检查点（扫描位置 / 字符 / 姿态之间）主动退出并判 NG；"
+                + "单次 OpenCV 调用内部不可中断，会等它返回后再判。"));
+        }
+
+        private static NodeParamTable CreateCore(FlowNodeType type)
+        {
             switch (type)
             {
                 case FlowNodeType.ImageSource:     return ImageSource();
@@ -45,6 +84,8 @@ namespace VisionPlatform.Modules
                 case FlowNodeType.DlPose:          return DlTable(FlowNodeType.DlPose, "目标姿态估计");
                 case FlowNodeType.DlDepth:         return DlTable(FlowNodeType.DlDepth, "目标深度估计");
                 case FlowNodeType.OcrDl:           return OcrDlTable();
+                case FlowNodeType.BarcodeRead:     return BarcodeRead();
+                case FlowNodeType.PointCloudSource: return PointCloudSource();
                 default:                           return null;
             }
         }
@@ -437,21 +478,115 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Int("SearchW", "宽", 0, 100000, "0"));
             t.Fields.Add(Int("SearchH", "高", 0, 100000, "0"));
 
-            t.Fields.Add(Group("判定"));
+            t.Fields.Add(Group("匹配"));
+            t.Fields.Add(Dbl("AngleStart", "起始角(°)", -360, 360, 2, 1m, "0"));
+            t.Fields.Add(Dbl("AngleEnd", "结束角(°)", -360, 360, 2, 1m, "0"));
+            t.Fields.Add(Dbl("AngleStep", "角度步长(°)", 0, 360, 3, 0.5m, "1", "", true));
+            t.Fields.Add(Dbl("ScaleMin", "最小缩放", 0, 10, 4, 0.1m, "1"));
+            t.Fields.Add(Dbl("ScaleMax", "最大缩放", 0, 10, 4, 0.1m, "1"));
+            t.Fields.Add(Dbl("ScaleStep", "缩放步长", 0, 10, 4, 0.05m, "0", "0 = 不搜索缩放", true));
+            t.Fields.Add(Int("PyramidLevels", "金字塔层数", 1, 8, "3", "姿态只有 1 个时自动按 1 层跑", true));
             t.Fields.Add(Dbl("MinScore", "最小得分", 0, 1, 3, 0.05m, "0.8"));
             t.Fields.Add(Int("MaxMatches", "最多目标数", 1, 1000, "1"));
+            t.Fields.Add(Dbl("MaxOverlap", "重叠阈值", 0, 1, 3, 0.05m, "0.5", "", true));
             t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
 
             // 同上：模板状态由 T03 的卡片独占显示，这里只留动作行。
             t.Fields.Add(Group("模板"));
             t.Fields.Add(Action("CreateTemplate", "创建模板…", "打开模板制作界面（取图 / 画 ROI / 训练 / 保存）"));
 
-            t.FooterNote = "仅支持平移匹配，不支持旋转/缩放；有旋转请用形状匹配。";
+            t.FooterNote = "灰度相关（NCC），与形状匹配是两套算法：纹理明显的工件用它，"
+                         + "光照变化大或有遮挡用形状匹配。\n"
+                         + "起始角=结束角=0 且不搜缩放时只做平移（与旧版完全一致）；"
+                         + "要搜旋转就把起止角设成 ±X。姿态数 = 角度档 × 缩放档，直接决定耗时。";
             return t;
         }
 
-        private static NodeParamTable Blob()
+        /// <summary>读取点云（PLY/PCD/深度图）：数据来源 + 深度图内参。</summary>
+        private static NodeParamTable PointCloudSource()
         {
+            var t = new NodeParamTable { Type = FlowNodeType.PointCloudSource, Title = "读取点云" };
+
+            t.Fields.Add(Group("数据来源"));
+            t.Fields.Add(Enum("Source", "取点云方式", "File",
+                new[] { "点云文件 (PLY/PCD)", "点云文件夹 (PLY/PCD)", "深度图转点云 (PNG/BMP)" },
+                new[] { "File", "Folder", "DepthFile" },
+                "文件 / 文件夹模式直接读 XYZ 点；深度图模式按内参反投影 X=(u-Cx)·Z/Fx、Y=(v-Cy)·Z/Fy。"));
+            t.Fields.Add(File("FilePath", "点云文件路径", "仅「点云文件」时生效；PLY 支持 ascii / binary_little_endian，PCD 支持 ascii / binary"));
+            t.Fields.Add(Folder("FolderPath", "点云文件夹", "",
+                "仅「点云文件夹」时生效：按文件名顺序逐个取，每次运行换下一个，到末尾回到第一个"));
+            t.Fields.Add(Int("FolderHoldMs", "每个停留(ms)", 0, 60000, "0",
+                "0 = 每次运行换一个；>0 = 同一个至少停留这么久（连续运行时便于观察）"));
+
+            t.Fields.Add(Group("深度图参数（仅深度图模式生效）"));
+            t.Fields.Add(Dbl("Fx", "焦距 Fx (像素)", 0.000001m, 100000000m, 2, 1m, "1000",
+                "相机内参焦距。两个都要大于 0，否则报「需要有效内参」"));
+            t.Fields.Add(Dbl("Fy", "焦距 Fy (像素)", 0.000001m, 100000000m, 2, 1m, "1000"));
+            t.Fields.Add(Dbl("Cx", "主点 Cx (像素)", -100000000m, 100000000m, 2, 1m, "320", "一般约为图像宽的一半"));
+            t.Fields.Add(Dbl("Cy", "主点 Cy (像素)", -100000000m, 100000000m, 2, 1m, "240", "一般约为图像高的一半"));
+            t.Fields.Add(Dbl("ZScale", "深度比例 ZScale", 0.000001m, 100000000m, 6, 0.001m, "1",
+                "深度值 × ZScale = 真实 Z（毫米）。16bit PNG 按 1/1000mm 保存时填 0.001；"
+                + "Z=0 的像素按无效点剔除。"));
+
+            t.FooterNote = "点云随节点输出直达显示视图：与 2D 图共用同一个查看器，自动进入 3D 模式 —— "
+                         + "左键拖动旋转、滚轮缩放、双击复位。16bit PNG 深度图走内置解析（GDI+ 会压成 8bit 丢精度）。";
+            return t;
+        }
+
+        /// <summary>条码 / 二维码识别（zxing-cpp）：免模板、可多码。</summary>
+        private static NodeParamTable BarcodeRead()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.BarcodeRead, Title = "条码/二维码" };
+
+            t.Fields.Add(Group("搜索 ROI（宽或高为 0 = 整图）"));
+            t.Fields.Add(Int("RoiX", "X", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiY", "Y", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0"));
+            t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
+            t.Fields.Add(Note("把 ROI 收紧到码附近能明显提速并减少误检；ROI 太小（小于 16×16）会直接报错。"));
+
+            t.Fields.Add(Group("码类型（单选，一种码只用一个节点）"));
+            t.Fields.Add(Enum("CodeType", "码类型", "0",
+                new[]
+                {
+                    "自动（不限）",
+                    "EAN-13", "UPC-A", "Codabar", "CODE 39",
+                    "CODE 128（含 GS1-128/SSCC-18/EAN-128）", "ITF（含 ITF-14）",
+                    "QR Code", "Data Matrix", "Aztec", "PDF 417", "MaxiCode",
+                    "EAN-8", "UPC-E", "CODE 93", "Micro QR Code", "RMQR Code",
+                    "GS1 DataBar", "GS1 DataBar Expanded", "GS1 DataBar Limited", "DX Film Edge"
+                },
+                new[]
+                {
+                    "0",
+                    "1", "2", "3", "4",
+                    "5", "6",
+                    "7", "8", "9", "10", "11",
+                    "12", "13", "14", "15", "16",
+                    "17", "18", "19", "20"
+                },
+                "选具体类型更快，也不会把近亲码认错（如 EAN-13 与 Code128）。"
+                + "SSCC-18 / EAN-128 在解码库眼里就是 Code128，请选 CODE 128；"
+                + "ITF-14 选 ITF。MicroPDF417 本库不支持。"));
+
+            t.Fields.Add(Group("识别"));
+            t.Fields.Add(Int("MaxCount", "最多码数", 1, 255, "8"));
+            t.Fields.Add(Bool("TryHarder", "更努力（慢）", "0", "小码 / 低对比度 / 破损码才需要"));
+            t.Fields.Add(Bool("TryRotate", "多方向", "1", "关掉只认正向（更快，但歪一点就找不到）"));
+            t.Fields.Add(Bool("TryDownscale", "降采样加速", "0", "大图更快，**小码会漏**"));
+            t.Fields.Add(Bool("TryInvert", "也试反色", "1", "白码黑底 / 底色偏暗时有用"));
+            t.Fields.Add(Bool("IsPure", "纯码模式", "0",
+                "搜索区里只有一个正对镜头的码时勾选：跳过定位直接解码，最快；有倾斜/多个码时不要勾"));
+
+            t.Fields.Add(Group("判定"));
+            t.Fields.Add(Int("MinCount", "至少识别数", 1, 255, "1", "少于这个数判 NG"));
+
+            t.FooterNote = "不用做模板。一次可识别多个码，叠加层按四角点画旋转框。"
+                         + "没识别到时会给出可行动的诊断（试过哪些方向 / 是否开了降采样 / 码制是否限死）。";
+            return t;
+        }
+
+        private static NodeParamTable Blob()        {
             var t = new NodeParamTable { Type = FlowNodeType.Blob, Title = "Blob 分析" };
 
             t.Fields.Add(Group("二值化"));
@@ -825,23 +960,31 @@ namespace VisionPlatform.Modules
         {
             var t = new NodeParamTable { Type = FlowNodeType.Ocr, Title = "字符识别(OCR)" };
 
-            t.Fields.Add(Group("模板"));
-            // ⚠️ 这里刻意不用 File：NodeParamPanel 的文件浏览过滤器写死成图片格式，选目录会被误导。
-            //    模板目录是「相对程序基目录」的名字或相对路径，故用 Folder（浏览 = 选文件夹）。
-            t.Fields.Add(Folder("TemplateDir", "模板目录", "OCRModel",
-                "相对程序运行目录（bin/x64/Release）的文件夹名，默认 OCRModel；留空按 OCRModel 处理"));
-            t.Fields.Add(Note("约定：一个模板 = 一个字符（一个灰度图 = 一个字符），文件名（不含扩展名）即标签，"
-                + "如 A.png、7.png、中.png。"
-                + "⚠️ 多字符模板（如把「N3O」框成一张图）永远匹配不上任何单个字符框，"
-                + "表现为「能分割、但全是 ? 且置信度 0.00」—— 请逐个字符框选入库。"
-                + "⚠️ 字符方向必须与现场一致（旋转/倒置的字符请先把图摆正再框选）。"
-                + "同一字符的多份样本用同名不同扩展名（A.png + A.bmp），每字符最多 6 份。"
-                + "目录为空时只做字符分割、不输出文本。"));
-            // 两个动作的语义由宿主（FlowForm）解释；ManageOcrTemplates 打开字符模板库窗体。
-            t.Fields.Add(Action("ManageOcrTemplates", "管理模板库…",
-                "打开字符模板库：查看 / 框选入库 / 删除 / 迁移（改动立即落盘并对下次运行生效）"));
+            t.Fields.Add(Group("字符库"));
+            // 新的字符库是**单文件**（.ocrtpl），不再是一个字符一张图。
+            // 参数走"浏览选取"而不是手填：过滤器与后缀由这里声明，面板不再靠 Key 猜类型。
+            // 路径留空 = 按流程自动分文件（OCRModel\<流程标识>.ocrtpl）—— 不同流程天然互不干扰。
+            var libField = File("LibFile", "字符库文件",
+                "点「浏览」直接选文件（不存在可以直接输入文件名新建，会自动补 .ocrtpl 后缀）。"
+                + "留空 = 按流程自动分文件：OCRModel\\<流程标识>.ocrtpl，因此【不同流程默认用各自的库】；"
+                + "要让两条流程共用同一个库，把它们选成同一个文件即可。");
+            libField.FileFilter = "字符库|*.ocrtpl|所有文件|*.*";
+            libField.FileExt = "ocrtpl";
+            libField.FileAllowCreate = true;
+            t.Fields.Add(libField);
+            t.Fields.Add(Note("用「制作字符模板…」完成训练：框选区域 → 自动分割（按宽/高/面积过滤）→ "
+                + "手工增删字符框 → 一次性输入全部字符名 → 保存进库。"
+                + "库里存的是序列化样本（不是图片文件），可以反复追加。"
+                + "⚠️ 一个字符一个框：把「N3O」框成一张图永远匹配不上任何单字符框（表现为全是 ?）。"));
+            // 两个动作的语义由宿主（FlowForm）解释；ManageOcrTemplates 打开字符模板训练窗体。
+            t.Fields.Add(Action("ManageOcrTemplates", "制作字符模板…",
+                "打开字符模板训练：框选区域 → 自动分割 → 调整字符框 → 一次性命名 → 保存到库"));
             t.Fields.Add(Action("OcrRescanTemplates", "重新扫描",
-                "模板目录被外部改动后强制重扫并刷新状态卡（不重跑流程也能看到最新字符数）"));
+                "库文件被外部改动后强制重扫并刷新状态卡（不重跑流程也能看到最新字符数）"));
+            // 【已移除】上一版这里还有「旧版模板目录（兼容）」文件夹输入框。
+            // 现在字符库只有单文件 .ocrtpl 一种形态，界面上不再暴露目录 —— 留着它只会让人
+            // 以为"还能往目录里塞图片"。运行期仍读节点里存量的 TemplateDir 做兜底
+            // （见 FlowRunner.RunOcr 的"无库回落到旧目录"），存量配方不受影响，但界面上不再可编辑。
 
             t.Fields.Add(Group("分割参数"));
             t.Fields.Add(Int("Threshold", "二值化阈值", -1, 255, "-1",
@@ -850,6 +993,12 @@ namespace VisionPlatform.Modules
                 "0 = 自动判定极性（推荐，白底黑字 / 黑底白字都能正确分割）；1 = 强制反色"));
             t.Fields.Add(Dbl("MinCharH", "字符最小高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉噪声点）", true));
             t.Fields.Add(Dbl("MaxCharH", "字符最大高度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉大块污渍）", true));
+            t.Fields.Add(Dbl("MinCharW", "字符最小宽度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉细划痕）", true));
+            t.Fields.Add(Dbl("MaxCharW", "字符最大宽度", 0, 10000, 0, 1m, "0", "像素；0 = 不限制（用于滤掉长条污渍）", true));
+            t.Fields.Add(Dbl("MinArea", "最小面积", 0, 100000000, 0, 10m, "0",
+                "连通域**像素数**（不是外接框面积）；0 = 不限制。比宽高更能滤掉细划痕", true));
+            t.Fields.Add(Dbl("MaxArea", "最大面积", 0, 100000000, 0, 10m, "0",
+                "连通域像素数上限；0 = 不限制。用于滤掉大块背景/污渍", true));
             t.Fields.Add(Dbl("MinAspect", "最小宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制", true));
             t.Fields.Add(Dbl("MaxAspect", "最大宽高比", 0, 100, 2, 0.05m, "0", "w/h；0 = 不限制", true));
             t.Fields.Add(Int("MaxGap", "同行最大间隙", -1, 1000, "3",
@@ -870,35 +1019,32 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0"));
             t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
 
-            // 【禁用中 → T04 启用】RoiAngle 目前没有被 RunOcr 读取，填了不生效。
-            // 这比死按钮更糟：用户会反复试、反复怀疑自己填错，而界面没有任何反馈。
-            // 注意：画布顶条「画 ROI」在 T02 起就能给 OCR 画旋转矩形并回写本键，所以这个值
-            // 可能"看起来填进去了"却不参与识别 —— 文案必须点明这一点（否则用户会以为自己画错了）。
-            // T04 接通「RoiAngle → 仿射矫正」后，删掉下面这一行 DisabledReason 即恢复可编辑。
-            var roiAngle = Dbl("RoiAngle", "角度(°)", -180, 180, 2, 0.5m, "0", "绕 ROI 中心；顺时针为正");
-            roiAngle.DisabledReason = "旋转 ROI 将在后续版本提供；当前 OCR 运行期只按轴对齐裁剪，ROI 角度不参与识别";
-            t.Fields.Add(roiAngle);
+            // 【T04 已接通】RoiAngle 由 FlowRunner.RunOcr 读取，并进入 RoiAffineMap 的
+            // 「生效角度 A = RoiAngle + dAngle」：裁剪、区域框、字符框全部按 A 走。
+            // 画布顶条「画 ROI」的旋转手柄写的就是这个键（写回时已按 dA 反算回示教角度）。
+            t.Fields.Add(Dbl("RoiAngle", "角度(°)", -180, 180, 2, 0.5m, "0",
+                "绕 ROI 中心；顺时针为正。运行时按「本角度 + 位置修正偏差角」仿射裁剪，"
+                + "字符框也跟着倾斜（不再按外接框裁）"));
 
-            // 【禁用中 → T04 启用】框选 / 预览的入口同样在 T04。
-            // 刻意保留按钮但置灰：看得见、明显不可用 > 看得见、点得动、点了没反应
-            //（后者会被当 bug 反馈，而且容易和上一版真的坏过的顶条「画 ROI」混在一起）。
-            // T04 落地后：删掉第 4 个实参（或传空字符串）即恢复可用。
+            // 【仍禁用】这两个按钮与画布顶条的「画 ROI」功能重叠，而顶条那条是**真的能用**的
+            // （能画矩形 + 拖旋转手柄 + 松手落盘）。保留按钮但置灰并指明去处，
+            // 好过"点得动、点了没反应"被当成 bug。
             t.Fields.Add(Action("RoiPick", "框选 ROI",
                 "在画布上拖拽画出带角度的矩形 ROI（画完可拖旋转手柄）",
-                "该功能将在 OCR 旋转 ROI 版本提供（当前请先用顶条的「画 ROI」框轴对齐 ROI）"));
+                "请用画布顶条的「画 ROI」：可拖 8 个手柄调尺寸 / 角度，松手即保存"));
             t.Fields.Add(Action("RoiPreview", "预览矫正图",
                 "按当前角度把 ROI 仿射矫正成正向图",
-                "该功能将在 OCR 旋转 ROI 版本提供"));
+                "请用「字符库…」管理界面：ROI 带角度时它显示的正是矫正后的画面"));
 
             t.Fields.Add(Group("方向跟随"));
-            // 【禁用中 → T04 启用】角度跟随位置修正尚未实现，勾了不生效。
-            // T04 实现 θ = 实测偏差角后，删掉这一行 DisabledReason 即恢复可勾选。
-            // 【联动】置灰期间 FlowValidator 的 W007（"开了角度跟随但上游没有位置修正"）会自动停报
-            // —— 校验器不是写死"OCR 不报"，而是调 IsFieldDisabled(Ocr, "FollowPose") 问这里的
-            // DisabledReason。所以去掉这一行之后，W007 会自己恢复，不用再去改校验器。
+            // 【禁用中 → 后续版本启用】角度跟随目前是**恒开**的（生效角度 A = RoiAngle + dAngle），
+            // 只是不提供关闭开关。要放开就删掉下面的 DisabledReason —— W007 会自己恢复
+            // （校验器不是写死"OCR 不报"，而是调 IsFieldDisabled(Ocr, "FollowPose") 问这里的禁用原因）。
+            // 之所以没放开：W007 一旦恢复，所有"OCR 前面没接位置修正"的既有流程都会冒警告，
+            // 而那时的 θ 本来就是 0、根本没影响 —— 属于噪声，不值当。
             var followPose = Bool("FollowPose", "角度跟随位置修正", "1",
                 "θ = 实测相对基准的偏差角；关闭则只用配置角度");
-            followPose.DisabledReason = "角度跟随位置修正将在后续版本提供，当前 ROI 角度固定为 0";
+            followPose.DisabledReason = "本版固定跟随位置修正（不可关闭）：ROI 生效角度 = 配置角度 + 位姿偏差角";
             t.Fields.Add(followPose);
 
             t.Fields.Add(Group("结果显示"));
@@ -913,8 +1059,8 @@ namespace VisionPlatform.Modules
             //    老配置里存的是显式 "1"，读到的就是 "1"（见 NodeParamPanel.LoadValues 的「键缺失才用默认」口径），不受影响。
             t.Fields.Add(Bool("ShowBoxes", "显示逐字符框", "0", "默认关（老配置为显式 1，不受影响）"));
 
-            t.FooterNote = "模板约定：每个字符一张灰度图放进模板目录，文件名即标签（A.png / 7.png，"
-                         + "支持中文标签如 中.png）；目录为空时只做字符分割、不输出文本。"
+            t.FooterNote = "字符库是单文件（.ocrtpl），存的是序列化样本而不是图片；"
+                         + "训练用「制作字符模板…」，库里已有多少字符可在状态卡上看到。"
                          + "输入图像内部自动转灰度，输出图像原样向下传递。";
             return t;
         }
@@ -933,15 +1079,29 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Enum("DataMode", "数据模式", "FixedText",
                 new[] { "固定文本", "格式化", "Modbus 写寄存器" },
                 new[] { "FixedText", "Format", "ModbusWrite" }));
-            t.Fields.Add(Text("Text", "固定文本", "", "「固定文本」模式发送的内容，可填任意字符串"));
+            t.Fields.Add(Text("Text", "固定文本", "",
+                "「固定文本」模式发送的内容；留空时自动发送上游节点的文本输出（脚本 / OCR 文本直连即可）"));
             t.Fields.Add(Text("Format", "格式化模板", "{OkNg},{Summary}",
-                "「格式化」模式的模板：{Summary} 上游摘要、{OkNg} OK/NG、{Time} 时间；取不到时占位符原样保留"));
+                "「格式化」模式的模板：{Summary} 上游摘要、{OkNg} OK/NG、{Time} 时间、{Input} 上游文本；取不到时占位符原样保留"));
 
             t.Fields.Add(Group("Modbus 写寄存器（FC06）"));
             t.Fields.Add(Int("MbAddress", "寄存器地址", 0, 65535, "0"));
             t.Fields.Add(Int("MbValue", "写入值", 0, 65535, "0"));
+            t.Fields.Add(Int("MbFlowStride", "多流程基址步长", 0, 65535, "0",
+                "0 = 关闭（单流程）。大于 0 时：实际地址 = 上面填的地址 + 流程序号 × 本值。\n"
+                + "流程序号见「流程编排 → 流程管理」列表（从 0 开始，可上下移动）。\n"
+                + "例：基址 20、步长 100 → 第 0 条写 20，第 1 条写 120，第 2 条写 220。\n"
+                + "与「通讯 → 任务」里的多流程触发步长填同一个值，触发与结果才在同一分区。"));
+
+            t.Fields.Add(Text("MbMap", "批量写（名:地址:类型）", "",
+                "把上游数值一次写进多个寄存器，多项用分号分隔，例如：\n"
+                + "OkNg:20:UInt16; PosX:30:Int32; PosY:32:Int32; PosA:34:Float32\n"
+                + "· 源名取脚本节点的命名输出；OkNg / Passed 表示本帧结论（OK=1 / NG=0）\n"
+                + "· 类型可写 Int16/UInt16/Int32/UInt32/Float32/Float64，缺省 UInt16（Int32/Float32 占 2 个寄存器）\n"
+                + "· 填了本项就忽略上面的「寄存器地址 / 写入值」"));
 
             t.FooterNote = "通讯在「通讯」界面里创建与命名，这里按名称绑定，改名后需重新选择一次。"
+                         + "输入 / 输出端子都是文本（不吃图也不产图）：输入接上游文本，输出是实际发出的内容。"
                          + "TCP 服务端是广播给所有已接入客户端；Modbus 仅支持 03/06/10 功能码，不支持线圈。"
                          + "发送结果写在节点摘要里（格式：发送数据：{通讯名} ← {内容}）。";
             return t;
@@ -968,6 +1128,7 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Int("MbCount", "寄存器数量", 1, 125, "1", "FC03 单次最多 125 个"));
 
             t.FooterNote = "通讯在「通讯」界面里创建与命名，这里按名称绑定。"
+                         + "无输入端子（链首节点），不产图；输出是收到的文本与长度。"
                          + "TCP 取的是该通讯最近收到的一条文本；超时未收到数据判为「跳过」并在摘要里写明，不判 NG。"
                          + "Modbus 读到的寄存器会拼成「100, 200, 300」这样的文本；仅支持 03/06/10 功能码。";
             return t;

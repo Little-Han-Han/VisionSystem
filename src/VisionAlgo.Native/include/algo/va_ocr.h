@@ -48,6 +48,10 @@ typedef struct VA_OcrParam {
     int    max_gap;                   /* 同行字符最大水平间隙，px；<0 用 3 */
     int    norm_w, norm_h;            /* 识别前归一化尺寸；<=0 用 16x24 */
     double accept_score;              /* 接受阈值 0~1，典型 0.6 */
+    /* ---- 以下为字符形状过滤的补充项（追加在末尾，老字段位置不变）---- */
+    double min_char_w, max_char_w;    /* 字符宽度过滤，px；<=0 不限制 */
+    double min_area, max_area;        /* 连通域面积过滤，px²；<=0 不限制
+                                         （面积比宽高更抗噪：能同时滤掉细划痕与大块污渍） */
 } VA_OcrParam;
 
 /* 单个字符的分割 / 识别结果 */

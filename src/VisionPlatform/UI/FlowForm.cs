@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Core;
 using VisionPlatform.Flow;
+using VisionPlatform.Native;
 using VisionPlatform.Framework.Modules;
 using VisionSystem.Controls;
 using VisionSystem.Controls.Geometry;
@@ -40,6 +41,12 @@ namespace VisionPlatform.UI
 
         private FlowNode _selectedNode; // 画布当前选中节点（画 ROI / 回填图像源都优先用它）
         private DrawSpec _drawSpec;     // 本次正在画的是哪一组几何（多组并存时由用户选）
+
+        /// <summary>流程级「NG 处理方式」下拉（运行时加到 grpBind，见 <see cref="BuildNgModeSelector"/>）。</summary>
+        private ComboBox cmbNgMode;
+
+        /// <summary>流程级「整帧超时(ms)」（0 = 不限）。</summary>
+        private NumericUpDown numFrameTimeout;
 
         // 右栏「输出结果」面板：纯代码构建、Dock=Bottom，放在「编辑输入参数」下方。
         // 刻意不改 FlowForm.Designer.cs——本项目历史上出现过 VS 重序列化把事件订阅弄丢的事故，
@@ -78,6 +85,8 @@ namespace VisionPlatform.UI
         private Panel panelRightTop;        // 上：参数标题 + 端子标题 + 端子树 + 参数面板(Fill)
         private Panel panelSplitter;        // 中：6px 可拖动分隔条
         private int _resultHeightLogical;      // 结果区高度（96-DPI 逻辑像素，见 UiSettings）
+        private readonly System.Collections.Generic.List<string> _statusHistory =
+            new System.Collections.Generic.List<string>();
         private bool _draggingSplitter;
         private int _dragStartScreenY;
         private int _dragStartHeight;
@@ -85,6 +94,10 @@ namespace VisionPlatform.UI
         public FlowForm()
         {
             InitializeComponent();
+
+            // 流程级「NG 处理方式」：建在 InitializeComponent 之后、用运行时 Controls.Add，
+            // 刻意不动 Designer —— 本项目历史上出现过 VS 重序列化把事件订阅弄丢的事故。
+            BuildNgModeSelector();
 
             // 参数面板取「上游实时坐标」的通道：按当前流程的 Coord 连线找上游节点的上次运行坐标
             NodeParamPanel.RuntimeCoordProvider = delegate(FlowNode n)
@@ -104,6 +117,21 @@ namespace VisionPlatform.UI
             // 仍只传 FlowModuleInfo.Key 字符串，FlowCanvasControl.OnDragDrop 零改动。
             treeModules.ItemDrag += OnModuleItemDrag;
             lstFlows.SelectedIndexChanged += OnFlowSelectionChanged;
+
+            // 列表显示「序号  流程名」：序号从 0 开始，就是外部触发位 / 结果寄存器的分区号。
+            // 事件必须挂在构造函数里（Designer 重序列化会丢掉手写的 += ，见项目铁律）。
+            lstFlows.Format += delegate(object s, ListControlConvertEventArgs e)
+            {
+                FlowDefinition item = e.ListItem as FlowDefinition;
+                if (item == null) return;
+
+                int idx = -1;
+                try { idx = ConfigStore.Current.Flows.Flows.IndexOf(item); }
+                catch (Exception) { }
+
+                e.Value = (idx >= 0 ? idx.ToString(CultureInfo.InvariantCulture) : "?")
+                          + "   " + (item.Name ?? "");
+            };
             cmbCamera.SelectedIndexChanged += OnCameraBindingChanged;
             // 相机管理里打开/关闭相机时自动刷新绑定下拉，无需手动点「刷新」
             CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
@@ -142,12 +170,15 @@ namespace VisionPlatform.UI
             flowPreview.SetController(_controller);
             flowPreview.ImageLoaded += OnPreviewImageLoaded;
             lblRunStatus.Text = "就绪";
+            lblRunStatus.DoubleClick += delegate { ShowStatusLog(); };
+            grpBind.Text = "绑定与运行（下方日志双击放大）";
 
             // 统一深色工程配色（canvas / preview / nodeParamPanel 自绘，已跳过）。
             // ★ 必须在 InitModules 之前：UiTree.Apply 在此定稿树字体（雅黑 10pt），
             //   InitModules 的分类加粗 NodeFont 从 treeModules.Font 派生——若树字体此时
             //   还是设计器里的宋体 8pt，分类节点会渲染成宋体 8pt、叶子是雅黑 10pt，两级不一致。
             UiStyle.ApplyForm(this);
+            lblRunStatus.Font = UiTheme.FontMono;
 
             // 输出结果面板 + 右栏结构重整：见 BuildRightColumn 的注释
             // （放在 UiStyle.ApplyForm 之后：本面板自建配色是唯一来源，
@@ -592,6 +623,7 @@ namespace VisionPlatform.UI
                 case FlowPortKind.Number:   return UiTheme.ColorOk;
                 case FlowPortKind.BlobList: return UiTheme.ColorRunning;
                 case FlowPortKind.Geometry: return UiTheme.ColorTextPrimary;
+                case FlowPortKind.PointCloud: return UiTheme.ColorAccent;   // 3D 点云：蓝系，与图像同色系
                 default:                    return UiTheme.ColorTextSecondary;   // Any
             }
         }
@@ -658,6 +690,110 @@ namespace VisionPlatform.UI
             LoadFlowToCanvas();
         }
 
+        /// <summary>
+        /// 建「NG 处理方式」+「整帧超时」两个流程级控件：放在「绑定与运行」组第二行。
+        /// </summary>
+        /// <remarks>
+        /// 【为什么要把「自动布局」往右挪】第二行原来只有左半段空着（270 px 起是「自动布局」）。
+        /// 两个控件塞不进 260 px，且第一行已被相机 / 视图 / 校验 / 单步 / 运行本节点占满 ——
+        /// 只能把「自动布局」右移到 380（与「运行」还留 6 px）。挪按钮比挤控件安全：
+        /// 挤出来的是"标签压着下拉框"，挪出来的是"两个按钮间距大一点"。
+        /// </remarks>
+        private void BuildNgModeSelector()
+        {
+            // 先腾位置：自动布局 270 → 380（宽 110，正好停在"运行"496 之前）
+            btnAutoLayout.Location = new Point(380, 60);
+
+            var lblNg = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.Silver,
+                Location = new Point(10, 66),
+                Text = "NG 处理："
+            };
+
+            cmbNgMode = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 30, 38),
+                ForeColor = Color.Gainsboro,
+                Location = new Point(70, 62),
+                Width = 150
+            };
+            cmbNgMode.Items.Add("遇 NG 立即停止");
+            cmbNgMode.Items.Add("NG 继续跑，末节点判定");
+            cmbNgMode.SelectedIndex = 0;
+            cmbNgMode.SelectedIndexChanged += OnNgModeChanged;
+
+            var lblFrame = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.Silver,
+                Location = new Point(226, 66),
+                Text = "整帧超时："
+            };
+
+            numFrameTimeout = new NumericUpDown
+            {
+                BackColor = Color.FromArgb(30, 30, 38),
+                ForeColor = Color.Gainsboro,
+                BorderStyle = BorderStyle.FixedSingle,
+                Location = new Point(286, 62),
+                Width = 62,
+                Minimum = 0,
+                Maximum = 600000,
+                Increment = 10,
+                Value = 0
+            };
+            numFrameTimeout.ValueChanged += OnFrameTimeoutChanged;
+
+            grpBind.Controls.Add(lblNg);
+            grpBind.Controls.Add(cmbNgMode);
+            grpBind.Controls.Add(lblFrame);
+            grpBind.Controls.Add(numFrameTimeout);
+        }
+
+        /// <summary>
+        /// 整帧超时（0 = 不限）：多个节点各自都不慢、加起来超了，只有这一层能发现。
+        /// </summary>
+        private void OnFrameTimeoutChanged(object sender, EventArgs e)
+        {
+            if (_loading) return;
+
+            FlowDefinition f = CurrentFlow;
+            if (f == null) return;
+
+            f.FrameTimeoutMs = (int)numFrameTimeout.Value;
+            SaveFlows();
+
+            SetStatus(f.FrameTimeoutMs > 0
+                ? "整帧超时：" + f.FrameTimeoutMs + "ms（超了就在节点之间截断并判 NG）"
+                : "整帧超时：不限");
+        }
+
+        /// <summary>切换流程级 NG 处理方式并立即落盘（每帧都要按它跑，不能等关窗）。</summary>
+        private void OnNgModeChanged(object sender, EventArgs e)
+        {
+            if (_loading) return;
+
+            FlowDefinition f = CurrentFlow;
+            if (f == null) return;
+
+            if (cmbNgMode.SelectedIndex == 1)
+            {
+                f.NgMode = FlowDefinition.NgModeContinue;
+                SetStatus("NG 处理：NG 不中断，流程判定取最后一个节点的返回值。");
+            }
+            else
+            {
+                f.NgMode = FlowDefinition.NgModeStop;
+                SetStatus("NG 处理：遇 NG 立即停止，后续节点不再执行。");
+            }
+
+            SaveFlows();
+        }
+
         private void LoadFlowToCanvas()
         {
             FlowDefinition f = CurrentFlow;
@@ -667,7 +803,22 @@ namespace VisionPlatform.UI
             try
             {
                 if (f != null)
+                {
                     numViewIndex.Value = Math.Max(numViewIndex.Minimum, Math.Min(numViewIndex.Maximum, f.ViewIndex));
+
+                    // NG 处理方式：未配置（旧流程）按 Stop 显示
+                    if (cmbNgMode != null)
+                        cmbNgMode.SelectedIndex = f.StopOnNg ? 0 : 1;
+
+                    // 整帧超时（0 = 不限）
+                    if (numFrameTimeout != null)
+                    {
+                        int ft = f.FrameTimeoutMs;
+                        if (ft < 0) ft = 0;
+                        if (ft > (int)numFrameTimeout.Maximum) ft = (int)numFrameTimeout.Maximum;
+                        numFrameTimeout.Value = ft;
+                    }
+                }
             }
             finally
             {
@@ -760,9 +911,42 @@ namespace VisionPlatform.UI
             SetStatus("流程已重命名：" + f.Name);
         }
 
-        private void OnDeleteFlow(object sender, EventArgs e)
+        /// <summary>
+        /// 调整流程顺序（序号从 0 开始）。顺序不是"好看的排序"，它直接决定
+        /// **外部触发位与结果寄存器的分区号**：第 i 条流程用 <c>基址 + i × 步长</c>。
+        /// <para>所以每次移动都要把新序号写进状态栏，并提醒核对 PLC 侧地址。</para>
+        /// </summary>
+        private void OnFlowUp(object sender, EventArgs e) { MoveFlow(-1); }
+
+        private void OnFlowDown(object sender, EventArgs e) { MoveFlow(+1); }
+
+        private void MoveFlow(int delta)
         {
+            FlowDefinition f = lstFlows.SelectedItem as FlowDefinition;
+            if (f == null) { SetStatus("请先在列表中选择一条流程"); return; }
+
             FlowSettings fs = ConfigStore.Current.Flows;
+            int i = fs.Flows.IndexOf(f);
+            if (i < 0) return;
+
+            int j = i + delta;
+            if (j < 0) { SetStatus("已经是第一条（序号 0）"); return; }
+            if (j >= fs.Flows.Count) { SetStatus("已经是最后一条（序号 " + (fs.Flows.Count - 1) + "）"); return; }
+
+            fs.Flows.RemoveAt(i);
+            fs.Flows.Insert(j, f);
+            SaveFlows();
+
+            LoadFlows();
+            lstFlows.SelectedItem = f;
+
+            SetStatus(string.Format(CultureInfo.InvariantCulture,
+                "顺序已调整：「{0}」现在是序号 {1}（从 0 开始）—— 外部触发位 / 结果寄存器按序号分区，"
+                + "请同步确认 PLC 侧地址。", f.Name, j));
+        }
+
+        private void OnDeleteFlow(object sender, EventArgs e)
+        {            FlowSettings fs = ConfigStore.Current.Flows;
             FlowDefinition f = CurrentFlow;
             if (f == null) return;
 
@@ -1458,8 +1642,14 @@ namespace VisionPlatform.UI
         /// <c>Path.Combine</c> 遇绝对路径会直接返回它，所以两种情况一条表达式覆盖。
         /// <b>不存在"新目录优先"的第二套逻辑</b> —— 那会让老 <c>TemplateDir</c> 被静默忽略（C2 红线）。</para>
         /// </summary>
-        private static string ResolveOcrDir(FlowNode node)
+        private string ResolveOcrDir(FlowNode node)
         {
+            // 有字符库（显式指定 / 默认库已存在）就让卡片按库文件统计；否则仍按旧目录扫图片
+            string lib = (node != null) ? node.GetString("LibFile", "") : "";
+            string flowId = (CurrentFlow != null) ? CurrentFlow.Id : "";
+            string libPath = OcrCharLibraryFile.ResolveActive(lib, flowId);
+            if (!string.IsNullOrEmpty(libPath)) return libPath;
+
             string v = node != null ? node.GetString("TemplateDir", "OCRModel") : "OCRModel";
             v = (v ?? "").Trim();
             if (v.Length == 0) v = "OCRModel";
@@ -1491,6 +1681,30 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
+        /// 把训练窗体里的分割参数写进节点的「高级参数」，并刷新面板显示。
+        /// <para>
+        /// 【为什么必须写回】这组参数既决定"训练时分出哪些框"，又决定"运行时切哪些字符"。
+        /// 只存在窗体里的话，训练完不点保存就白调了；事后在高级参数里再改一次又会变回两套。
+        /// 所以两边共用同一处存储：节点参数。
+        /// </para>
+        /// </summary>
+        private void ApplyOcrSplitParams(FlowNode node, OcrParam p)
+        {
+            if (node == null || p == null) return;
+
+            node.Set("Threshold", p.Threshold);
+            node.Set("Invert", p.Invert ? "1" : "0");
+            node.Set("MinCharH", ((int)Math.Round(p.MinCharH)).ToString(CultureInfo.InvariantCulture));
+            node.Set("MaxCharH", ((int)Math.Round(p.MaxCharH)).ToString(CultureInfo.InvariantCulture));
+            node.Set("MinCharW", ((int)Math.Round(p.MinCharW)).ToString(CultureInfo.InvariantCulture));
+            node.Set("MaxCharW", ((int)Math.Round(p.MaxCharW)).ToString(CultureInfo.InvariantCulture));
+            node.Set("MinArea", ((int)Math.Round(p.MinArea)).ToString(CultureInfo.InvariantCulture));
+            node.Set("MaxArea", ((int)Math.Round(p.MaxArea)).ToString(CultureInfo.InvariantCulture));
+
+            if (nodeParamPanel != null) nodeParamPanel.ReloadValues();
+        }
+
+        /// <summary>
         /// 打开字符模板库窗体（模态）。
         /// <para>窗体里改目录会抛 <c>DirChanged</c>，在这里立刻写回节点参数并落盘 ——
         /// 不写回就是"在库里加了一批字符，回主界面一跑还是读老目录"。</para>
@@ -1514,20 +1728,99 @@ namespace VisionPlatform.UI
                 return;
             }
 
-            using (var dlg = new OcrTemplateForm(node.GetString("TemplateDir", "OCRModel")))
+            OcrParam current = new OcrParam
             {
-                dlg.DirChanged += (s, e) =>
+                Threshold = node.GetInt("Threshold", -1),
+                Invert = node.GetBool("Invert", false),
+                MinCharH = node.GetDouble("MinCharH", 0),
+                MaxCharH = node.GetDouble("MaxCharH", 0),
+                MinCharW = node.GetDouble("MinCharW", 0),
+                MaxCharW = node.GetDouble("MaxCharW", 0),
+                MinArea = node.GetDouble("MinArea", 0),
+                MaxArea = node.GetDouble("MaxArea", 0),
+                MinAspect = node.GetDouble("MinAspect", 0),
+                MaxAspect = node.GetDouble("MaxAspect", 0),
+                MaxGap = node.GetInt("MaxGap", 3),
+                NormW = node.GetInt("NormW", 16),
+                NormH = node.GetInt("NormH", 24),
+                AcceptScore = node.GetDouble("AcceptScore", 0.6)
+            };
+
+            string flowId = (CurrentFlow != null) ? CurrentFlow.Id : "";
+
+            // ① 进窗体就先摆上"预览区当前画面"（上一次结束时的画面，而不是空白）；
+            // ② 「取当前帧」每次都现场抓，随时可以换成最新画面；
+            // ③ 分割参数实时写回节点，高级参数里立刻是同一组数。
+            Rectangle nodeRoi = new Rectangle(node.GetInt("RoiX", 0), node.GetInt("RoiY", 0),
+                                              node.GetInt("RoiW", 0), node.GetInt("RoiH", 0));
+
+            // 训练窗体显示的是**原始帧**，而参数存的是示教坐标：进去先正变换成"画面上该在哪"，
+            // 出来再逆变换回去。否则训练框和运行时框会差一个位移（与画 ROI 同一个坑）。
+            FlowRunTransform live = LiveTransform();
+            double nodeRoiAngle = node.GetDouble("RoiAngle", 0);
+            double effRoiAngle = RoiAffineMap.EffectiveAngle(live, nodeRoiAngle);
+
+            Rectangle displayRoi;
+            Func<Bitmap> frameProvider = GrabPreviewFrame;
+            bool roiLocked = false;
+
+            if (Math.Abs(effRoiAngle) > RoiAffineMap.AngleEpsilon
+                && nodeRoi.Width > 0 && nodeRoi.Height > 0)
+            {
+                // ROI 带角度时，运行期看到的是一块"跟着转"的正向图（RoiAffineMap.Crop）。
+                // 训练必须看**同一块像素**，否则训练时分出来的字符与运行时分出来的
+                // 差一个旋转 —— 表现就是"训练时有框、跑起来认不出"。
+                // 这里直接把矫正后的图当作训练画面，区域锁成整幅（回写会破坏 ROI，见下）。
+                Rectangle teachRoi = nodeRoi;
+                Func<Bitmap> rawProvider = frameProvider;
+                frameProvider = delegate
                 {
-                    string value = dlg.CurrentDir;
-                    if (string.IsNullOrEmpty(value)) return;
-                    if (string.Equals(value, node.GetString("TemplateDir", "OCRModel"), StringComparison.Ordinal)) return;
-
-                    node.Set("TemplateDir", value);
-                    SaveFlows();
-                    SetStatus("模板目录已更新：" + value);
+                    Bitmap raw = rawProvider();
+                    if (raw == null) return null;
+                    Bitmap patch = RoiAffineMap.Crop(raw, teachRoi, nodeRoiAngle, live);
+                    raw.Dispose();
+                    return patch;
                 };
+                displayRoi = new Rectangle(0, 0, nodeRoi.Width, nodeRoi.Height);
+                roiLocked = true;
+            }
+            else
+            {
+                displayRoi = (live != null && nodeRoi.Width > 0 && nodeRoi.Height > 0)
+                    ? live.ApplyToRect(nodeRoi)
+                    : nodeRoi;
+            }
 
+            using (var dlg = new OcrCharTrainForm(flowId, node.GetString("LibFile", ""), current,
+                                                  frameProvider,
+                                                  p => ApplyOcrSplitParams(node, p),
+                                                  displayRoi, roiLocked))
+            {
                 dlg.ShowDialog(this);
+
+                if (!string.IsNullOrEmpty(dlg.SelectedLibPath))
+                {
+                    node.Set("LibFile", dlg.SelectedLibPath);
+                    nodeParamPanel.ReloadValues();
+                }
+
+                // 训练里重新框过区域 → 写回节点 ROI，保证运行期裁的是同一块。
+                // 区域被锁（ROI 带角度，训练图是矫正后的整块）时不回写：
+                // 那张图里框出来的坐标与整帧没有一一对应关系，硬写会把 ROI 改坏。
+                Rectangle trainedRoi = dlg.RoiLocked ? Rectangle.Empty : dlg.TrainedRoi;
+                if (live != null && trainedRoi.Width > 0 && trainedRoi.Height > 0)
+                    trainedRoi = live.ApplyInverseToRect(trainedRoi);
+
+                if (trainedRoi.Width > 0 && trainedRoi.Height > 0)
+                {
+                    node.Set("RoiX", trainedRoi.X);
+                    node.Set("RoiY", trainedRoi.Y);
+                    node.Set("RoiW", trainedRoi.Width);
+                    node.Set("RoiH", trainedRoi.Height);
+                    nodeParamPanel.ReloadValues();
+                }
+
+                if (dlg.ParamTouched) SaveFlows();
             }
 
             // 关窗后强制重扫一次：可能刚入库 / 刚迁移
@@ -1838,8 +2131,24 @@ namespace VisionPlatform.UI
             RotatedRectShape rr = ReadCurrentGeometry(node, spec) as RotatedRectShape;
             if (rr == null) { flowPreview.ClearRoiOutline(); return; }
 
+            // 叠加轮廓要画在"工件**现在**所在的位置"：位置修正只改坐标不改像素，
+            // 不套这一步，跑起来 ROI 框还停在示教位，看上去就是"没跟着工件走"。
+            FlowRunResult last = (_controller != null) ? _controller.LastResult : null;
+            if (last != null && last.TransformValid && !last.TransformWarped && last.Transform != null)
+            {
+                // 【必须用**完整**变换，不能只加 (dX, dY)】
+                // 位置修正的正变换是「绕基准点转 dA，再平移」；只做平移时，
+                // 纯旋转工况（dX=dY=0、dA≠0）下这个框一个像素都不会动 ——
+                // 现场反馈「至少有一个 ROI 是一直不变的」就是它：运行期产出的区域框在转，
+                // 而这条 FR-12 轮廓原地不动，两个框同时存在，看起来就像"框没跟随旋转"。
+                PointF c = last.Transform.ApplyToPoint(rr.Center.X, rr.Center.Y);
+                rr = new RotatedRectShape(c, rr.Width, rr.Height,
+                                          rr.AngleDeg + (float)last.Transform.DAngle);
+            }
+
+            // 标签角度用**变换后**的角度：否则框已经转了，标签还写着示教角度，自相矛盾
             flowPreview.SetRoiOutline(rr, FlowPreviewPanel.FormatRotatedRoiLabel(
-                (float)w, (float)h, (float)node.GetDouble(spec.Angle, 0.0)));
+                (float)w, (float)h, rr.AngleDeg));
         }
 
         /// <summary>
@@ -1945,6 +2254,27 @@ namespace VisionPlatform.UI
         /// 绘制完成：把图像坐标的几何写回用户选中的那一组参数并持久化。
         /// 按 <see cref="_drawSpec.Kind"/> 分流：矩形→X/Y/W/H；直线→X1/Y1/X2/Y2；圆环→Cx/Cy/InnerRadius/OuterRadius。
         /// </summary>
+        /// <summary>
+        /// 取"画框需要换算回去"的位姿：只有「ROI 偏移」模式下的有效修正才需要。
+        /// <para>
+        /// 预览显示的是<strong>原始帧</strong>，而节点参数存的是<strong>示教坐标</strong>；
+        /// 位置修正在运行期会把参数再变换一次。所以画完必须**逆变换**回去，
+        /// 否则"画的框"和"实际用的框"正好差一个 dX/dY —— 现场说的「画的 ROI 不跟随」。
+        /// </para>
+        /// </summary>
+        private FlowRunTransform DrawInverseTransform()
+        {
+            return LiveTransform();
+        }
+
+        /// <summary>本帧有效的位姿变换（"ROI 偏移"模式才有；整图对齐返回 null）。</summary>
+        private FlowRunTransform LiveTransform()
+        {
+            FlowRunResult last = (_controller != null) ? _controller.LastResult : null;
+            if (last == null || !last.TransformValid || last.TransformWarped) return null;
+            return last.Transform;
+        }
+
         private void OnShapePicked(object sender, ShapeEventArgs e)
         {
             FlowNode node = _selectedNode ?? nodeParamPanel.Node;
@@ -1963,6 +2293,13 @@ namespace VisionPlatform.UI
                 int y = (int)Math.Round(r.Y);
                 int w = (int)Math.Round(r.Width);
                 int h = (int)Math.Round(r.Height);
+
+                FlowRunTransform inv = DrawInverseTransform();
+                if (inv != null && w > 0 && h > 0)
+                {
+                    Rectangle back = inv.ApplyInverseToRect(new Rectangle(x, y, w, h));
+                    x = back.X; y = back.Y; w = back.Width; h = back.Height;
+                }
                 if (x < 0) x = 0;
                 if (y < 0) y = 0;
                 if (w < 0) w = 0;
@@ -1984,6 +2321,15 @@ namespace VisionPlatform.UI
                 int x2 = (int)Math.Round(ls.P2.X);
                 int y2 = (int)Math.Round(ls.P2.Y);
 
+                FlowRunTransform invLine = DrawInverseTransform();
+                if (invLine != null)
+                {
+                    PointF p1 = invLine.ApplyInverseToPoint(x1, y1);
+                    PointF p2 = invLine.ApplyInverseToPoint(x2, y2);
+                    x1 = (int)Math.Round(p1.X); y1 = (int)Math.Round(p1.Y);
+                    x2 = (int)Math.Round(p2.X); y2 = (int)Math.Round(p2.Y);
+                }
+
                 node.Set(spec.X1, x1);
                 node.Set(spec.Y1, y1);
                 node.Set(spec.X2, x2);
@@ -2002,12 +2348,21 @@ namespace VisionPlatform.UI
 
                 // 几何（中心）→ 参数（未旋转时的左上角）：left = center − W/2，
                 // 用取整后的 w/h 反算，保证「读→写」往返不漂移（中心恒为 .0 / .5）。
-                int x = (int)Math.Round(rr.Center.X - w * 0.5);
-                int y = (int)Math.Round(rr.Center.Y - h * 0.5);
+                PointF center = rr.Center;
+                double angle = Math.Round(rr.AngleDeg, 2);   // 已是 (-180, 180]
+
+                // 画在原始帧上 → 存进参数前要逆变换回"示教坐标"（与轴对齐矩形同理）
+                FlowRunTransform invRr = DrawInverseTransform();
+                if (invRr != null)
+                {
+                    center = invRr.ApplyInverseToPoint(center.X, center.Y);
+                    angle = Math.Round(angle - invRr.DAngle, 2);
+                }
+
+                int x = (int)Math.Round(center.X - w * 0.5);
+                int y = (int)Math.Round(center.Y - h * 0.5);
                 if (x < 0) x = 0;
                 if (y < 0) y = 0;
-
-                double angle = Math.Round(rr.AngleDeg, 2);   // 已是 (-180, 180]
 
                 node.Set(spec.X, x);
                 node.Set(spec.Y, y);
@@ -2406,10 +2761,6 @@ namespace VisionPlatform.UI
             SetRunButtons(true, false);
             SetStatus("运行中…");
 
-            // [预览诊断][临时] 定位「点运行预览无图」——定位后移除
-            Logger.Info("[预览诊断] OnRun flow=" + f.Name + " cam=" + (cam != null ? cam.Info.Id : "null") +
-                        " 节点数=" + f.Nodes.Count + " sel='" + (_selectedNode != null ? _selectedNode.Id : "") + "'");
-
             _controller.RunOnce(f, cam);
         }
 
@@ -2683,6 +3034,9 @@ namespace VisionPlatform.UI
         /// <summary>一次启动彻底结束（回到 Idle）：复位按钮；若关窗被挂起则自动关闭。</summary>
         private void OnControllerCompleted(object sender, EventArgs e)
         {
+            // 本帧可能带了新的位姿 → 选中节点的 ROI 轮廓要跟着动
+            try { UpdateRoiOutline(_selectedNode); } catch (Exception) { }
+
             if (IsDisposed || !IsHandleCreated) return;
 
             try
@@ -2697,6 +3051,7 @@ namespace VisionPlatform.UI
                     SetRunButtons(false, false);
 
                     if (wasLooping) SetStatus("连续运行已停止");
+                    else SetStatusFromLastRun();
 
                     if (_closeWhenIdle)
                     {
@@ -2709,6 +3064,48 @@ namespace VisionPlatform.UI
             {
                 // 窗体已销毁：忽略
             }
+        }
+
+        /// <summary>
+        /// 运行结束后把结论写回状态栏（原来只在"连续运行停止"时更新，单次运行结束后状态栏永远停在"运行中…"，
+        /// 而预览区没图时又不给原因 —— 现场看到的就是"图像采集控件不更新、一直读不到图"）。
+        /// <para>NG / 失败时直接给出<strong>第一个 NG 节点的原因</strong>，不用去翻日志。</para>
+        /// </summary>
+        private void SetStatusFromLastRun()
+        {
+            if (_controller == null || _controller.LastResult == null)
+            {
+                SetStatus("运行结束（无结果）");
+                return;
+            }
+
+            FlowRunResult last = _controller.LastResult;
+
+            if (!last.Success)
+            {
+                SetStatus("运行失败：" + (string.IsNullOrEmpty(last.Message) ? "未知原因" : last.Message));
+                return;
+            }
+
+            if (last.Passed)
+            {
+                SetStatus(string.Format("运行完成：OK  {0} ms", last.ElapsedMs));
+                return;
+            }
+
+            string reason = "";
+            if (last.Progress != null)
+            {
+                foreach (FlowNodeProgress p in last.Progress)
+                {
+                    if (p == null || p.Status != FlowNodeStatus.Ng) continue;
+                    string name = string.IsNullOrEmpty(p.NodeName) ? p.NodeId : p.NodeName;
+                    reason = (name ?? "") + "：" + (p.Summary ?? "");
+                    break;
+                }
+            }
+
+            SetStatus("运行完成：NG —— " + (reason.Length > 0 ? reason : (last.Summary ?? "")));
         }
 
         /// <summary>
@@ -2768,10 +3165,69 @@ namespace VisionPlatform.UI
         private void SetStatus(string text)
         {
             if (lblRunStatus == null) return;
-            lblRunStatus.Text = text ?? "";
-            // 多行报错（如原生 OpenCV 异常）可能很长：滚到顶部并显示完整文本
-            lblRunStatus.SelectionStart = 0;
+
+            string line = DateTime.Now.ToString("HH:mm:ss") + "  " + (text ?? "");
+            _statusHistory.Add(line);
+            while (_statusHistory.Count > 200) _statusHistory.RemoveAt(0);
+
+            int start = Math.Max(0, _statusHistory.Count - 30);
+            var sb = new System.Text.StringBuilder();
+            for (int i = start; i < _statusHistory.Count; i++)
+            {
+                if (sb.Length > 0) sb.AppendLine();
+                sb.Append(_statusHistory[i]);
+            }
+
+            lblRunStatus.Text = sb.ToString();
+            lblRunStatus.SelectionStart = lblRunStatus.TextLength;
             lblRunStatus.ScrollToCaret();
+        }
+
+        /// <summary>双击状态框：完整历史（最多 200 行）用大窗口查看，避免 62px 里翻。</summary>
+        private void ShowStatusLog()
+        {
+            using (var dlg = new Form())
+            {
+                dlg.Text = "流程运行日志";
+                dlg.ClientSize = new Size(900, 520);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.ShowInTaskbar = false;
+                dlg.MinimizeBox = false;
+
+                var box = new TextBox();
+                box.Dock = DockStyle.Fill;
+                box.Multiline = true;
+                box.ReadOnly = true;
+                box.ScrollBars = ScrollBars.Both;
+                box.WordWrap = false;
+                box.Font = UiTheme.FontMono;
+                box.BackColor = Color.FromArgb(24, 24, 30);
+                box.ForeColor = Color.Gainsboro;
+                box.Text = _statusHistory.Count > 0
+                    ? string.Join(Environment.NewLine, _statusHistory.ToArray())
+                    : (lblRunStatus.Text ?? "");
+
+                var bar = new FlowLayoutPanel();
+                bar.Dock = DockStyle.Bottom;
+                bar.Height = 44;
+                bar.FlowDirection = FlowDirection.RightToLeft;
+                bar.Padding = new Padding(8, 8, 8, 8);
+
+                var close = new Button { Text = "关闭", DialogResult = DialogResult.OK, Width = 80, Height = 28 };
+                var copy = new Button { Text = "复制", Width = 80, Height = 28 };
+                copy.Click += delegate
+                {
+                    try { Clipboard.SetText(box.Text ?? ""); } catch (Exception) { }
+                };
+                bar.Controls.Add(close);
+                bar.Controls.Add(copy);
+
+                dlg.Controls.Add(box);
+                dlg.Controls.Add(bar);
+                dlg.AcceptButton = close;
+                dlg.CancelButton = close;
+                dlg.ShowDialog(this);
+            }
         }
 
         /// <summary>简易文本输入对话框（避免引入额外依赖）。取消返回 null。</summary>

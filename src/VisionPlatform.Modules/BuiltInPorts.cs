@@ -22,6 +22,15 @@ namespace VisionPlatform.Modules
                 new List<FlowPortDef>(),
                 new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) });
 
+            // 读取点云：链首节点（不吃图），输出点云 + 点数。显示视图按输出自动进 3D 模式。
+            Register(FlowNodeType.PointCloudSource,
+                new List<FlowPortDef>(),
+                new List<FlowPortDef>
+                {
+                    P("PointCloud", "点云", FlowPortKind.PointCloud, false),
+                    P("Count", "点数", FlowPortKind.Number, false)
+                });
+
             Register(FlowNodeType.Preprocess,
                 new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
                 new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) });
@@ -252,23 +261,39 @@ namespace VisionPlatform.Modules
                     P("Text",  "识别文本", FlowPortKind.Text,  false)
                 });
 
-            // ---- 本期新增：发送数据 / 接收数据 ----
-            // 输入图像一律「不必填」：这两个节点不依赖图像也能工作（纯通讯场景可独立成链），
-            // 连了就原样向下透传。输出靠 Text 端子承载收发的文本内容。
-
-            Register(FlowNodeType.SendData,
-                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) },
+            // 条码 / 二维码：图像进，图像 + 个数 + 文本 + 坐标出（坐标由 EnsureCoordOutput 补齐）
+            Register(FlowNodeType.BarcodeRead,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Pose", "位姿", FlowPortKind.Pose, false,
+                      "可选：位置修正由链内全局变换统一应用；此处连线用于显式表达依赖关系")
+                },
                 new List<FlowPortDef>
                 {
                     P("Image", "图像", FlowPortKind.Image, false),
-                    P("Text",  "发送内容", FlowPortKind.Text,  false)
+                    P("Count", "码数", FlowPortKind.Number, false),
+                    P("Text",  "首个码文本", FlowPortKind.Text, false)
                 });
 
+            // ---- 发送数据 / 接收数据 ----
+            // 【端子修正】通讯节点不产图也不吃图：旧版把"可选图像"挂在输入输出上，
+            // 现场会误以为输出信号节点该接图像链（用户反馈：输出信号的输入不应该是图像）。
+            // 现在输入 / 输出全部走文本：
+            //   SendData    输入 Text = 上游文本（脚本 / OCR 文本接入，留空则只用参数内容），
+            //               输出 Text = 实际发出的内容；
+            //   ReceiveData 无输入端子（链首节点），输出 Text = 收到的文本 + Number = 长度。
+            // 老工程里连在旧 "Image" 端子上的连线，加载时由 FlowLink.Normalize
+            // 按新端子表自动改挂到主输入 / 主输出（Text），不会悬空。
+
+            Register(FlowNodeType.SendData,
+                new List<FlowPortDef> { P("Text", "输入内容", FlowPortKind.Text, false) },
+                new List<FlowPortDef> { P("Text", "发送内容", FlowPortKind.Text, false) });
+
             Register(FlowNodeType.ReceiveData,
-                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, false) },
+                new List<FlowPortDef>(),
                 new List<FlowPortDef>
                 {
-                    P("Image",  "输出图像", FlowPortKind.Image, false),
                     P("Text",   "接收内容", FlowPortKind.Text,  false),
                     P("Number", "长度", FlowPortKind.Number, false)
                 });
@@ -399,6 +424,7 @@ namespace VisionPlatform.Modules
             EnsureCoordOutput(FlowNodeType.FitLine,       "线中点");
             EnsureCoordOutput(FlowNodeType.ObjectDetect,  "目标中心");
             EnsureCoordOutput(FlowNodeType.Ocr,           "首字符中心");
+            EnsureCoordOutput(FlowNodeType.BarcodeRead,   "首个码中心");
 
             // ---- 畸变矫正：吃图像，吐矫正后的图像 ----
             Register(FlowNodeType.DistortionCorrect,

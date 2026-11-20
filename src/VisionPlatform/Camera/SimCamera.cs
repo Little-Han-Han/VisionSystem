@@ -120,6 +120,8 @@ namespace VisionPlatform.Camera
 
         private void GrabLoop()
         {
+            PerfProbe.Mark("采集:模拟");
+
             while (!_stopFlag)
             {
                 try

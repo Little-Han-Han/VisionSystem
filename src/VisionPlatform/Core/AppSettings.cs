@@ -128,6 +128,37 @@ namespace VisionPlatform.Core
         /// <summary>日志保留天数默认值（旧配置缺失该字段时补齐用）。</summary>
         public const int DefaultLogRetentionDays = 90;
 
+        /// <summary>触发式运行：「运行」后只建立通讯与流程、<strong>等外部触发</strong>才跑一轮（产线模式）。</summary>
+        public const string RunModeTriggered = "Triggered";
+
+        /// <summary>连续运行：「运行」后流程按帧率一直跑（调试 / 无触发源的场景）。</summary>
+        public const string RunModeContinuous = "Continuous";
+
+        /// <summary>
+        /// 运行模式：<see cref="RunModeTriggered"/>（默认）/ <see cref="RunModeContinuous"/>。
+        /// <para>
+        /// 【为什么用字符串而不是 bool】<c>DataContractJsonSerializer</c> 把缺失的 bool 反序列化成
+        /// <c>false</c> —— 那会让所有老配置静默变成"连续运行"（正是要修的那个毛病）。
+        /// 字符串缺失是 <c>null</c>，<see cref="NormalizeRunMode"/> 才能区分"没配过"与"显式选连续"。
+        /// </para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public string RunMode { get; set; }
+
+        /// <summary>规范化运行模式：null / 空 / 未知值一律回落到触发式。</summary>
+        public static string NormalizeRunMode(string mode)
+        {
+            if (string.Equals(mode, RunModeContinuous, StringComparison.OrdinalIgnoreCase))
+                return RunModeContinuous;
+            return RunModeTriggered;
+        }
+
+        /// <summary>当前配置是否触发式运行（产线握手模式）。</summary>
+        public bool IsTriggeredRun
+        {
+            get { return NormalizeRunMode(RunMode) == RunModeTriggered; }
+        }
+
         public static SystemSettings CreateDefault()
         {
             return new SystemSettings
@@ -141,7 +172,8 @@ namespace VisionPlatform.Core
                 YieldAlarmPercent = DefaultYieldAlarmPercent,
                 AllowCameraShare = false,
                 DbPath = "",
-                LogRetentionDays = DefaultLogRetentionDays
+                LogRetentionDays = DefaultLogRetentionDays,
+                RunMode = RunModeTriggered
             };
         }
 
@@ -158,7 +190,8 @@ namespace VisionPlatform.Core
                 YieldAlarmPercent = YieldAlarmPercent,
                 AllowCameraShare = AllowCameraShare,
                 DbPath = DbPath,
-                LogRetentionDays = LogRetentionDays
+                LogRetentionDays = LogRetentionDays,
+                RunMode = NormalizeRunMode(RunMode)
             };
         }
     }
@@ -175,10 +208,27 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public InspectionConfig Inspection { get; set; }
 
+        /// <summary>
+        /// 单条流程可用的算法并行线程数；<c>0</c> = 自动（核数 / 在跑流程数，上限 4）。
+        /// <para>
+        /// 【为什么需要这个开关】形状匹配用 <c>#pragma omp parallel for</c>，OpenMP 默认按物理核数
+        /// 开满线程。宿主本来就是每条流程一个线程，于是小图上并行开销远大于收益：
+        /// 实测同一条流程 12 线程 → 8.3 fps / CPU 11.5 核，2 线程 → 3.4 fps / CPU 2.14 核
+        /// （每帧的 CPU 成本从 1.4 核·s 降到 0.63 核·s，能效提高一倍多）。
+        /// 要极限帧率就调大（8/12），要低占用就调小（1/2）。
+        /// </para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public int MaxThreads { get; set; }
+
+        /// <summary>自动模式的并行度上限：再多只会把 CPU 烧在同步上。</summary>
+        public const int AutoThreadsCap = 4;
+
         public AlgorithmSettings()
         {
             CurrentRecipeName = "";
             Inspection = null;
+            MaxThreads = 0;
         }
 
         public AlgorithmSettings Clone()
@@ -186,7 +236,8 @@ namespace VisionPlatform.Core
             return new AlgorithmSettings
             {
                 CurrentRecipeName = CurrentRecipeName,
-                Inspection = Inspection != null ? Inspection.Clone() : null
+                Inspection = Inspection != null ? Inspection.Clone() : null,
+                MaxThreads = MaxThreads
             };
         }
     }
@@ -481,6 +532,12 @@ namespace VisionPlatform.Core
         /// <summary>界面显示名，下标与 <see cref="All"/> 严格对齐。</summary>
         public static readonly string[] DisplayNames = { "TCP 客户端", "TCP 服务端", "Modbus TCP" };
 
+        /// <summary>是否内置协议（TCP / Modbus）；false 表示由 Communication\*.dll 插件提供。</summary>
+        public static bool IsBuiltIn(string kind)
+        {
+            return kind == TcpClient || kind == TcpServer || kind == ModbusTcp;
+        }
+
         /// <summary>归一化：未知 / 空值一律按 TCP 客户端处理。</summary>
         public static string Normalize(string kind)
         {
@@ -512,7 +569,7 @@ namespace VisionPlatform.Core
     public sealed class CommSettings
     {
         /// <summary>通讯配置结构版本；<see cref="ConfigStore.Load"/> 据此做一次性升级。</summary>
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         /// <summary>结构版本（序列化字段，勿删：删了就无法区分「用户停用」与「字段缺失」）。</summary>
         [System.Runtime.Serialization.DataMember]
@@ -522,10 +579,30 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public List<CommEndpointConfig> Endpoints { get; set; }
 
+        /// <summary>点位表：名称 → 协议地址 / 类型 / 方向（协议无关）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public List<CommPointConfig> Points { get; set; }
+
+        /// <summary>消息模板：结果 / 心跳 / 组合信息的文本、JSON 或多点写入。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public List<CommMessageConfig> Messages { get; set; }
+
+        /// <summary>常驻任务：心跳、结果推送、触发启动、状态镜像。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public List<CommJobConfig> Jobs { get; set; }
+
+        /// <summary>流程状态绑定：每条流程的 Busy / Ready / Fault 写到哪些点位。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public List<CommFlowBindingConfig> FlowBindings { get; set; }
+
         public CommSettings()
         {
             SchemaVersion = CurrentSchemaVersion;
             Endpoints = new List<CommEndpointConfig>();
+            Points = new List<CommPointConfig>();
+            Messages = new List<CommMessageConfig>();
+            Jobs = new List<CommJobConfig>();
+            FlowBindings = new List<CommFlowBindingConfig>();
         }
 
         /// <summary>默认值：给出一条示例端点，用户可直接改名 / 改参数，也可删除。</summary>
@@ -555,21 +632,35 @@ namespace VisionPlatform.Core
                 changed = true;
             }
 
-            if (settings.SchemaVersion < CurrentSchemaVersion)
+            // v0 → v1：旧配置没有 Enabled 字段，补 true。
+            // v1 → v2：只增加 Points / Messages / Jobs / FlowBindings，绝不改写用户已停用的端点。
+            if (settings.SchemaVersion < 1)
             {
                 foreach (CommEndpointConfig ep in settings.Endpoints)
                 {
                     if (ep != null) ep.Enabled = true;
                 }
+            }
 
+            if (settings.SchemaVersion < CurrentSchemaVersion)
+            {
                 settings.SchemaVersion = CurrentSchemaVersion;
                 changed = true;
             }
+
+            if (settings.Points == null) { settings.Points = new List<CommPointConfig>(); changed = true; }
+            if (settings.Messages == null) { settings.Messages = new List<CommMessageConfig>(); changed = true; }
+            if (settings.Jobs == null) { settings.Jobs = new List<CommJobConfig>(); changed = true; }
+            if (settings.FlowBindings == null) { settings.FlowBindings = new List<CommFlowBindingConfig>(); changed = true; }
 
             foreach (CommEndpointConfig ep in settings.Endpoints)
             {
                 if (ep != null) ep.Normalize();
             }
+            foreach (CommPointConfig pt in settings.Points) if (pt != null) pt.Normalize();
+            foreach (CommMessageConfig msg in settings.Messages) if (msg != null) msg.Normalize();
+            foreach (CommJobConfig job in settings.Jobs) if (job != null) job.Normalize();
+            foreach (CommFlowBindingConfig b in settings.FlowBindings) if (b != null) b.Normalize();
 
             return changed;
         }
@@ -635,6 +726,10 @@ namespace VisionPlatform.Core
                     if (ep != null) c.Endpoints.Add(ep.Clone());
                 }
             }
+            if (Points != null) foreach (CommPointConfig pt in Points) if (pt != null) c.Points.Add(pt.Clone());
+            if (Messages != null) foreach (CommMessageConfig m in Messages) if (m != null) c.Messages.Add(m.Clone());
+            if (Jobs != null) foreach (CommJobConfig j in Jobs) if (j != null) c.Jobs.Add(j.Clone());
+            if (FlowBindings != null) foreach (CommFlowBindingConfig b in FlowBindings) if (b != null) c.FlowBindings.Add(b.Clone());
             return c;
         }
     }
@@ -682,6 +777,18 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public bool AutoConnect { get; set; }
 
+        /// <summary>TCP 分帧：None / Newline / LengthPrefix / StxEtx。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public string Framing { get; set; }
+
+        /// <summary>单次读写超时（ms）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int TimeoutMs { get; set; }
+
+        /// <summary>断线重连间隔（ms）；0 = 不自动重连。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int ReconnectMs { get; set; }
+
         public CommEndpointConfig()
         {
             Name = "";
@@ -691,6 +798,9 @@ namespace VisionPlatform.Core
             SlaveId = DefaultSlaveId;
             Enabled = true;
             AutoConnect = false;
+            Framing = "None";
+            TimeoutMs = 1000;
+            ReconnectMs = 3000;
         }
 
         /// <summary>按类型创建一条带合理默认值的端点。</summary>
@@ -698,7 +808,7 @@ namespace VisionPlatform.Core
         {
             CommEndpointConfig c = new CommEndpointConfig();
             c.Name = name ?? "";
-            c.Kind = CommKind.Normalize(kind);
+            c.Kind = string.IsNullOrWhiteSpace(kind) ? CommKind.TcpClient : kind.Trim();
             c.Port = CommKind.DefaultPort(c.Kind);
             c.Host = c.Kind == CommKind.TcpServer ? "" : "127.0.0.1";
             return c;
@@ -712,11 +822,16 @@ namespace VisionPlatform.Core
         public void Normalize()
         {
             Name = (Name ?? "").Trim();
-            Kind = CommKind.Normalize(Kind);
+            // 空值才回落 TCP；未知协议保留（由 Communication\*.dll 插件提供），
+            // 否则 OPC UA 等插件端点会被静默改成 TCP 客户端。
+            if (string.IsNullOrWhiteSpace(Kind)) Kind = CommKind.TcpClient;
             Host = (Host ?? "").Trim();
             if (Port <= 0 || Port > 65535) Port = CommKind.DefaultPort(Kind);
             if (Kind == CommKind.TcpServer) Host = "";   // 服务端只监听本地端口，不需要目标主机
             if (SlaveId < MinSlaveId || SlaveId > MaxSlaveId) SlaveId = DefaultSlaveId;
+            if (string.IsNullOrWhiteSpace(Framing)) Framing = "None";
+            if (TimeoutMs <= 0) TimeoutMs = 1000;
+            if (ReconnectMs < 0) ReconnectMs = 0;
         }
 
         /// <summary>界面「目标」列文本：客户端 host:port，服务端 "监听 :port"。</summary>
@@ -732,7 +847,7 @@ namespace VisionPlatform.Core
         /// <summary>界面「类型」列文本（中文）。</summary>
         public string KindDisplay
         {
-            get { return CommKind.Display(Kind); }
+            get { return CommKind.IsBuiltIn(Kind) ? CommKind.Display(Kind) : (Kind ?? ""); }
         }
 
         public CommEndpointConfig Clone()
@@ -745,7 +860,304 @@ namespace VisionPlatform.Core
                 Port = Port,
                 SlaveId = SlaveId,
                 Enabled = Enabled,
-                AutoConnect = AutoConnect
+                AutoConnect = AutoConnect,
+                Framing = Framing,
+                TimeoutMs = TimeoutMs,
+                ReconnectMs = ReconnectMs
+            };
+        }
+    }
+
+    /// <summary>
+    /// 一个点位：协议无关的名称 → 地址映射。
+    /// <para>流程/任务只写点位名，不关心是 Modbus 寄存器还是 OPC UA NodeId。</para>
+    /// </summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommPointConfig
+    {
+        [System.Runtime.Serialization.DataMember] public string Name { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Endpoint { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Address { get; set; }
+
+        /// <summary>Read / Write / ReadWrite。</summary>
+        [System.Runtime.Serialization.DataMember] public string Direction { get; set; }
+
+        /// <summary>Bool / Int16 / UInt16 / Int32 / UInt32 / Float / Double / String。</summary>
+        [System.Runtime.Serialization.DataMember] public string Type { get; set; }
+
+        /// <summary>寄存器个数 / 字符串长度；1 = 单值。</summary>
+        [System.Runtime.Serialization.DataMember] public int Length { get; set; }
+
+        /// <summary>Modbus 多寄存器字序：ABCD / CDAB / BADC / DCBA。</summary>
+        [System.Runtime.Serialization.DataMember] public string WordOrder { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public double Scale { get; set; }
+        [System.Runtime.Serialization.DataMember] public double Offset { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Default { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Description { get; set; }
+
+        public CommPointConfig()
+        {
+            Name = "";
+            Endpoint = "";
+            Address = "";
+            Direction = "ReadWrite";
+            Type = "Bool";
+            Length = 1;
+            WordOrder = "ABCD";
+            Scale = 1.0;
+            Offset = 0.0;
+            Default = "";
+            Description = "";
+        }
+
+        public void Normalize()
+        {
+            Name = (Name ?? "").Trim();
+            Endpoint = (Endpoint ?? "").Trim();
+            Address = (Address ?? "").Trim();
+            Direction = NormalizeDirection(Direction);
+            Type = NormalizeType(Type);
+            if (Length <= 0) Length = 1;
+            if (Length > 125) Length = 125;
+            WordOrder = string.IsNullOrWhiteSpace(WordOrder) ? "ABCD" : WordOrder.Trim().ToUpperInvariant();
+            if (Scale == 0) Scale = 1.0;
+            Default = Default ?? "";
+            Description = Description ?? "";
+        }
+
+        public static string NormalizeDirection(string value)
+        {
+            if (string.Equals(value, "Read", StringComparison.OrdinalIgnoreCase)) return "Read";
+            if (string.Equals(value, "Write", StringComparison.OrdinalIgnoreCase)) return "Write";
+            return "ReadWrite";
+        }
+
+        public static string NormalizeType(string value)
+        {
+            string[] all = { "Bool", "Int16", "UInt16", "Int32", "UInt32", "Float", "Double", "String" };
+            foreach (string t in all)
+                if (string.Equals(value, t, StringComparison.OrdinalIgnoreCase)) return t;
+
+            // 【别名，别删】Modbus 圈里 Float32 / Float64 是通用叫法，这里存的是 Float / Double。
+            // 不认就会**静默回落 Bool**：写 1.5 变成写 0、写 -3 变成写 1，而且一句提示都没有
+            // （手改 comm.json 或导入别人的工程时必踩，现场已经踩过一次）。
+            string v = (value ?? "").Trim();
+            if (string.Equals(v, "Float32", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(v, "Single", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(v, "Real", StringComparison.OrdinalIgnoreCase)) return "Float";
+            if (string.Equals(v, "Float64", StringComparison.OrdinalIgnoreCase)) return "Double";
+
+            return "Bool";
+        }
+
+        public CommPointConfig Clone()
+        {
+            return new CommPointConfig
+            {
+                Name = Name, Endpoint = Endpoint, Address = Address,
+                Direction = Direction, Type = Type, Length = Length, WordOrder = WordOrder,
+                Scale = Scale, Offset = Offset, Default = Default, Description = Description
+            };
+        }
+    }
+
+    /// <summary>消息模板：结果 / 心跳 / 组合信息的文本或 JSON。</summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommMessageConfig
+    {
+        [System.Runtime.Serialization.DataMember] public string Name { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Endpoint { get; set; }
+
+        /// <summary>Text / Json / Points。</summary>
+        [System.Runtime.Serialization.DataMember] public string Mode { get; set; }
+
+        /// <summary>Text/Json 时是模板；Points 时是 <c>Point=value;Point=value</c>。</summary>
+        [System.Runtime.Serialization.DataMember] public string Format { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public string Terminator { get; set; }
+
+        /// <summary>Mode=Points 时按顺序写入的点位名（可选，Format 优先）。</summary>
+        [System.Runtime.Serialization.DataMember] public List<string> Points { get; set; }
+
+        public CommMessageConfig()
+        {
+            Name = "";
+            Endpoint = "";
+            Mode = "Text";
+            Format = "";
+            Terminator = "\r\n";
+            Points = new List<string>();
+        }
+
+        public void Normalize()
+        {
+            Name = (Name ?? "").Trim();
+            Endpoint = (Endpoint ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(Mode)) Mode = "Text";
+            Format = Format ?? "";
+            Terminator = Terminator ?? "";
+            if (Points == null) Points = new List<string>();
+        }
+
+        public CommMessageConfig Clone()
+        {
+            var c = new CommMessageConfig { Name = Name, Endpoint = Endpoint, Mode = Mode, Format = Format, Terminator = Terminator };
+            if (Points != null) c.Points.AddRange(Points);
+            return c;
+        }
+    }
+
+    /// <summary>任务动作。</summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommActionConfig
+    {
+        /// <summary>SetPoint / SendMessage / WaitPoint / Sleep / StartFlow / Log。</summary>
+        [System.Runtime.Serialization.DataMember] public string Kind { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Target { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Value { get; set; }
+        [System.Runtime.Serialization.DataMember] public int TimeoutMs { get; set; }
+        [System.Runtime.Serialization.DataMember] public bool ContinueOnError { get; set; }
+
+        public CommActionConfig()
+        {
+            Kind = "SetPoint";
+            Target = "";
+            Value = "";
+            TimeoutMs = 1000;
+        }
+
+        public void Normalize()
+        {
+            Kind = string.IsNullOrWhiteSpace(Kind) ? "SetPoint" : Kind.Trim();
+            Target = (Target ?? "").Trim();
+            Value = Value ?? "";
+            if (TimeoutMs <= 0) TimeoutMs = 1000;
+        }
+
+        public CommActionConfig Clone()
+        {
+            return new CommActionConfig { Kind = Kind, Target = Target, Value = Value, TimeoutMs = TimeoutMs, ContinueOnError = ContinueOnError };
+        }
+    }
+
+    /// <summary>常驻通讯任务。</summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommJobConfig
+    {
+        [System.Runtime.Serialization.DataMember] public string Name { get; set; }
+        [System.Runtime.Serialization.DataMember] public bool Enabled { get; set; }
+
+        /// <summary>Timer / ResultGroup / PointEdge / Startup。</summary>
+        [System.Runtime.Serialization.DataMember] public string Trigger { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public int IntervalMs { get; set; }
+
+        /// <summary>流程 Id 或名称（ResultGroup / StartFlow 用）。</summary>
+        [System.Runtime.Serialization.DataMember] public List<string> Flows { get; set; }
+
+        /// <summary>Latest / AllFresh。</summary>
+        [System.Runtime.Serialization.DataMember] public string Mode { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public int WindowMs { get; set; }
+
+        /// <summary>PointEdge 的触发点位。</summary>
+        [System.Runtime.Serialization.DataMember] public string Point { get; set; }
+
+        /// <summary>
+        /// 多流程触发步长（0 = 关闭，老行为：只读 <see cref="Point"/> 一个点位）。
+        /// <para>大于 0 时按**流程在「流程管理」里的顺序**展开：第 i 条流程读
+        /// <c>Point 的地址 + i × FlowStride</c>，一条任务即可驱动多条流程。
+        /// 与 SendData 的 <c>MbFlowStride</c> 用同一个值，触发与结果才落在同一分区。</para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember] public int FlowStride { get; set; }
+        [System.Runtime.Serialization.DataMember] public string Expect { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public List<CommActionConfig> Actions { get; set; }
+
+        public CommJobConfig()
+        {
+            Name = "";
+            Enabled = true;
+            Trigger = "Timer";
+            IntervalMs = 1000;
+            Flows = new List<string>();
+            Mode = "Latest";
+            WindowMs = 500;
+            Point = "";
+            FlowStride = 0;
+            Expect = "true";
+            Actions = new List<CommActionConfig>();
+        }
+
+        public void Normalize()
+        {
+            Name = (Name ?? "").Trim();
+            Trigger = string.IsNullOrWhiteSpace(Trigger) ? "Timer" : Trigger.Trim();
+            if (IntervalMs <= 0) IntervalMs = 1000;
+            if (Flows == null) Flows = new List<string>();
+            Mode = string.Equals(Mode, "AllFresh", StringComparison.OrdinalIgnoreCase) ? "AllFresh" : "Latest";
+            if (WindowMs <= 0) WindowMs = 500;
+            Point = (Point ?? "").Trim();
+            if (FlowStride < 0) FlowStride = 0;
+            if (FlowStride > 65535) FlowStride = 65535;
+            Expect = Expect ?? "true";
+            if (Actions == null) Actions = new List<CommActionConfig>();
+            foreach (CommActionConfig a in Actions) if (a != null) a.Normalize();
+        }
+
+        public CommJobConfig Clone()
+        {
+            var c = new CommJobConfig
+            {
+                Name = Name, Enabled = Enabled, Trigger = Trigger, IntervalMs = IntervalMs,
+                Mode = Mode, WindowMs = WindowMs, Point = Point,
+                FlowStride = FlowStride, Expect = Expect
+            };
+            if (Flows != null) c.Flows.AddRange(Flows);
+            if (Actions != null) foreach (CommActionConfig a in Actions) if (a != null) c.Actions.Add(a.Clone());
+            return c;
+        }
+    }
+
+    /// <summary>把某条流程的 Busy / Ready / Fault 映射到点位（多相机多流程时一条流程一份）。</summary>
+    [System.Runtime.Serialization.DataContract]
+    public sealed class CommFlowBindingConfig
+    {
+        /// <summary>流程 Id（优先）或流程名。</summary>
+        [System.Runtime.Serialization.DataMember] public string Flow { get; set; }
+
+        [System.Runtime.Serialization.DataMember] public string Endpoint { get; set; }
+        [System.Runtime.Serialization.DataMember] public string BusyPoint { get; set; }
+        [System.Runtime.Serialization.DataMember] public string ReadyPoint { get; set; }
+        [System.Runtime.Serialization.DataMember] public string FaultPoint { get; set; }
+        [System.Runtime.Serialization.DataMember] public bool Enabled { get; set; }
+
+        public CommFlowBindingConfig()
+        {
+            Flow = "";
+            Endpoint = "";
+            BusyPoint = "";
+            ReadyPoint = "";
+            FaultPoint = "";
+            Enabled = true;
+        }
+
+        public void Normalize()
+        {
+            Flow = (Flow ?? "").Trim();
+            Endpoint = (Endpoint ?? "").Trim();
+            BusyPoint = (BusyPoint ?? "").Trim();
+            ReadyPoint = (ReadyPoint ?? "").Trim();
+            FaultPoint = (FaultPoint ?? "").Trim();
+        }
+
+        public CommFlowBindingConfig Clone()
+        {
+            return new CommFlowBindingConfig
+            {
+                Flow = Flow, Endpoint = Endpoint, BusyPoint = BusyPoint,
+                ReadyPoint = ReadyPoint, FaultPoint = FaultPoint, Enabled = Enabled
             };
         }
     }
@@ -858,6 +1270,11 @@ namespace VisionPlatform.Core
             // 反序列化后为 0，这里补齐默认值 95，保证良率告警着色行为与首次运行一致。
             if (cfg.System.YieldAlarmPercent <= 0.0)
                 cfg.System.YieldAlarmPercent = SystemSettings.DefaultYieldAlarmPercent;
+
+            // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有 RunMode 字段，反序列化后为 null。
+            // RunMode 刻意用字符串而非 bool：缺失 bool 会变 false，无法区分"没配过"与"显式选连续"，
+            // 会让所有老配置静默退回连续运行 —— 正是"不触发也在跑"的病灶。缺失即 null → 触发式。
+            cfg.System.RunMode = SystemSettings.NormalizeRunMode(cfg.System.RunMode);
 
             // 【旧配置兼容，请勿移除】旧版 appconfig.json 没有 DbPath / LogRetentionDays 字段，
             // 反序列化后 DbPath 为 null、LogRetentionDays 为 0，这里归一化为默认值

@@ -43,10 +43,12 @@ void Preprocess(const cv::Mat& bgr, int inW, int inH, std::vector<float>& blob,
     blob.assign((size_t)3 * inW * inH, 0.0f);
     const unsigned char* p = padded.data;
     const int wh = inW * inH;
+    // 乘倒数而非逐元素除 255（/O2 不会把浮点常量除法折成乘法，见 algo_detect.cpp 同处说明）
+    const float kInv255 = 1.0f / 255.0f;
     for (int i = 0; i < wh; ++i) {
-        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] / 255.0f;
-        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] / 255.0f;
-        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] / 255.0f;
+        blob[(size_t)0 * wh + i] = (float)p[i * 3 + 0] * kInv255;
+        blob[(size_t)1 * wh + i] = (float)p[i * 3 + 1] * kInv255;
+        blob[(size_t)2 * wh + i] = (float)p[i * 3 + 2] * kInv255;
     }
 }
 
@@ -132,6 +134,7 @@ int CreateCommon(Context* ctx, DlState& st, int task, const char* model_path, co
         }
 
         ov::Core core;
+        ApplyThreadBudget(core);
         std::shared_ptr<ov::Model> model = core.read_model(model_path);
 
         auto in_shape = model->input().get_shape();

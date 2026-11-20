@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using VisionPlatform.Core;
 
 namespace VisionPlatform.Communication
@@ -53,6 +54,19 @@ namespace VisionPlatform.Communication
     {
         /// <summary>订阅 / 退订 / 读写共享状态的统一锁。</summary>
         private static readonly object Sync = new object();
+
+        /// <summary>
+        /// 自动连接失败后的冷却时间（毫秒）。
+        /// <para>
+        /// 【为什么必须有】PLC 掉线时，边沿轮询（100ms 一次）、心跳（1s 一次）、流程节点
+        /// 都会走到"未连接 → 自动连接"。TCP 连不上一个不可达地址要等满超时（默认 2s），
+        /// 不加冷却就是<strong>每秒多次 × 每次 2 秒</strong>的连接风暴。
+        /// 冷却期内自动连接直接快速失败，重连频率被压到约 1 次 / 5 秒。
+        /// </para>
+        /// <para>【与手动连接的关系】界面上的"连接"按钮走 <see cref="Connect"/>，不受冷却限制 ——
+        /// 用户点了按钮就该立刻尝试。</para>
+        /// </summary>
+        private const int AutoConnectBackoffMs = 5000;
 
         /// <summary>名称 → 活连接（名称比较忽略大小写，与配置侧一致）。</summary>
         private static readonly Dictionary<string, Channel> Channels =
@@ -126,7 +140,7 @@ namespace VisionPlatform.Communication
             return "已连接";
         }
 
-        /// <summary>连接（服务端即启动监听）指定的一条通讯。</summary>
+        /// <summary>连接（服务端即启动监听）指定的一条通讯。手动语义：立即尝试，不受自动重连冷却限制。</summary>
         public static OpResult Connect(string name)
         {
             EnsureInitialized();
@@ -135,11 +149,40 @@ namespace VisionPlatform.Communication
             if (ch == null) return OpResult.Fail("没有名为「{0}」的通讯", name ?? "");
             if (!ch.Config.Enabled) return OpResult.Fail("通讯「{0}」已停用", ch.Config.Name);
 
-            OpResult r;
-            lock (Sync) { r = ConnectInternal(ch); }
+            return ConnectChannel(ch);
+        }
 
-            RaiseChanged();
-            return r;
+        /// <summary>
+        /// 自动连接（供后台轮询 / 心跳 / 流程节点使用）：带失败冷却。
+        /// <para>
+        /// 【为什么单独一个入口】"没连上就自动连"这件事在边沿轮询、心跳、流程节点里每秒发生多次；
+        /// 直接复用 <see cref="Connect"/> 会对不可达地址形成连接风暴（每次都要等满 TCP 超时），
+        /// 且历史上连接是在全局锁内做的，风暴期间 UI 查通讯状态全部被锁卡住 —— 这正是
+        /// "加载通讯方案后所有界面切换都卡顿"的根因。冷却让重试频率降到约 1 次 / 5 秒。
+        /// </para>
+        /// </summary>
+        public static OpResult ConnectAuto(string name)
+        {
+            EnsureInitialized();
+
+            // 闸门：软件不在运行态时不自动连接（连接统一由主界面「运行」触发）
+            if (!CommRuntime.IsActive)
+                return OpResult.Fail("软件未处于运行状态，暂不自动连接（点主界面「运行」后才会建立通讯）");
+
+            Channel ch = Find(name);
+            if (ch == null) return OpResult.Fail("没有名为「{0}」的通讯", name ?? "");
+            if (!ch.Config.Enabled) return OpResult.Fail("通讯「{0}」已停用", ch.Config.Name);
+            if (ch.IsConnected) return OpResult.Ok();
+
+            DateTime now = DateTime.Now;
+            lock (Sync)
+            {
+                if (now < ch.NextAutoConnect)
+                    return OpResult.Fail("通讯「" + ch.Config.Name + "」自动连接冷却中（"
+                                         + (int)(ch.NextAutoConnect - now).TotalMilliseconds + "ms 后重试）");
+            }
+
+            return ConnectChannel(ch);
         }
 
         /// <summary>断开（服务端即停止监听）指定的一条通讯。</summary>
@@ -152,12 +195,9 @@ namespace VisionPlatform.Communication
 
             lock (Sync)
             {
-                switch (ch.Config.Kind)
-                {
-                    case CommKind.TcpServer:  ch.Server.Stop();      break;
-                    case CommKind.ModbusTcp:  ch.Modbus.Disconnect(); break;
-                    default:                  ch.Client.Disconnect(); break;
-                }
+                if (ch.Server != null) ch.Server.Stop();
+                else if (ch.Modbus != null) ch.Modbus.Disconnect();
+                else if (ch.Client != null) ch.Client.Disconnect();
 
                 UpdateCommState();
             }
@@ -177,12 +217,10 @@ namespace VisionPlatform.Communication
             if (ch == null) return OpResult.Fail("没有名为「{0}」的通讯", name ?? "");
             if (!ch.Config.Enabled) return OpResult.Fail("通讯「{0}」已停用", ch.Config.Name);
 
-            switch (ch.Config.Kind)
-            {
-                case CommKind.TcpServer:  return ch.Server.Broadcast(text);
-                case CommKind.ModbusTcp:  return OpResult.Fail("通讯「{0}」是 Modbus TCP，不支持文本发送", ch.Config.Name);
-                default:                  return ch.Client.Send(text);
-            }
+            if (ch.Server != null) return ch.Server.Broadcast(text);
+            if (ch.Modbus != null) return OpResult.Fail("通讯「{0}」是 Modbus TCP，不支持文本发送", ch.Config.Name);
+            if (ch.Client != null) return ch.Client.Send(text);
+            return OpResult.Fail("通讯「{0}」通道未创建", ch.Config.Name);
         }
 
         /// <summary>最近收到的一条文本；从未收到返回空串。</summary>
@@ -341,13 +379,17 @@ namespace VisionPlatform.Communication
                     if (cfg.Name.Length == 0) continue;
                     if (keep.Contains(cfg.Name)) continue;   // 重名配置只保留第一条
 
+                    // 未知协议（OPC UA 等）由 CommHub 的协议插件管理，旧注册表不能按 TCP 去连，
+                    // 否则插件端点会被静默当成 TCP 客户端反复重连。
+                    if (!CommKind.IsBuiltIn(cfg.Kind)) continue;
+
                     keep.Add(cfg.Name);
                     newOrder.Add(cfg.Name);
 
                     Channel ch;
                     if (Channels.TryGetValue(cfg.Name, out ch) && SameTarget(ch.Config, cfg))
                     {
-                        ch.Config = cfg;      // 参数没变 → 复用连接，绝不打断已建立的链路
+                        ch.Config = cfg.Clone();   // 参数没变 → 复用连接，但只保存快照
                         continue;
                     }
 
@@ -356,7 +398,10 @@ namespace VisionPlatform.Communication
                     ch = new Channel(cfg);
                     Channels[cfg.Name] = ch;
 
-                    if (allowAutoConnect && cfg.Enabled && cfg.AutoConnect) ConnectInternal(ch);
+                    // AutoConnect 只在「首次初始化 + 处于运行态」时执行：
+                    // 软件刚打开时（未点运行）不该偷偷连 PLC / 起监听，连接统一由 CommRuntime 触发。
+                    if (allowAutoConnect && CommRuntime.IsActive && cfg.Enabled && cfg.AutoConnect)
+                        ConnectInternal(ch);
                 }
             }
 
@@ -395,25 +440,66 @@ namespace VisionPlatform.Communication
             }
         }
 
+        /// <summary>
+        /// 真正执行连接：<strong>网络 I/O 在全局锁外</strong>，用通道自身的 Interlocked 标志防并发。
+        /// <para>
+        /// 【为什么不能在锁里连】TCP/Modbus 连不上要等满超时（秒级）。若持 <see cref="Sync"/> 连接，
+        /// 这几秒内 UI 的 Names() / StatusText() / IsConnected()（开窗体、开参数面板都要调）全部排队，
+        /// 表现就是"界面打开切换卡顿"。锁只保护字典查找与状态汇总，绝不跨越网络调用。
+        /// </para>
+        /// </summary>
+        private static OpResult ConnectChannel(Channel ch)
+        {
+            if (Interlocked.CompareExchange(ref ch.Connecting, 1, 0) != 0)
+                return OpResult.Fail("通讯「" + ch.Config.Name + "」正在连接中");
+
+            OpResult r;
+            try
+            {
+                r = ConnectInternal(ch);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref ch.Connecting, 0);
+            }
+
+            if (!r.Success)
+            {
+                // 失败才进冷却；成功则清掉（掉线恢复后下一次自动连接立刻放行）
+                lock (Sync) { ch.NextAutoConnect = DateTime.Now.AddMilliseconds(AutoConnectBackoffMs); }
+            }
+            else
+            {
+                lock (Sync) { ch.NextAutoConnect = DateTime.MinValue; }
+            }
+
+            RaiseChanged();
+            return r;
+        }
+
         private static OpResult ConnectInternal(Channel ch)
         {
             CommEndpointConfig cfg = ch.Config;
             OpResult r;
 
-            switch (cfg.Kind)
+            // 按通道实际持有的对象分发：配置快照与对象类型永远一致，
+            // 避免“配置已改成服务端、通道还是客户端”时走错分支。
+            if (ch.Server != null)
             {
-                case CommKind.TcpServer:
-                    r = ch.Server.Start(cfg.Port);
-                    break;
-
-                case CommKind.ModbusTcp:
-                    ch.Modbus.SlaveId = (byte)cfg.SlaveId;
-                    r = ch.Modbus.Connect(cfg.Host, cfg.Port);
-                    break;
-
-                default:
-                    r = ch.Client.Connect(cfg.Host, cfg.Port);
-                    break;
+                r = ch.Server.Start(cfg.Port);
+            }
+            else if (ch.Modbus != null)
+            {
+                ch.Modbus.SlaveId = (byte)cfg.SlaveId;
+                r = ch.Modbus.Connect(cfg.Host, cfg.Port);
+            }
+            else if (ch.Client != null)
+            {
+                r = ch.Client.Connect(cfg.Host, cfg.Port);
+            }
+            else
+            {
+                return OpResult.Fail("通讯「" + cfg.Name + "」通道未创建");
             }
 
             if (r.Success) CommState.ClearError();
@@ -427,7 +513,9 @@ namespace VisionPlatform.Communication
         {
             if (ch.Modbus != null && ch.Modbus.IsConnected) return true;
 
-            OpResult r = Connect(name);
+            // 自动路径：带冷却。ModbusRead/WriteAs 由后台轮询与流程节点高频调用，
+            // 不能每次都对不可达地址做一次秒级连接。
+            OpResult r = ConnectAuto(name);
             return r.Success;
         }
 
@@ -436,17 +524,20 @@ namespace VisionPlatform.Communication
         /// 任意一条对应类型的通讯连上即为 true。
         /// 这样 MainForm 的运行前校验与 SettingsForm 的状态文本无需任何改动。
         /// </summary>
+        /// <remarks>自己加锁（C# lock 可重入，既有的锁内调用点不受影响）——
+        /// 现在 <see cref="ConnectInternal"/> 在全局锁外执行，也会走到这里。</remarks>
         private static void UpdateCommState()
         {
             bool tcpClient = false, tcpServer = false, modbus = false;
 
-            foreach (Channel ch in Channels.Values)
+            lock (Sync)
             {
-                switch (ch.Config.Kind)
+                foreach (Channel ch in Channels.Values)
                 {
-                    case CommKind.TcpServer: if (ch.IsConnected) tcpServer = true; break;
-                    case CommKind.ModbusTcp: if (ch.IsConnected) modbus = true;    break;
-                    default:                 if (ch.IsConnected) tcpClient = true; break;
+                    if (!ch.IsConnected) continue;
+                    if (ch.Server != null) tcpServer = true;
+                    else if (ch.Modbus != null) modbus = true;
+                    else if (ch.Client != null) tcpClient = true;
                 }
             }
 
@@ -476,9 +567,21 @@ namespace VisionPlatform.Communication
             /// <summary>最近收到的一条文本（后台线程写入，读取须加锁）。</summary>
             public string LastReceived = "";
 
+            /// <summary>
+            /// 连接互斥标志（Interlocked）：同一通道同时只允许一个连接动作。
+            /// 连接在全局锁外执行后，靠它防止"边沿轮询 + 心跳"同时对同一通道发起连接。
+            /// </summary>
+            public int Connecting;
+
+            /// <summary>自动连接冷却截止时间（<see cref="CommRegistry.AutoConnectBackoffMs"/>）。</summary>
+            public DateTime NextAutoConnect = DateTime.MinValue;
+
             public Channel(CommEndpointConfig cfg)
             {
-                Config = cfg;
+                // 必须存快照：配置对象会被界面就地修改（例如客户端改成服务端），
+                // 若 Channel 直接引用它，Disconnect/Send 会按“新 Kind”去用“旧对象”，
+                // 典型表现就是 ch.Server 为 null 的 NullReferenceException。
+                Config = cfg != null ? cfg.Clone() : new CommEndpointConfig();
 
                 switch (cfg.Kind)
                 {
@@ -505,12 +608,10 @@ namespace VisionPlatform.Communication
             {
                 get
                 {
-                    switch (Config.Kind)
-                    {
-                        case CommKind.TcpServer: return Server != null && Server.IsRunning;
-                        case CommKind.ModbusTcp: return Modbus != null && Modbus.IsConnected;
-                        default:                 return Client != null && Client.IsConnected;
-                    }
+                    if (Server != null) return Server.IsRunning;
+                    if (Modbus != null) return Modbus.IsConnected;
+                    if (Client != null) return Client.IsConnected;
+                    return false;
                 }
             }
 

@@ -115,7 +115,7 @@ namespace VisionPlatform.Modules
                     break;
 
                 case FlowNodeType.TemplateMatch:
-                    // NCC（归一化灰度相关）：仅支持平移，不支持旋转 / 缩放
+                    // NCC（归一化灰度相关）：支持角度 / 缩放；默认只搜平移，与旧版行为一致
                     Add(list, "TemplateX", "0");
                     Add(list, "TemplateY", "0");
                     Add(list, "TemplateW", "0");
@@ -124,10 +124,43 @@ namespace VisionPlatform.Modules
                     Add(list, "SearchY", "0");
                     Add(list, "SearchW", "0");
                     Add(list, "SearchH", "0");
+                    Add(list, "AngleStart", "0");
+                    Add(list, "AngleEnd", "0");
+                    Add(list, "AngleStep", "1");
+                    Add(list, "ScaleMin", "1");
+                    Add(list, "ScaleMax", "1");
+                    Add(list, "ScaleStep", "0");
+                    Add(list, "PyramidLevels", "3");
                     Add(list, "MinScore", "0.8");
                     Add(list, "MaxMatches", "1");
+                    Add(list, "MaxOverlap", "0.5");
                     Add(list, "Subpixel", "1");
                     // 同 ShapeMatch：「创建模板…」是动作行，不落盘、不补键。
+                    break;
+
+                case FlowNodeType.PointCloudSource:
+                    Add(list, "Source", "File");
+                    Add(list, "Fx", "1000");
+                    Add(list, "Fy", "1000");
+                    Add(list, "Cx", "320");
+                    Add(list, "Cy", "240");
+                    Add(list, "ZScale", "1");
+                    break;
+
+                case FlowNodeType.BarcodeRead:
+                    // 条码 / 二维码：免模板。默认值 = "能认出来"的最稳组合（不追速度）。
+                    Add(list, "RoiX", "0");
+                    Add(list, "RoiY", "0");
+                    Add(list, "RoiW", "0");
+                    Add(list, "RoiH", "0");
+                    Add(list, "CodeType", "0");
+                    Add(list, "MaxCount", "8");
+                    Add(list, "TryHarder", "0");
+                    Add(list, "TryRotate", "1");
+                    Add(list, "TryDownscale", "0");
+                    Add(list, "TryInvert", "1");
+                    Add(list, "IsPure", "0");
+                    Add(list, "MinCount", "1");
                     break;
 
                 case FlowNodeType.Blob:
@@ -363,6 +396,17 @@ namespace VisionPlatform.Modules
                     break;
             }
 
+            // 运行控制：算法节点的「超时(ms)」，默认 500。
+            // 【必须与 Schema 对齐】SmokeUi 有一条"Our Schema 与 CreateDefaultParams 键一致"的断言；
+            // 只在两边都加，老流程才会在 UpgradeToCurrent 时被补上这个键（否则运行时读到的是硬默认值，
+            // 界面上却看不见 —— 正是"填了不生效"那类问题的反面）。
+            // 【为什么这几个类型没有】
+            //   图像源：它自己的 TimeoutMs 是"等一帧"的超时（3000），语义完全不同，不能混；
+            //   发送/接收数据：同上，是通讯应答超时；
+            //   结果输出：只做汇总，微秒级；
+            //   脚本：用户代码里可能是死循环，限时也无从中断（硬杀线程会留下脏状态）。
+            if (HasAlgoTimeout(type)) Add(list, "TimeoutMs", "500");
+
             return list;
         }
 
@@ -380,6 +424,12 @@ namespace VisionPlatform.Modules
         private static void Add(List<ParamItem> list, string key, string value)
         {
             list.Add(new ParamItem(key, value));
+        }
+
+        /// <summary>该节点类型是否带「算法超时」参数（唯一判据在 <see cref="FlowNodeTraits.HasAlgoTimeout"/>）。</summary>
+        internal static bool HasAlgoTimeout(FlowNodeType type)
+        {
+            return FlowNodeTraits.HasAlgoTimeout(type);
         }
     }
 }

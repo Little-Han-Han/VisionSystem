@@ -38,11 +38,19 @@ namespace VisionPlatform.Flow
         /// </summary>
         public static string[] List(string folder, out string error)
         {
+            return List(folder, Exts, "图片", out error);
+        }
+
+        /// <summary>
+        /// 按指定扩展名列出目录文件（自然序）。缓存键包含扩展名约定（点云/图片共用同一套缓存字典）。
+        /// </summary>
+        public static string[] List(string folder, string[] extensions, string kindName, out string error)
+        {
             error = "";
 
             if (string.IsNullOrWhiteSpace(folder))
             {
-                error = "未选择图片文件夹";
+                error = "未选择" + kindName + "文件夹";
                 return new string[0];
             }
 
@@ -62,8 +70,10 @@ namespace VisionPlatform.Flow
 
             lock (_sync)
             {
+                // 缓存键带上扩展名约定：同一目录里既有图片又有 PLY/PCD 时不会互相串
+                string cacheKey = dir + "\u0001" + string.Join(";", extensions);
                 CacheEntry hit;
-                if (_cache.TryGetValue(dir, out hit) && hit.Valid && hit.StampUtc == stamp && hit.Files.Length > 0)
+                if (_cache.TryGetValue(cacheKey, out hit) && hit.Valid && hit.StampUtc == stamp && hit.Files.Length > 0)
                     return hit.Files;
             }
 
@@ -82,7 +92,7 @@ namespace VisionPlatform.Flow
                 if (string.IsNullOrEmpty(ext)) continue;
 
                 bool ok = false;
-                foreach (string e in Exts)
+                foreach (string e in extensions)
                 {
                     if (string.Equals(ext, e, StringComparison.OrdinalIgnoreCase)) { ok = true; break; }
                 }
@@ -104,10 +114,10 @@ namespace VisionPlatform.Flow
                 e.Files = result;
                 e.StampUtc = stamp;
                 e.Valid = true;
-                _cache[dir] = e;
+                _cache[dir + "\u0001" + string.Join(";", extensions)] = e;
             }
 
-            if (result.Length == 0) error = "文件夹内没有图片（" + dir + "）";
+            if (result.Length == 0) error = "文件夹内没有" + kindName + "（" + dir + "）";
             return result;
         }
 

@@ -30,6 +30,12 @@
 //       分子必然为 0（分数 0，必然低于粗层阈值），一次查表就能跳过整个位置的全部姿态。
 //       这是**严格上界**（不是启发式），不会漏掉真目标；工业图大片平坦背景时收益最大。
 //    6) 并行 + SIMD：粗扫按位置、精化按候选做 OpenMP 并行；精化层评分的累积段用 SSE2 四路。
+//    7) 只读视图与免转换梯度：单通道输入直接引用（GrayView，不 clone 整图）；
+//       Sobel 直接 8U→CV_32F，省掉每层一次整图 convertTo（8U 定点与 32F 浮点结果逐位相同）。
+//    8) 金字塔只建「搜索区邻域」：搜索 ROI 外的像素根本不参与评分，却要为 pyrDown 与两层
+//       Sobel 付全图代价。留边覆盖「模板外接半径 + 金字塔/Sobel 支撑域」后裁切，
+//       结果与原图构建**逐位相同**（BENCH-K 断言中心/角度/得分一致）。
+//    9) 姿态表复用：精化与亚像素段共用一个 Pose 缓冲，不再每个 (角度×缩放) 新建 4 个 vector。
 //
 //  稳健性设计（针对「定位准确率不足」）：
 //    · 评分分母只统计「落在图像内」的模板点。目标贴边/部分出画时，出画的点根本无从
@@ -52,6 +58,7 @@
 #include "algo/va_shape.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <vector>
 #include <cstdio>
@@ -74,7 +81,12 @@ const double kPi = 3.14159265358979323846;
 const double kDeg2Rad = kPi / 180.0;
 
 const size_t kMaxModelPoints = 8000;    // 特征点数量的硬上限
-const size_t kMaxPointsPerLevel = 1024; // 单层参与评分的最多点数
+const size_t kMaxPointsPerLevel = 1024; // 粗层单层参与评分的最多点数（直接决定粗扫成本）
+// 最细层的点数上限。最细层只服务「精化 / 亚像素 / 最终诚实重评」，只对 keep=8~300 个候选
+// 执行，与粗扫的 (位置 × 姿态) 规模无关，所以可以比粗层宽得多。
+// 原实现共用 1024 → 默认 1500 点的模型在最细层被 stride=2 抽成 750 点，
+// 等于「训练了 1500 个特征点，最终打分只用一半」，对外 score 的稳定性被白丢。
+const size_t kMaxPointsFinest = 4096;
 const int    kDefaultMaxFeatures = 1500;    // 默认最多特征点数
 const double kDefaultMinFeatureDist = 2.0;  // 默认特征点最小间距（模板像素）
 
@@ -177,10 +189,22 @@ double ClampD(double v, double lo, double hi)
 
 void BuildGradients(const cv::Mat& gray, cv::Mat& gx, cv::Mat& gy)
 {
-    cv::Mat f;
-    gray.convertTo(f, CV_32F);
-    cv::Sobel(f, gx, CV_32F, 1, 0, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
-    cv::Sobel(f, gy, CV_32F, 0, 1, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
+    // 直接 8U → CV_32F。ksize=3 的 Sobel 权重全是整数（±1/±2），8U 定点路径与
+    // 32F 浮点路径算出的和逐位相同，因此这一步只是省掉一次「整图 convertTo(CV_32F)」
+    // 的分配 + 全图写入（每层一张 float 图，5MP 图约 20 MB 内存写）。
+    cv::Sobel(gray, gx, CV_32F, 1, 0, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
+    cv::Sobel(gray, gy, CV_32F, 0, 1, 3, 1.0, 0.0, cv::BORDER_REPLICATE);
+}
+
+// 只读灰度视图：单通道输入直接返回引用，不做 clone。
+// 训练 / 匹配两条路径对 gray 全程只读（Canny、Sobel、pyrDown 都不写 src），
+// 所以没必要为了「连续性」把整图拷一遍 —— 单色 12MP 图这一次拷贝就是 12 MB。
+// ⚠️ 与 va::AsGray 的分工：AsGray 会 clone，是给 preprocess 那种「原地滤波」路径用的，
+//    这里绝不能用 AsGray，否则白拷一次；同理将来若有原地写操作，也不能用 GrayView。
+cv::Mat GrayView(const cv::Mat& input)
+{
+    if (input.channels() == 1) return input;
+    return va::AsGray(input);
 }
 
 // 建立某层的梯度方向图（档位表）与边缘支持度整型图。
@@ -278,8 +302,17 @@ static inline float HSum128(__m128 v)
 #endif
 
 // 为某个姿态预计算旋转 / 缩放后的模板点
+// 诊断用：整个 FindShapeModel 调用里累计「被旋转缩放的模板点数」。
+// 用来判断「姿态表能不能靠预计算提速」——见 docs/算法/算法更新记录.md 的成本结构。
+// 只有开诊断（VA_SHAPE_DEBUG=1）时才累加；正常路径上是一次 relaxed load，可忽略。
+static std::atomic<bool>      g_poseCountOn(false);
+static std::atomic<long long> g_posePoints(0);
+
 void BuildPose(const ModelLevel& ml, float angleDeg, float scale, Pose& out)
 {
+    if (g_poseCountOn.load(std::memory_order_relaxed))
+        g_posePoints.fetch_add((long long)ml.pts.size(), std::memory_order_relaxed);
+
     const double a = (double)angleDeg * kDeg2Rad;
     const float ca = (float)std::cos(a);
     const float sa = (float)std::sin(a);
@@ -579,8 +612,9 @@ static int BadImageError(Context* ctx, const VA_Image* img)
 {
     if (img != 0 && img->channels != 1 && img->channels != 3 && img->channels != 4)
     {
-        SetError(ctx, "unsupported image type: channels must be 1, 3 or 4");
-        return VA_ERR_TYPE;
+        return SetErrorEx(ctx, VA_ERR_CHANNEL, "形状匹配", "图像通道数",
+                          "非 1/3/4 通道", "1=灰度 / 3=BGR / 4=BGRA",
+                          "形状匹配：图像通道数不支持（需要 1=灰度 / 3=BGR / 4=BGRA）");
     }
     return VA_ERR_ARG;
 }
@@ -596,15 +630,18 @@ static int TrainCore(Context* ctx, const VA_Image* gray, const int* roi,
     if (maxFeatures > (int)kMaxModelPoints) maxFeatures = (int)kMaxModelPoints;
     if (minFeatureDist <= 0.0) minFeatureDist = kDefaultMinFeatureDist;
 
-    if (gray == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (gray == 0)
+        return SetErrorEx(ctx, VA_ERR_NO_INPUT, "形状匹配/训练", "gray",
+                          "空指针", "必须传入一帧图像", "形状匹配训练：图像为空（未传入帧）");
 
     try
     {
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return BadImageError(ctx, gray);
 
-        // 彩色输入统一转灰度：形状匹配只依赖边缘的梯度方向，与颜色无关
-        cv::Mat grayImg = AsGray(g);
+        // 彩色输入统一转灰度：形状匹配只依赖边缘的梯度方向，与颜色无关。
+        // 单通道走 GrayView（引用，不拷贝）—— 训练全程只读。
+        cv::Mat grayImg = GrayView(g);
 
         cv::Rect r(0, 0, grayImg.cols, grayImg.rows);
         if (roi != 0 && roi[2] > 0 && roi[3] > 0)
@@ -616,8 +653,13 @@ static int TrainCore(Context* ctx, const VA_Image* gray, const int* roi,
             r = cv::Rect(x, y, w, h) & cv::Rect(0, 0, grayImg.cols, grayImg.rows);
             if (r.width <= 0 || r.height <= 0)
             {
-                SetError(ctx, "invalid roi");
-                return VA_ERR_ARG;
+                char val[64], exp[64], msg[256];
+                std::snprintf(val, sizeof(val), "(%d,%d,%d,%d)", roi[0], roi[1], roi[2], roi[3]);
+                std::snprintf(exp, sizeof(exp), "与图像 %dx%d 有交集", grayImg.cols, grayImg.rows);
+                std::snprintf(msg, sizeof(msg),
+                              "形状匹配训练：模板 ROI 与图像无交集（ROI=(%d,%d,%d,%d)，图像=%dx%d）",
+                              roi[0], roi[1], roi[2], roi[3], grayImg.cols, grayImg.rows);
+                return SetErrorEx(ctx, VA_ERR_ROI, "形状匹配/训练", "TemplateX/Y/W/H", val, exp, msg);
             }
         }
 
@@ -671,7 +713,15 @@ static int TrainCore(Context* ctx, const VA_Image* gray, const int* roi,
 
         if (raw.empty())
         {
-            SetError(ctx, "no edge found in template roi");
+            {
+                char val[64], msg[320];
+                std::snprintf(val, sizeof(val), "%.1f", contrast);
+                std::snprintf(msg, sizeof(msg),
+                              "形状匹配训练：模板 ROI 内没有边缘（对比度阈值 %.1f，ROI=%dx%d）；"
+                              "请把对比度调低（典型 20~60）或把 ROI 框到有轮廓的区域", contrast, patch.cols, patch.rows);
+                return SetErrorEx(ctx, VA_ERR_TEMPLATE_NO_FEATURE, "形状匹配/训练", "Contrast", val,
+                                  "阈值过高会让边缘全被丢掉，典型 20~60", msg);
+            }
             return VA_ERR_NO_TEMPLATE;
         }
 
@@ -814,16 +864,22 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 {
     if (gray == 0 || param == 0 || outMatches == 0 || outCount == 0 || maxCount <= 0)
     {
-        SetError(ctx, "null argument");
-        return VA_ERR_ARG;
+        return SetErrorEx(ctx, VA_ERR_ARG, "形状匹配", "image / param / out / max_count",
+                          "存在空指针或 max_count<=0", "全部必填且 max_count>=1",
+                          "形状匹配：入参为空（图像 / 参数 / 输出缓冲区 / 容量必须全部提供，且容量 >= 1）");
     }
 
     *outCount = 0;
 
+    // 诊断计数复位（见 BuildPose 处的注释）：只在 VA_SHAPE_DEBUG=1 时真正累加
+    g_posePoints.store(0, std::memory_order_relaxed);
+    g_poseCountOn.store(DebugTrace(), std::memory_order_relaxed);
+
     if (!ctx->shape.valid || ctx->shape.pts.empty())
     {
-        SetError(ctx, "shape model not trained");
-        return VA_ERR_NO_TEMPLATE;
+        return SetErrorEx(ctx, VA_ERR_NO_TEMPLATE, "形状匹配", "模板槽位",
+                          "模型点数为 0", "先训练/加载模板资产",
+                          "形状匹配：尚未训练模板（本节点还没加载到模板资产，或原生上下文被其它节点抢占后未重训）");
     }
 
     try
@@ -831,14 +887,39 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return BadImageError(ctx, gray);
 
-        // 彩色输入统一转灰度（1 通道则直接复用，3/4 通道走 cvtColor）
-        cv::Mat grayImg = AsGray(g);
+        // 彩色输入统一转灰度（1 通道走 GrayView：只引用不拷贝，匹配全程只读）
+        cv::Mat grayImg = GrayView(g);
         const int iw = grayImg.cols;
         const int ih = grayImg.rows;
 
-        // ---------- 1. 金字塔层数 ----------
+        // ---------- 1. 搜索范围（原图坐标，限制中心可出现的位置）----------
+        // 注意：这里的 ROI 限制的是「模板中心」可出现的位置，不是模板外接框。
+        // 提前到金字塔之前解析：下面要靠它把金字塔的构建范围裁到「搜索区邻域」。
+        int rx = 0, ry = 0, rw = iw, rh = ih;
+        const bool hasRoi = (searchRoi != 0 && searchRoi[2] > 0 && searchRoi[3] > 0);
+        if (hasRoi)
+        {
+            rx = std::max(0, searchRoi[0]);
+            ry = std::max(0, searchRoi[1]);
+            rw = std::min(searchRoi[2], iw - rx);
+            rh = std::min(searchRoi[3], ih - ry);
+            if (rw <= 0 || rh <= 0)
+            {
+                char val[64], exp[64], msg[256];
+                std::snprintf(val, sizeof(val), "(%d,%d,%d,%d)", searchRoi[0], searchRoi[1], searchRoi[2], searchRoi[3]);
+                std::snprintf(exp, sizeof(exp), "与图像 %dx%d 有交集", iw, ih);
+                std::snprintf(msg, sizeof(msg),
+                              "形状匹配：搜索 ROI 与图像无交集（ROI=(%d,%d,%d,%d)，图像=%dx%d）",
+                              searchRoi[0], searchRoi[1], searchRoi[2], searchRoi[3], iw, ih);
+                return SetErrorEx(ctx, VA_ERR_ROI, "形状匹配", "SearchX/Y/W/H", val, exp, msg);
+            }
+        }
+
+        // ---------- 2. 金字塔层数 ----------
         // 约束取「最粗层模板 ≥ 8px、图像 ≥ 32px」。约束过严会让层数退化成 1，
         // 退化后等于全分辨率暴力扫描 —— 这是最常见的性能陷阱。
+        // ⚠️ 用**未裁切**的整图尺寸算，裁切后不重算：层数是「用户参数与图像尺寸」的函数，
+        //    不能因为搜索区小而变浅，否则同一套参数在 ROI 内外的金字塔深度不同、结果不可比。
         const double tw = ctx->shape.width;
         const double th = ctx->shape.height;
 
@@ -857,59 +938,8 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         if (levels > 8) levels = 8;
         if (levels > maxLevel) levels = maxLevel;
 
-        // ---------- 2. 图像金字塔与梯度 ----------
-        std::vector<cv::Mat> pyr(levels);
-        pyr[0] = grayImg;
-        for (int L = 1; L < levels; ++L)
-            cv::pyrDown(pyr[L - 1], pyr[L]);
-
-        std::vector<GradLevel> grads(levels);
-        for (int L = 0; L < levels; ++L)
-            BuildGradients(pyr[L], grads[L].gx, grads[L].gy);
-
-        // ---------- 3. 各层模型点 ----------
-        std::vector<ModelLevel> mls(levels);
-        const size_t pointCount = ctx->shape.pts.size();
-
-        for (int L = 0; L < levels; ++L)
-        {
-            size_t stride = ((size_t)1 << L);
-            if (pointCount / stride > kMaxPointsPerLevel)
-                stride = pointCount / kMaxPointsPerLevel + 1;
-
-            const double f = 1.0 / (double)(1 << L);
-            for (size_t i = 0; i < pointCount; i += stride)
-            {
-                mls[L].pts.push_back(cv::Point2f((float)((double)ctx->shape.pts[i].x * f),
-                                                 (float)((double)ctx->shape.pts[i].y * f)));
-                mls[L].dir.push_back(ctx->shape.dir[i]);
-            }
-
-            if (mls[L].pts.empty())
-            {
-                SetError(ctx, "template too small for pyramid level");
-                return VA_ERR_SIZE;
-            }
-        }
-
-        // 各点的方向档位：只算一次，姿态阶段按角度整体平移（旋转不改变相对档位）
-        for (int L = 0; L < levels; ++L)
-        {
-            const size_t n = mls[L].dir.size();
-            mls[L].bin.resize(n);
-            for (size_t i = 0; i < n; ++i)
-            {
-                const cv::Point2f d = mls[L].dir[i];
-                double ang = std::atan2((double)d.y, (double)d.x);
-                if (ang < 0.0) ang += 2.0 * kPi;
-                int b = (int)(ang * (double)kDirBins / (2.0 * kPi));
-                if (b < 0) b = 0;
-                if (b >= kDirBins) b = kDirBins - 1;
-                mls[L].bin[i] = (unsigned char)b;
-            }
-        }
-
-        // ---------- 4. 角度 / 缩放序列 ----------
+        // ---------- 3. 角度 / 缩放序列 ----------
+        // 也提前：裁切范围要按「最大缩放下模板的外接半径」留边。
         double aStart = param->angle_start;
         double aEnd = param->angle_end;
         if (aEnd < aStart) { double t = aStart; aStart = aEnd; aEnd = t; }
@@ -951,26 +981,160 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             if (scales.back() < sMax - 1e-9) scales.push_back(sMax);
         }
 
+        // ---------- 4. 只建「搜索区邻域」的金字塔 ----------
+        // 金字塔与各层梯度原本按**整图**构建，与搜索区大小无关：5MP 的全图上搜一个
+        // 500×500 的 ROI，光 pyrDown + 两层 Sobel 就要十几毫秒，而真正参与评分的像素
+        // 只有 ROI 那一小块。这里把输入裁到「搜索区 ⊕ 模板外接半径 ⊕ 金字塔/Sobel 支撑域」，
+        // 之后再平移回原图坐标。
+        //
+        // 【为什么结果不变，而不是"近似"】
+        //   · 中心 ∈ ROI 时，任何模板点到中心的距离 ≤ 0.5*sqrt(tw²+th²)*maxScale，留边覆盖它
+        //     ⇒ 每个中心的"图内/图外"判定与原图完全一致，分母不变，score 逐位不变。
+        //   · 留边还要覆盖 pyrDown（半径 2·(2^L-1)）与 Sobel（半径 1）的采样支撑域，
+        //     ⇒ 参与评分的像素值也与整图构建时相同。
+        //   · 层数在裁切前用整图尺寸算好，裁切后强制把窗口撑到 32·2^(levels-1)，
+        //     ⇒ 金字塔深度与粗扫网格分辨率跟不裁切时一致。
+        int cropX = 0, cropY = 0, cropW = iw, cropH = ih;
+        if (hasRoi)
+        {
+            double maxScaleAbs = scales[0];
+            for (size_t i = 1; i < scales.size(); ++i)
+                if (scales[i] > maxScaleAbs) maxScaleAbs = scales[i];
+
+            const double halfDiag = 0.5 * std::sqrt(tw * tw + th * th) * maxScaleAbs;
+            const int margin = (int)std::ceil(halfDiag) + 3 * (1 << (levels - 1)) + 8;
+
+            int cx0 = rx - margin;
+            int cy0 = ry - margin;
+            int cx1 = rx + rw + margin;   // 右开
+            int cy1 = ry + rh + margin;
+
+            // 至少保住 levels 层所需的 32·2^(levels-1) 像素（撑不动就顶到图像边界）
+            const int minSide = 32 << (levels - 1);
+            if (cx1 - cx0 < minSide) { const int d = (minSide - (cx1 - cx0) + 1) / 2; cx0 -= d; cx1 += d; }
+            if (cy1 - cy0 < minSide) { const int d = (minSide - (cy1 - cy0) + 1) / 2; cy0 -= d; cy1 += d; }
+
+            if (cx0 < 0) cx0 = 0;
+            if (cy0 < 0) cy0 = 0;
+            if (cx1 > iw) cx1 = iw;
+            if (cy1 > ih) cy1 = ih;
+
+            // 贴边裁切后宽度可能又被削回不足 minSide（左右都被图像边界顶住），
+            // 这时只能往图像内侧补足；iw >= minSide 由 maxLevel 的推导保证，补得回来。
+            if (cx1 - cx0 < minSide && cx1 - cx0 < iw)
+            {
+                if (cx0 <= 0) cx1 = std::min(iw, minSide);
+                else          cx0 = std::max(0, cx1 - minSide);
+            }
+            if (cy1 - cy0 < minSide && cy1 - cy0 < ih)
+            {
+                if (cy0 <= 0) cy1 = std::min(ih, minSide);
+                else          cy0 = std::max(0, cy1 - minSide);
+            }
+
+            // 裁完省不下 10% 面积就不折腾（省的是 memcpy 与边界处理的零头，不值得引入坐标平移）
+            const double cropArea = (double)(cx1 - cx0) * (double)(cy1 - cy0);
+            if (cropArea <= 0.9 * (double)iw * (double)ih)
+            {
+                cropX = cx0; cropY = cy0;
+                cropW = cx1 - cx0; cropH = cy1 - cy0;
+            }
+        }
+
+        // 搜索范围平移到裁切坐标（hasRoi 时 ROI 必然完整落在窗口内，见上面的留边推导）
+        rx -= cropX;
+        ry -= cropY;
+
+        // ---------- 5. 图像金字塔与梯度 ----------
+        cv::Mat base = grayImg;
+        if (cropW != iw || cropH != ih)
+            base = grayImg(cv::Rect(cropX, cropY, cropW, cropH));
+
+        std::vector<cv::Mat> pyr(levels);
+        pyr[0] = base;
+        for (int L = 1; L < levels; ++L)
+            cv::pyrDown(pyr[L - 1], pyr[L]);
+
+        std::vector<GradLevel> grads(levels);
+        for (int L = 0; L < levels; ++L)
+            BuildGradients(pyr[L], grads[L].gx, grads[L].gy);
+
+        // ---------- 3. 各层模型点 ----------
+        std::vector<ModelLevel> mls(levels);
+        const size_t pointCount = ctx->shape.pts.size();
+
+        for (int L = 0; L < levels; ++L)
+        {
+            size_t stride = ((size_t)1 << L);
+            if (pointCount / stride > kMaxPointsPerLevel)
+                stride = pointCount / kMaxPointsPerLevel + 1;
+
+            const double f = 1.0 / (double)(1 << L);
+            for (size_t i = 0; i < pointCount; i += stride)
+            {
+                mls[L].pts.push_back(cv::Point2f((float)((double)ctx->shape.pts[i].x * f),
+                                                 (float)((double)ctx->shape.pts[i].y * f)));
+                mls[L].dir.push_back(ctx->shape.dir[i]);
+            }
+
+            if (mls[L].pts.empty())
+            {
+                {
+                    char val[64], msg[256];
+                    std::snprintf(val, sizeof(val), "%gx%g", ctx->shape.width, ctx->shape.height);
+                    std::snprintf(msg, sizeof(msg),
+                                  "形状匹配：模板 %gx%g 在第 %d 层缩到 %dx%d，小于 8x8（特征点一个也放不下）；"
+                                  "请减少金字塔层数或放大模板",
+                                  ctx->shape.width, ctx->shape.height, L,
+                                  (int)(ctx->shape.width / (double)(1 << L)),
+                                  (int)(ctx->shape.height / (double)(1 << L)));
+                    return SetErrorEx(ctx, VA_ERR_TEMPLATE_TOO_SMALL, "形状匹配", "PyramidLevels",
+                                      "该层模板 < 8x8", "每层模板边长 >= 8px", msg);
+                }
+                return VA_ERR_SIZE;
+            }
+        }
+
+        // 各点的方向档位：只算一次，姿态阶段按角度整体平移（旋转不改变相对档位）
+        for (int L = 0; L < levels; ++L)
+        {
+            const size_t n = mls[L].dir.size();
+            mls[L].bin.resize(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const cv::Point2f d = mls[L].dir[i];
+                double ang = std::atan2((double)d.y, (double)d.x);
+                if (ang < 0.0) ang += 2.0 * kPi;
+                int b = (int)(ang * (double)kDirBins / (2.0 * kPi));
+                if (b < 0) b = 0;
+                if (b >= kDirBins) b = kDirBins - 1;
+                mls[L].bin[i] = (unsigned char)b;
+            }
+        }
+
+        // ---------- 3b. 诚实重评专用点集（最细层全量）----------
+        // 粗层 1024 点的上限是为了压住 (位置 × 姿态) 的乘法成本；但步骤 9 的「诚实重评」
+        // 只对 keep 个候选各跑一遍，成本与粗扫无关。原实现两步共用 mls[0]：
+        // 模型训练了 1500 点（默认 max_features）却在最细层被 stride=2 抽成 750 点，
+        // 等于「对外 score 只用了一半特征证据」。这里单独建一份全量点集，
+        // 只给重评用 —— 精化 / 亚像素仍走抽稀集，速度一点不加。
+        ModelLevel mlScore;
+        {
+            size_t stride = 1;
+            if (pointCount > kMaxPointsFinest) stride = pointCount / kMaxPointsFinest + 1;
+            mlScore.pts.reserve(pointCount / stride + 1);
+            mlScore.dir.reserve(pointCount / stride + 1);
+            for (size_t i = 0; i < pointCount; i += stride)
+            {
+                mlScore.pts.push_back(ctx->shape.pts[i]);
+                mlScore.dir.push_back(ctx->shape.dir[i]);
+            }
+        }
+
         // 贪婪系数：越大越激进（越快）；<=0 表示只用理论上界，不启用启发式
         double greediness = param->greediness;
         if (greediness < 0.0) greediness = 0.0;
         if (greediness > 1.0) greediness = 1.0;
-
-        // ---------- 5. 搜索范围（原图坐标，限制中心可出现的位置）----------
-        int rx = 0, ry = 0, rw = iw, rh = ih;
-        // 注意：这里的 ROI 限制的是「模板中心」可出现的位置，不是模板外接框
-        if (searchRoi != 0 && searchRoi[2] > 0 && searchRoi[3] > 0)
-        {
-            rx = std::max(0, searchRoi[0]);
-            ry = std::max(0, searchRoi[1]);
-            rw = std::min(searchRoi[2], iw - rx);
-            rh = std::min(searchRoi[3], ih - ry);
-            if (rw <= 0 || rh <= 0)
-            {
-                SetError(ctx, "invalid search roi");
-                return VA_ERR_ARG;
-            }
-        }
 
         // ---------- 6. 最粗层全局扫描 ----------
         // 循环次序：位置在外、姿态在内 —— 这样才能拿「本位置当前最优」当剪枝阈值，
@@ -1063,6 +1227,15 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             const double rad = 0.5 * std::sqrt(tw * tw + th * th) * maxScale * f0;
             const cv::Mat& S = edgeSup.sum;
 
+            // 从「边缘像素数 > 0」加强到「边缘像素数够不够撑到粗层阈值」：
+            //   任何被采纳的位姿都必须通过覆盖率下限 inFrame >= n*kMinCoverage，
+            //   而 sum <= cnt（每个模板点至多贡献 1，且贡献点必定落在某个带梯度的像素上），
+            //   所以 score = sum/inFrame <= cnt/(n*kMinCoverage)。
+            //   cnt 达不到 thrCoarse*n*kMinCoverage 的位置，**所有**姿态都必然低于粗层阈值，
+            //   整块跳过 —— 这是严格上界，不是启发式，不会漏掉真目标。
+            const double nPts = (double)mls[L0].pts.size();
+            const double needCnt = (double)coarseThr * nPts * (double)kMinCoverage;
+
             for (int p = 0; p < nPos; ++p)
             {
                 int bx0 = (int)std::floor((double)posX[(size_t)p] - rad);
@@ -1081,7 +1254,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                 const int* r0 = S.ptr<int>(by0);
                 const int* r1 = S.ptr<int>(by1 + 1);
                 const int cnt = r1[bx1 + 1] - r1[bx0] - r0[bx1 + 1] + r0[bx0];
-                if (cnt <= 0) posKeep[(size_t)p] = 0;
+                if ((double)cnt < needCnt) posKeep[(size_t)p] = 0;
             }
         }
 
@@ -1092,6 +1265,9 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         if (chunkMax > nPoses) chunkMax = nPoses;
 
         std::chrono::steady_clock::time_point tCoarse = std::chrono::steady_clock::now();
+        // 姿态表（旋转/缩放后的点集）构建耗时：单独累计，便于回答
+        // 「把这部分预计算/落盘能不能提速」——实测占比只有粗扫的百分之一量级。
+        double msPoseBuild = 0.0;
         for (size_t p0 = 0; p0 < nPoses; p0 += chunkMax)
         {
             // 本块参与比较的姿态表（预计算一次，块内所有位置复用）
@@ -1101,6 +1277,8 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             poses.reserve(chunkMax);
             poseA.reserve(chunkMax);
             poseS.reserve(chunkMax);
+
+            std::chrono::steady_clock::time_point tPose = std::chrono::steady_clock::now();
 
             for (size_t k = p0; k < nPoses && poses.size() < chunkMax; ++k)
             {
@@ -1116,6 +1294,9 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                 poseS.push_back(sc);
             }
 
+            msPoseBuild += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - tPose).count();
+
             const size_t nChunk = poses.size();
             const Pose* __restrict pPoses = poses.empty() ? 0 : &poses[0];
             const float* pPoseA = poseA.empty() ? 0 : &poseA[0];
@@ -1126,6 +1307,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 #endif
             for (int p = 0; p < nPos; ++p)
             {
+                if (DeadlineHit()) continue;         // 软超时：本位置直接跳过（并行区内不能 break）
                 if (!posKeep[(size_t)p]) continue;   // 6b 的严格位置预筛：必然 0 分
 
                 const float px = (float)posX[(size_t)p];
@@ -1159,6 +1341,14 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tCoarse).count()
             : 0.0;
 
+        // 软超时：粗扫已被打断（每个位置都在 continue，循环很快空转完），这里直接收工。
+        // 【为什么在粗扫之后判一次】精化（最细层 × 25 位置 × 25 姿态 × 全点）与粗扫同量级，
+        // 不在这里挡住，超时后还要再白烧一遍同样长的时间。
+        if (DeadlineHit())
+            return SetErrorEx(ctx, VA_ERR_ALGO_TIMEOUT, "形状匹配", "TimeoutMs",
+                              "超时", "在超时前完成",
+                              "算法在超时时间内未完成搜索（粗扫被中断）；请缩小搜索 ROI / 减少角度或缩放档位，或调大「超时(ms)」");
+
         std::vector<Candidate> cands;
         cands.reserve(1024);
         for (int p = 0; p < nPos; ++p)
@@ -1181,13 +1371,15 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             for (int p = 0; p < nPos; ++p) if (posKeep[(size_t)p]) ++keptPos;
             int edgeTotal = 0;
             if (edgeSup.valid) edgeTotal = edgeSup.sum.at<int>(lh, lw);
-            std::fprintf(stderr, "[shape] levels=%d L0=%d nPos=%d keep=%d nPoses=%zu fast=%d cands=%zu "
-                         "build=%.1fms coarse=%.1fms edgePx=%d  best: ",
-                         levels, L0, nPos, keptPos, nPoses, (int)useFast, cands.size(), msBuild, msCoarse,
-                         edgeTotal);
+            std::fprintf(stderr, "[shape] levels=%d L0=%d crop=(%d,%d %dx%d) nPos=%d keep=%d nPoses=%zu fast=%d cands=%zu "
+                         "build=%.1fms pose=%.2fms(%lldpts) coarse=%.1fms edgePx=%d  best: ",
+                         levels, L0, cropX, cropY, cropW, cropH, nPos, keptPos, nPoses, (int)useFast,
+                         cands.size(), msBuild, msPoseBuild,
+                         (long long)g_posePoints.load(std::memory_order_relaxed), msCoarse, edgeTotal);
             for (size_t i = 0; i < cands.size() && i < 6; ++i)
                 std::fprintf(stderr, "(%.1f,%.1f a=%.0f s=%.3f) ",
-                             cands[i].cx, cands[i].cy, cands[i].angle, cands[i].score);
+                             cands[i].cx + (double)cropX, cands[i].cy + (double)cropY,
+                             cands[i].angle, cands[i].score);
             std::fprintf(stderr, "\n");
         }
 
@@ -1248,6 +1440,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 #endif
             for (int ci = 0; ci < (int)cands.size(); ++ci)
             {
+                if (DeadlineHit()) continue;      // 软超时：不再精化剩余候选
                 const Candidate c = cands[(size_t)ci];
 
                 double bestScore = 0.0;
@@ -1256,12 +1449,16 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                 double bestAngle = c.angle;
                 double bestScale = c.scale;
 
+                // 复用同一个 Pose：BuildPose 内部是 resize（容量不变就不重新分配），
+                // 原实现每个姿态都新建一个 Pose，等于每个 (候选 × 角度 × 缩放) 做 4 次堆分配 ——
+                // 8 候选 × 25 姿态 × 2 层 ≈ 1600 次分配，纯属白给。
+                Pose pose;
+
                 // 先用当前位姿在该层评分，作为后续比较的基准
                 {
-                    Pose p0;
-                    BuildPose(mls[L], (float)c.angle, (float)c.scale, p0);
+                    BuildPose(mls[L], (float)c.angle, (float)c.scale, pose);
                     float s0 = 0.0f;
-                    if (ScorePose(grads[L], p0, (float)(c.cx * f), (float)(c.cy * f),
+                    if (ScorePose(grads[L], pose, (float)(c.cx * f), (float)(c.cy * f),
                                   0.0f, 0.0f, s0))
                         bestScore = s0;
                 }
@@ -1276,8 +1473,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                         if (sStep > 0.0) s = ClampD(c.scale + so * sStep, sMin, sMax);
                         else if (so != 0) continue;
 
-                        Pose pl;
-                        BuildPose(mls[L], (float)a, (float)s, pl);
+                        BuildPose(mls[L], (float)a, (float)s, pose);
 
                         for (int dy = -win; dy <= win; ++dy)
                         {
@@ -1287,7 +1483,7 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                                 const float ccy = (float)(c.cy * f) + (float)dy;
 
                                 float sc = 0.0f;
-                                if (ScorePose(grads[L], pl, ccx, ccy,
+                                if (ScorePose(grads[L], pose, ccx, ccy,
                                               (float)bestScore, avgFine, sc))
                                 {
                                     if (sc > bestScore)
@@ -1320,8 +1516,10 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 #endif
             for (int ci = 0; ci < (int)cands.size(); ++ci)
             {
+                if (DeadlineHit()) continue;      // 软超时：不再精化剩余候选
                 const Candidate c = cands[(size_t)ci];
 
+                // 同一个 Pose 走完「位置精化 → 角度/缩放精化」两段（容量复用，不重复分配）
                 Pose pl;
                 BuildPose(mls[0], (float)c.angle, (float)c.scale, pl);
 
@@ -1366,11 +1564,10 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
                     {
                         const double s = useS ? ClampD(c.scale + si * subS, sMin, sMax) : c.scale;
 
-                        Pose pa;
-                        BuildPose(mls[0], (float)a, (float)s, pa);
+                        BuildPose(mls[0], (float)a, (float)s, pl);
 
                         float sc = 0.0f;
-                        if (ScorePose(grads[0], pa, (float)bestCx, (float)bestCy,
+                        if (ScorePose(grads[0], pl, (float)bestCx, (float)bestCy,
                                       (float)bestScore, avgFine, sc))
                         {
                             if (sc > bestScore)
@@ -1395,15 +1592,18 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         // 上面每一级都带阈值剪枝，返回的分数只是「不低于真实分」的近似值（剪得越早越乐观）。
         // 下游拿 score 判 OK/NG，必须是真实分：这里用 threshold=0、abandonAvg=0
         // （即不剪枝）在最细层重算一次。代价 = 候选数 × 全点评估，相对粗扫可忽略。
+        // 用 mlScore（全量特征点，见 3b）而不是 mls[0]（抽稀集）：重评是对外口径，
+        // 应当吃掉训练时的全部证据，多出来的成本只有 keep 个候选各一遍。
         {
 #ifdef _OPENMP
             #pragma omp parallel for schedule(dynamic)
 #endif
             for (int ci = 0; ci < (int)cands.size(); ++ci)
             {
+                if (DeadlineHit()) continue;      // 软超时：不再重评剩余候选
                 Candidate& c = cands[(size_t)ci];
                 Pose pl;
-                BuildPose(mls[0], (float)c.angle, (float)c.scale, pl);
+                BuildPose(mlScore, (float)c.angle, (float)c.scale, pl);
 
                 float s = 0.0f;
                 if (ScorePose(grads[0], pl, (float)c.cx, (float)c.cy, 0.0f, 0.0f, s))
@@ -1480,13 +1680,24 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 
         for (int i = 0; i < n; ++i)
         {
-            outMatches[i].cx = accepted[i].cx;
-            outMatches[i].cy = accepted[i].cy;
+            // 裁切坐标 → 原图坐标（未裁切时 cropX/cropY 恒为 0，行为与改动前完全一致）
+            outMatches[i].cx = accepted[i].cx + (double)cropX;
+            outMatches[i].cy = accepted[i].cy + (double)cropY;
             outMatches[i].angle = accepted[i].angle;
             outMatches[i].scale = accepted[i].scale;
             outMatches[i].score = accepted[i].score;
             outMatches[i].width = ctx->shape.width * accepted[i].scale;
             outMatches[i].height = ctx->shape.height * accepted[i].scale;
+        }
+
+        // 诊断：整次调用累计被旋转缩放的模板点数（粗层姿态表 + 各层精化 + 亚像素）。
+        // 按实测 8~12 ns/点（4 张 float 表的写 + 读回）即可估出"姿态计算"在大盘里的占比，
+        // 用来判断"把旋转缩放特征预存下来"值不值得做。
+        if (trace)
+        {
+            const long long pts = g_posePoints.load(std::memory_order_relaxed);
+            std::fprintf(stderr, "[shape] pose-total=%lldpts (~%.2f~%.2fms)\n",
+                         pts, (double)pts * 8.0 / 1e6, (double)pts * 12.0 / 1e6);
         }
 
         *outCount = n;

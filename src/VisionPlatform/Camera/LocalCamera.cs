@@ -299,6 +299,8 @@ namespace VisionPlatform.Camera
         /// </summary>
         private void GrabLoop()
         {
+            PerfProbe.Mark("采集:本机");
+
             int failStreak = 0;
 
             while (!_stopFlag)

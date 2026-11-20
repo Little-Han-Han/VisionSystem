@@ -107,6 +107,12 @@ namespace VisionPlatform.Recipe
                 string path = Path.Combine(dir, "recipe.json");
                 Json.SaveToFile(path, recipe);
 
+                // 保存配方 = 保存整个工程：通讯与流程一并写进方案目录（comm.json / flows.json）。
+                // 这样"把 A 机工程搬到 B 机"只需拷 Recipes\<方案名> 一个目录。
+                // 失败不影响配方本身落盘，只在日志里留痕 —— 配方永远是能保存的。
+                OpResult bundle = ProjectBundle.WriteProjectFiles(recipe.Name);
+                if (!bundle.Success) Logger.Warn("工程配置未写入方案目录：" + bundle.Message);
+
                 Logger.Info("已保存配方：" + recipe.Name);
                 return OpResult.Ok("已保存到 " + path);
             }

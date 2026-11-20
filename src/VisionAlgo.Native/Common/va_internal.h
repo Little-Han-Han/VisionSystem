@@ -11,10 +11,16 @@
 #include <vector>
 
 #include "va_types.h"
+// 错误码（VA_ERR_*）与结构化错误：内部实现到处要用，统一在这里引入
+#include "va_error.h"
 // OpenVINO C++ 推理运行时（YOLO 目标检测用）
 #include <openvino/openvino.hpp>
 // 形状匹配的参数与结果结构体声明在对外头文件里，内部实现直接复用
 #include "algo/va_shape.h"
+// 模板匹配（NCC）的参数结构体（VA_MatchParam）
+#include "algo/va_match.h"
+// 条码 / 二维码识别的参数与结果结构体（VA_BarcodeParam / VA_Barcode）
+#include "algo/va_barcode.h"
 // 相机对外结构体与接口声明在对外头文件里，内部实现直接复用
 #include "algo/va_camera.h"
 // 卡尺的对外结构体（VA_CaliperParam / VA_CaliperPoint）声明在对外头文件里
@@ -33,6 +39,20 @@
 #include "algo/va_ocrdl.h"
 
 namespace va {
+
+// ---------------------------------------------------------------------------
+//  全局并行预算（由 va_set_threads 设置，0 = 不限制/用库默认）
+//  【为什么要一个全局量】CPU 上真正开线程池的有两套东西：
+//    ① OpenCV 的 parallel_for（cv::setNumThreads 控制）；
+//    ② OpenVINO 推理（ov::Core 默认按物理核数开自己的线程池，**不受** setNumThreads 影响）。
+//  宿主本来就是"每条流程一个线程"并行，两套再各自开满核 ⇒ N 条流程 × 核数 个线程抢核，
+//  实测 3 条流程吃满 10.9 核却只有 3 fps。这里让两者共用同一个预算。
+// ---------------------------------------------------------------------------
+extern int g_vaThreads;
+
+// 把并行预算应用到 OpenVINO 的 CPU 插件（建 ov::Core 之后、compile_model 之前调用）。
+// 预算是 0（未设置）时保持库默认，不做任何改动。
+void ApplyThreadBudget(ov::Core& core);
 
 // 形状匹配模型：模板 ROI 内的边缘点（相对中心）与其单位梯度方向
 struct ShapeModel {
@@ -64,6 +84,9 @@ struct OcrState {
     VA_OcrParam             param;      // va_ocr_set_param 时保存，作为缺省值
     std::vector<cv::Mat>    templates;  // 归一化后的单通道字符模板
     std::vector<std::string> labels;    // 与 templates 一一对应
+    // 每个模板「中心 (W-2)x(H-2) 子区」的标准差，训练时算一次。
+    // 识别阶段一张图要跑 N(模板) x M(字符) 次相关，每次都重算模板标准差纯属浪费。
+    std::vector<double>     tplStd;
 
     OcrState() { std::memset(&param, 0, sizeof(param)); }
 };
@@ -119,6 +142,13 @@ struct OcrDlState {
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
+    // ---- 结构化错误（va_get_error_info 的数据源）----
+    // 只保留"最近一次"；每次 SetError 都会整体重置，避免上一次的模块名/参数名残留。
+    int         lastCode;      // VA_ERR_*；0 = 没出过错
+    std::string lastModule;    // 哪个模块/步骤
+    std::string lastParam;     // 哪个参数
+    std::string lastValue;     // 实际值
+    std::string lastExpect;    // 期望口径
     cv::Mat     tmpl;
     bool        hasTemplate;
     ShapeModel  shape;              // 形状匹配模型
@@ -130,7 +160,7 @@ struct Context {
     DlState         depth;           // 深度估计
     OcrDlState      ocrdl;           // 深度学习 OCR（PaddleOCR）
 
-    Context() : hasTemplate(false) {}
+    Context() : lastCode(0), hasTemplate(false) {}
 };
 
 // 相机句柄：与算法 Context 平行、相互独立（见架构设计决策 2）。
@@ -180,14 +210,22 @@ cv::Mat AsGray(const cv::Mat& input);
 // 按 128 阈值化
 cv::Mat Binarize(const cv::Mat& gray);
 
-// 取面积最大的轮廓；没有轮廓时填充 err 并返回 false
-bool    LargestContour(const cv::Mat& gray, std::vector<cv::Point>& out, std::string& err);
+// 取面积最大的轮廓；没有轮廓时填充 err 并返回 false。
+// preBinarized=true 表示 gray 已经是 0/255 二值图，跳过 Binarize 的重复阈值化
+// （识别链路已经把二值图算出来了，再按 128 阈值一遍只是白白多一次全图扫描）。
+bool    LargestContour(const cv::Mat& gray, std::vector<cv::Point>& out, std::string& err,
+                       bool preBinarized = false);
 
 // 修正为不小于 3 的奇数
 int     OddAtLeast3(int v);
 
 void    SetError(Context* ctx, const char* msg);
 void    SetError(Context* ctx, const std::exception& e);
+
+// 结构化报错：写 code + 哪个模块 + 哪个参数 + 实际值 + 期望，并返回 code（便于 `return SetErrorEx(...)`）。
+// message 传 NULL 时自动拼成「模块：参数=实际值（期望：…）」。
+int     SetErrorEx(Context* ctx, int code, const char* module, const char* param,
+                   const char* value, const char* expect, const char* message = 0);
 
 // ---------------------- 算法实现 ----------------------
 // 由 src/vision_algo.cpp 中的导出函数转发调用，签名与导出函数一致，
@@ -209,7 +247,17 @@ int TrainTemplate(Context* ctx, const VA_Image* gray, const int* roi);
 
 int MatchTemplate(Context* ctx, const VA_Image* gray, VA_MatchResult* out);
 
+// NCC 的多姿态版本（角度 / 缩放 / 金字塔 / 多目标）。
+int MatchTemplateEx(Context* ctx, const VA_Image* gray, const VA_MatchParam* param,
+                    VA_MatchResult* out, int maxCount, int* outCount);
+
 int EdgeCount(Context* ctx, const VA_Image* gray, int scanRow, int delta, int* outCount);
+
+// ---------------------- 条码 / 二维码 ----------------------
+// zxing-cpp 只读识别；param 为 NULL 等价于「全部码制 + 多方向 + 反色」。
+int BarcodeRead(Context* ctx, const VA_Image* gray, const VA_BarcodeParam* param,
+                VA_Barcode* out, int maxCount, int* outCount);
+const char* BarcodeVersion();
 
 // ---------------------- 图像滤波 ----------------------
 // 均值 / 高斯 / 中值 / 双边 / USM 锐化 / 自定义 3x3 核，后接可选形态学。
@@ -324,6 +372,24 @@ int ClearShapeModel(Context* ctx);
 int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* param,
                    const int* searchRoi, VA_ShapeMatch* outMatches,
                    int maxCount, int* outCount);
+
+// ---------------------------------------------------------------------------
+//  节点级软超时（协作式中断）
+//  【放置位置】放在 namespace va 里而不是新建一个模块，是因为它要出现在**所有** algo_*.cpp
+//  的循环里；单独一个头会让每个算法多一行 include，改这里一处即可。
+//  实现在 Common/va_internal.cpp（同一份 thread_local，跨 TU 唯一）。
+// ---------------------------------------------------------------------------
+
+/* 设置/清除本线程的截止时间（毫秒，<=0 清除）。由导出函数 va_set_deadline_ms 调用。 */
+void DeadlineSet(int ms);
+
+/* 当前剩余毫秒（未设超时返回 -1）。仅用于诊断/摘要。 */
+int DeadlineRemainMs();
+
+/* 检查点：到点返回 true。
+ * 【成本】每 8 次调用才读一次 steady_clock（~20ns），摊到每次 <3ns —— 比一次浮点乘还便宜，
+ * 所以可以放心放进内层循环。 */
+bool DeadlineHit();
 
 } // namespace va
 

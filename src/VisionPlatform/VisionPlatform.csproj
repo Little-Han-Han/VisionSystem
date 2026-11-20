@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -59,7 +59,20 @@
     <Compile Include="Calibration\RotationCenterSolver.cs" />
     <Compile Include="Calibration\CalibSolver.cs" />
     <Compile Include="Communication\CommQuery.cs" />
+    <Compile Include="Communication\CommActionEditorForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Communication\CommAutomationForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Communication\CommJobEngine.cs" />
+    <Compile Include="Communication\CommHub.cs" />
+    <Compile Include="Communication\CommPointMapper.cs" />
+    <Compile Include="Communication\CommProtocolRegistry.cs" />
+    <Compile Include="Communication\CommSendQueue.cs" />
+    <Compile Include="Communication\CommTemplate.cs" />
     <Compile Include="Communication\CommRegistry.cs" />
+    <Compile Include="Communication\CommRuntime.cs" />
     <Compile Include="Communication\CommState.cs" />
     <Compile Include="Communication\ModbusData.cs" />
     <Compile Include="Communication\ModbusTcpClient.cs" />
@@ -73,6 +86,7 @@
     <Compile Include="Core\Lang.cs" />
     <Compile Include="Core\LogEntry.cs" />
     <Compile Include="Core\Logger.cs" />
+    <Compile Include="Core\PerfProbe.cs" />
     <Compile Include="Data\LogDb.cs" />
     <Compile Include="Data\Sqlite.cs" />
     <Compile Include="Core\OpResult.cs" />
@@ -80,6 +94,7 @@
     <Compile Include="Flow\FlowModule.cs" />
     <Compile Include="Flow\FlowPortSchema.cs" />
     <Compile Include="Flow\FlowOrder.cs" />
+    <Compile Include="Flow\FlowPasteService.cs" />
     <Compile Include="Flow\FlowValidator.cs" />
     <Compile Include="Flow\FlowOutputChannel.cs" />
     <Compile Include="Flow\FlowRunContext.cs" />
@@ -93,9 +108,12 @@
     <Compile Include="Flow\FlowRunController.cs" />
     <Compile Include="Flow\FlowRunManager.cs" />
     <Compile Include="Flow\FlowRunner.cs" />
+    <Compile Include="Flow\RoiAffineMap.cs" />
+    <Compile Include="Flow\OcrTrainSession.cs" />
     <Compile Include="Flow\ImageFolderSource.cs" />
     <Compile Include="Flow\FlowRunSlot.cs" />
     <Compile Include="Flow\FlowShapes.cs" />
+    <Compile Include="Flow\OcrCharLibraryFile.cs" />
     <Compile Include="Flow\OcrCharStore.cs" />
     <Compile Include="Flow\OcrTemplateLoadResult.cs" />
     <Compile Include="Flow\FlowNodeMetrics.cs" />
@@ -116,8 +134,10 @@
     <Compile Include="..\SharedVersion.cs">
       <Link>Properties\SharedVersion.cs</Link>
     </Compile>
+    <Compile Include="Recipe\ProjectBundle.cs" />
     <Compile Include="Recipe\Recipe.cs" />
     <Compile Include="Recipe\RecipeStore.cs" />
+    <Compile Include="Recipe\SampleProject.cs" />
     <Compile Include="UI\AlgoForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -160,11 +180,8 @@
     <Compile Include="UI\OcrTemplateCard.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Include="UI\OcrTemplateForm.cs">
+    <Compile Include="UI\OcrCharTrainForm.cs">
       <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="UI\OcrTemplateForm.Designer.cs">
-      <DependentUpon>OcrTemplateForm.cs</DependentUpon>
     </Compile>
     <Compile Include="UI\NodeResultCache.cs" />
     <Compile Include="UI\ShapeLabelStyle.cs" />
@@ -261,6 +278,8 @@
     <PostBuildEvent>xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\VisionAlgo.Native.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
 xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\opencv_world455*.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
 xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
+if exist "$(ProjectDir)..\..\ThirdParty\Communication" if not exist "$(TargetDir)Communication" mkdir "$(TargetDir)Communication"
+if exist "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" "$(TargetDir)Communication\" &gt;nul 2&gt;&amp;1
 exit /b 0</PostBuildEvent>
   </PropertyGroup>
 </Project>

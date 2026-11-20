@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using VisionPlatform.Communication;
 using VisionPlatform.Core;
 
 namespace VisionPlatform.Flow
@@ -77,7 +78,9 @@ namespace VisionPlatform.Flow
         private const string CodePositionNoMatch = "W005";
         private const string CodeMultiShapeMatch = "W006";
         private const string CodeFollowPoseNoCorrect = "W007";
-
+        private const string CodeModbusTextSend = "E009";
+        private const string CodeModbusAddrLooksPort = "W009";
+        private const string CodeImageFileMissing = "E010";
         // ---------------------- 对外 API ----------------------
 
         /// <summary>
@@ -101,14 +104,21 @@ namespace VisionPlatform.Flow
                 return result;
             }
 
-            bool hasImageSource = false;
+            bool hasChainHead = false;
             foreach (FlowNode n in nodes)
             {
                 if (n == null) continue;
                 FlowNodeType t;
-                if (n.TryGetType(out t) && t == FlowNodeType.ImageSource) { hasImageSource = true; break; }
+                if (!n.TryGetType(out t)) continue;
+
+                // 图像源 / 读取点云都能作为链首：3D 流程只有点云节点时同样合法
+                if (t == FlowNodeType.ImageSource || t == FlowNodeType.PointCloudSource)
+                {
+                    hasChainHead = true;
+                    break;
+                }
             }
-            if (!hasImageSource)
+            if (!hasChainHead)
             {
                 result.Add(new FlowIssue(FlowIssueLevel.Error, CodeNoImageSource,
                     "流程缺少「图像源」节点，没有图像输入无法运行。"));
@@ -118,6 +128,12 @@ namespace VisionPlatform.Flow
             FlowOrderResult order = FlowOrder.Analyze(flow);
             foreach (FlowIssue e in order.Errors) result.Add(e);
             foreach (FlowIssue w in order.Warnings) result.Add(w);
+
+            // ---- ②b 通讯配置层：发送节点与链路协议是否对得上（E009 / W009） ----
+            AddCommIssues(nodes, result);
+
+            // ---- ②c 取图配置层：本地图片 / 文件夹路径是否真的存在（E010） ----
+            AddSourceIssues(nodes, result);
 
             // ---- ③ 连线层 ----
             Dictionary<string, PortSlot> inputs = new Dictionary<string, PortSlot>(StringComparer.Ordinal);
@@ -415,6 +431,7 @@ namespace VisionPlatform.Flow
                 case FlowPortKind.Number:   return "数值";
                 case FlowPortKind.BlobList: return "Blob 列表";
                 case FlowPortKind.Geometry: return "几何";
+                case FlowPortKind.PointCloud: return "点云";
                 case FlowPortKind.Any:      return "任意";
                 default:                    return kind.ToString();
             }
@@ -423,6 +440,107 @@ namespace VisionPlatform.Flow
         // ---------------------- 内部辅助 ----------------------
 
         /// <summary>被计入并去重后的节点表。</summary>
+        /// <summary>
+        /// 通讯配置层校验：发送节点指向 Modbus 端点、却选了「固定文本 / 格式文本」时提前报错。
+        /// <para>【为什么必须提前拦】这种配置运行时必然走到 <c>SendText</c>，得到
+        /// 「通讯「PLC」是 Modbus TCP，不支持文本发送」→ 整帧 NG，而 PLC 侧一个字节都没收到。
+        /// 现场看到的就是"发送信息一点反应都没有"，且无从判断是地址填错还是模式选错。</para>
+        /// <para>顺带把「把端口 502 填进寄存器地址」这种笔误点出来（502 是合法寄存器号，靠范围查不出来）。</para>
+        /// </summary>
+        private static void AddCommIssues(List<FlowNode> nodes, FlowValidationResult result)
+        {
+            foreach (FlowNode n in nodes)
+            {
+                if (n == null) continue;
+
+                FlowNodeType t;
+                if (!n.TryGetType(out t) || t != FlowNodeType.SendData) continue;
+
+                string commName = n.GetString("CommName", "");
+                if (string.IsNullOrWhiteSpace(commName)) continue;
+
+                string label = "节点「" + (string.IsNullOrEmpty(n.Name) ? (n.Id ?? "") : n.Name) + "」";
+                string mode = n.GetString("DataMode", "FixedText");
+
+                if (string.Equals(mode, "ModbusWrite", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (n.GetInt("MbAddress", -1) == 502)
+                    {
+                        result.Add(new FlowIssue(FlowIssueLevel.Warning, CodeModbusAddrLooksPort,
+                            label + "的寄存器地址是 502 —— 那是 Modbus 的端口号，不是寄存器地址；"
+                            + "这里要填 PLC 的保持寄存器号（0 起，例如结果位 20）。"));
+                    }
+                    continue;
+                }
+
+                CommEndpointConfig ep = CommRegistry.Config(commName);
+                if (ep == null) continue;
+                if (CommKind.Normalize(ep.Kind) != CommKind.ModbusTcp) continue;
+
+                result.Add(new FlowIssue(FlowIssueLevel.Error, CodeModbusTextSend,
+                    label + "要发给「" + commName + "」，但这条通讯是 Modbus TCP，只能写寄存器："
+                    + "请把「发送方式」改成「Modbus 写寄存器」（再填寄存器地址与写入值），"
+                    + "或把通讯换成 TCP 客户端 / 服务端。"));
+            }
+        }
+
+        /// <summary>
+        /// 取图层校验：图像源选了「本地图片文件 / 文件夹」但路径不存在时提前报错。
+        /// <para>【为什么必须提前拦】这类配置每轮都会在第一节点 NG（摘要"图像源：文件不存在"），
+        /// 后面整条链按策略跳过，预览区一片空白 —— 现场看到的就是"图像采集控件不更新、一直读不到图"，
+        /// 但真实原因藏在日志里的一行摘要，很容易被当成控件坏了。</para>
+        /// </summary>
+        private static void AddSourceIssues(List<FlowNode> nodes, FlowValidationResult result)
+        {
+            foreach (FlowNode n in nodes)
+            {
+                if (n == null) continue;
+
+                FlowNodeType t;
+                if (!n.TryGetType(out t) || t != FlowNodeType.ImageSource) continue;
+
+                string label = "节点「" + (string.IsNullOrEmpty(n.Name) ? (n.Id ?? "") : n.Name) + "」";
+                string source = n.GetString("Source", "Camera");
+
+                if (string.Equals(source, "File", StringComparison.OrdinalIgnoreCase))
+                {
+                    string path = n.GetString("FilePath", "");
+                    if (string.IsNullOrWhiteSpace(path))
+                    {
+                        result.Add(new FlowIssue(FlowIssueLevel.Error, CodeImageFileMissing,
+                            label + " 取图方式选了「本地图片文件」，但没有指定文件；请选择一张图片，或改回「流程绑定相机」。"));
+                        continue;
+                    }
+
+                    if (!System.IO.File.Exists(path))
+                    {
+                        result.Add(new FlowIssue(FlowIssueLevel.Error, CodeImageFileMissing,
+                            label + " 指定的图片不存在：" + path
+                            + "。文件被移动 / 改名 / 删掉都会这样，重新选一张即可"
+                            + "（换个目录或文件名时，流程不会自动跟着改）。"));
+                    }
+                    continue;
+                }
+
+                if (string.Equals(source, "Folder", StringComparison.OrdinalIgnoreCase))
+                {
+                    string dir = n.GetString("FolderPath", "");
+                    if (string.IsNullOrWhiteSpace(dir))
+                    {
+                        result.Add(new FlowIssue(FlowIssueLevel.Error, CodeImageFileMissing,
+                            label + " 取图方式选了「本地图片文件夹」，但没有指定目录。"));
+                        continue;
+                    }
+
+                    if (!System.IO.Directory.Exists(dir))
+                    {
+                        result.Add(new FlowIssue(FlowIssueLevel.Error, CodeImageFileMissing,
+                            label + " 指定的图片文件夹不存在：" + dir));
+                    }
+                }
+            }
+        }
+
         private static Dictionary<string, FlowNode> CollectNodes(List<FlowNode> nodes)
         {
             var byId = new Dictionary<string, FlowNode>(StringComparer.Ordinal);

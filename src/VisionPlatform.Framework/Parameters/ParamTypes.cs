@@ -137,6 +137,28 @@ namespace VisionPlatform.Flow
         /// </summary>
         public string DisabledReason { get; set; }
 
+        /// <summary>
+        /// 文件选择对话框的过滤器（仅 <see cref="NodeParamKind.File"/>；空 = 按 Key 猜）。
+        /// <para>
+        /// 【为什么要显式声明】以前是靠 Key 里是否含 "file"/"path"/"image"/"model" 来猜过滤器，
+        /// 于是「字符库文件」(.ocrtpl) 会被当成图片过滤器，用户根本选不到自己的库。
+        /// 参数表知道自己的文件是什么类型，就该由它直接说。
+        /// </para>
+        /// </summary>
+        public string FileFilter { get; set; }
+
+        /// <summary>
+        /// 文件扩展名（不含点；仅 <see cref="NodeParamKind.File"/>）。浏览后若路径缺少该后缀会自动补上，
+        /// 避免用户存出 <c>line1</c> 这种没有扩展名、下次又找不到的文件。
+        /// </summary>
+        public string FileExt { get; set; }
+
+        /// <summary>
+        /// 允许选择不存在的文件（仅 <see cref="NodeParamKind.File"/>）。
+        /// <para>库 / 配置这类"先定名字、保存时才创建"的文件必须为 true，否则用户无法新建。</para>
+        /// </summary>
+        public bool FileAllowCreate { get; set; }
+
         /// <summary>是否禁用（<see cref="DisabledReason"/> 非空即禁用）。</summary>
         public bool IsDisabled
         {

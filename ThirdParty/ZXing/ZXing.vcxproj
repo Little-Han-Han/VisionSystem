@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  zxing-cpp 2.3.0 —— 条码识别静态库（只读，编解码器全开、写端关闭）。
+
+  【为什么不用官方 CMake】本仓库是 MSBuild 传统 vcxproj 构建；CMake 的 VS 生成器在
+  本机探测不到 MSVC 工具链（No CMAKE_C_COMPILER），所以直接把 core\src 平铺成工程。
+  升级 zxing-cpp 时：覆盖 core\src，同步 core\src\Version.h 里的版本号，其余不用改
+  （源文件用通配符引入，增删 .cpp 不必改本文件）。
+
+  版本与特性开关的唯一来源是 core\src\Version.h（代替 CMake 的 configure_file）：
+  只定义 ZXING_READERS，不定义 ZXING_WRITERS —— 本项目只识别、不生成条码。
+-->
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{4B1D9C2E-7A3F-4E58-9B2D-6C1F8A0E3D71}</ProjectGuid>
+    <RootNamespace>ZXing</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)lib\x64\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\x64\$(Configuration)\</IntDir>
+    <TargetName>zxing</TargetName>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)core\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_SCL_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <WarningLevel>Level1</WarningLevel>
+      <SDLCheck>false</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <!-- 递归通配：core/src 下还有 aztec/datamatrix/oned/pdf417/qrcode/maxicode/libzueci 子目录，
+         漏掉任何一个都会在链接期报"无法解析的外部符号"（Reader::decode / zueci_eci_to_utf8）。
+         libzint 排除：那是**写端**依赖的 zint 桩，本项目只识别不生成，且它需要 zint 私有头。 -->
+    <ClCompile Include="core\src\**\*.cpp" />
+    <ClCompile Include="core\src\**\*.c" Exclude="core\src\libzint\**\*.c" />
+    <ClInclude Include="core\src\**\*.h" Exclude="core\src\libzint\**\*.h" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

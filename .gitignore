@@ -442,3 +442,6 @@ detect_diag.txt
 /tools/step1.txt
 /tools/*.log
 /tools/*_diag*.txt
+
+# zxing-cpp 静态库产物：由 ThirdParty/ZXing/ZXing.vcxproj 现场构建，不入库
+ThirdParty/ZXing/lib/

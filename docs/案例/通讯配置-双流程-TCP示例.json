@@ -1,0 +1,117 @@
+{
+  "Comm": {
+    "SchemaVersion": 2,
+    "Endpoints": [
+      {
+        "Name": "SIM-PLC",
+        "Kind": "TcpServer",
+        "Host": "",
+        "Port": 9000,
+        "SlaveId": 1,
+        "Enabled": true,
+        "AutoConnect": true,
+        "Framing": "Newline",
+        "TimeoutMs": 1000,
+        "ReconnectMs": 3000
+      }
+    ],
+    "Points": [
+      { "Name": "Line.Trigger", "Endpoint": "SIM-PLC", "Address": "", "Direction": "Read",  "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "", "Description": "收到 TRIG 触发" },
+      { "Name": "Line.Ack",     "Endpoint": "SIM-PLC", "Address": "", "Direction": "Read",  "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "", "Description": "收到 ACK 表示 MES 已收" },
+
+      { "Name": "Line.Ready",   "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "true",  "Description": "工位可接料（握手）" },
+      { "Name": "Line.Busy",    "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "工位检测中（握手）" },
+      { "Name": "Line.Fault",   "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "工位故障（握手）" },
+
+      { "Name": "Flow1.Ready",  "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "true",  "Description": "流程1空闲（自动绑定）" },
+      { "Name": "Flow1.Busy",   "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "流程1运行中（自动绑定）" },
+      { "Name": "Flow1.Fault",  "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "流程1中止（自动绑定）" },
+
+      { "Name": "Flow2.Ready",  "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "true",  "Description": "流程2空闲（自动绑定）" },
+      { "Name": "Flow2.Busy",   "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "流程2运行中（自动绑定）" },
+      { "Name": "Flow2.Fault",  "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "流程2中止（自动绑定）" },
+
+      { "Name": "Line.Heartbeat", "Endpoint": "SIM-PLC", "Address": "", "Direction": "Write", "Type": "String", "Length": 1, "WordOrder": "ABCD", "Scale": 1.0, "Offset": 0.0, "Default": "false", "Description": "每秒翻转" }
+    ],
+    "Messages": [
+      {
+        "Name": "ResultJson",
+        "Endpoint": "SIM-PLC",
+        "Mode": "Text",
+        "Format": "{\"line\":\"L1\",\"f1\":\"{Flow1.Passed}\",\"f2\":\"{Flow2.Passed}\",\"yield\":\"{Yield}\",\"time\":\"{Time}\"}",
+        "Terminator": "\\r\\n",
+        "Points": []
+      }
+    ],
+    "Jobs": [
+      {
+        "Name": "Startup",
+        "Enabled": true,
+        "Trigger": "Startup",
+        "IntervalMs": 1000,
+        "Flows": [],
+        "Mode": "Latest",
+        "WindowMs": 500,
+        "Point": "",
+        "Expect": "true",
+        "Actions": [
+          { "Kind": "SetPoint", "Target": "Line.Ready", "Value": "true",  "TimeoutMs": 1000, "ContinueOnError": true },
+          { "Kind": "SetPoint", "Target": "Line.Busy",  "Value": "false", "TimeoutMs": 1000, "ContinueOnError": true },
+          { "Kind": "SetPoint", "Target": "Line.Fault", "Value": "false", "TimeoutMs": 1000, "ContinueOnError": true }
+        ]
+      },
+      {
+        "Name": "Heartbeat",
+        "Enabled": true,
+        "Trigger": "Timer",
+        "IntervalMs": 1000,
+        "Flows": [],
+        "Mode": "Latest",
+        "WindowMs": 500,
+        "Point": "",
+        "Expect": "true",
+        "Actions": [
+          { "Kind": "SetPoint", "Target": "Line.Heartbeat", "Value": "toggle", "TimeoutMs": 1000, "ContinueOnError": true }
+        ]
+      },
+      {
+        "Name": "Trigger",
+        "Enabled": true,
+        "Trigger": "PointEdge",
+        "IntervalMs": 1000,
+        "Flows": [],
+        "Mode": "Latest",
+        "WindowMs": 500,
+        "Point": "Line.Trigger",
+        "Expect": "TRIG",
+        "Actions": [
+          { "Kind": "StartFlow", "Target": "F1", "Value": "", "TimeoutMs": 1000, "ContinueOnError": true },
+          { "Kind": "StartFlow", "Target": "F2", "Value": "", "TimeoutMs": 1000, "ContinueOnError": true }
+        ]
+      },
+      {
+        "Name": "Result",
+        "Enabled": true,
+        "Trigger": "ResultGroup",
+        "IntervalMs": 1000,
+        "Flows": [ "F1", "F2" ],
+        "Mode": "AllFresh",
+        "WindowMs": 1500,
+        "Point": "",
+        "Expect": "true",
+        "Actions": [
+          { "Kind": "SetPoint", "Target": "Line.Busy", "Value": "true", "TimeoutMs": 1000, "ContinueOnError": false },
+          { "Kind": "SetPoint", "Target": "Line.Ready", "Value": "false", "TimeoutMs": 1000, "ContinueOnError": false },
+          { "Kind": "SendMessage", "Target": "ResultJson", "Value": "", "TimeoutMs": 1000, "ContinueOnError": false },
+          { "Kind": "WaitPoint", "Target": "Line.Ack", "Value": "ACK", "TimeoutMs": 5000, "ContinueOnError": false },
+          { "Kind": "SetPoint", "Target": "Line.Busy", "Value": "false", "TimeoutMs": 1000, "ContinueOnError": true },
+          { "Kind": "SetPoint", "Target": "Line.Ready", "Value": "true", "TimeoutMs": 1000, "ContinueOnError": true }
+        ]
+      }
+    ],
+    "FlowBindings": [
+      { "Flow": "F1", "Endpoint": "SIM-PLC", "BusyPoint": "Flow1.Busy", "ReadyPoint": "Flow1.Ready", "FaultPoint": "Flow1.Fault", "Enabled": true },
+      { "Flow": "F2", "Endpoint": "SIM-PLC", "BusyPoint": "Flow2.Busy", "ReadyPoint": "Flow2.Ready", "FaultPoint": "Flow2.Fault", "Enabled": true }
+    ]
+  }
+}

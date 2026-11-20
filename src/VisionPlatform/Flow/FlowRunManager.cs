@@ -62,6 +62,28 @@ namespace VisionPlatform.Flow
             }
         }
 
+        /// <summary>
+        /// 正在跑某一轮（<see cref="FlowSlotStatus.Running"/>）的槽数。
+        /// <para>触发式模式下用它区分「有空闲、在等触发」与「正在执行本轮」，
+        /// 界面状态栏据此显示「等待触发」还是「运行中」。0 与 <see cref="RunningCount"/> 之差
+        /// 就是空闲等触发的槽数（暂停 / 启动中的槽也计入后者）。</para>
+        /// </summary>
+        public static int ExecutingCount
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    int n = 0;
+                    foreach (FlowRunSlot s in Slots.Values)
+                    {
+                        if (s != null && s.Status == FlowSlotStatus.Running) n++;
+                    }
+                    return n;
+                }
+            }
+        }
+
         /// <summary>线程安全快照（副本）。</summary>
         public static List<FlowRunSlot> Snapshot()
         {
@@ -99,7 +121,7 @@ namespace VisionPlatform.Flow
         /// </summary>
         public static OpResult StartOne(string flowId)
         {
-            return StartOne(flowId, false);
+            return StartOne(flowId, false, false);
         }
 
         /// <summary>
@@ -108,6 +130,16 @@ namespace VisionPlatform.Flow
         /// （满足主界面连续运行「所有流程同步运行」的诉求），而单条启动仍受上限约束。
         /// </summary>
         public static OpResult StartOne(string flowId, bool ignoreLimit)
+        {
+            return StartOne(flowId, ignoreLimit, false);
+        }
+
+        /// <summary>
+        /// 启动一条流程（可指定触发式）。
+        /// <para><paramref name="triggered"/>=true：线程起来后<strong>等触发</strong>，触发一次跑一轮；
+        /// false：连续运行（原行为）。</para>
+        /// </summary>
+        public static OpResult StartOne(string flowId, bool ignoreLimit, bool triggered)
         {
             FlowDefinition flow = FindFlow(flowId);
             if (flow == null) return OpResult.Fail("流程不存在（Id=" + (flowId ?? "") + "），请刷新流程列表");
@@ -160,7 +192,7 @@ namespace VisionPlatform.Flow
             FlowRunSlot slot = null;
             try
             {
-                slot = new FlowRunSlot(flow);
+                slot = new FlowRunSlot(flow, triggered);
 
                 lock (Sync)
                 {
@@ -208,6 +240,45 @@ namespace VisionPlatform.Flow
             return OpResult.Ok("流程「" + flow.Name + "」已启动");
         }
 
+        /// <summary>
+        /// 触发一条流程执行<strong>一轮</strong>（产线握手的核心入口）。
+        /// <para>
+        /// 【三种情况】
+        /// ① 槽已按触发式运行 → 只放行一轮（正在跑则丢弃本次触发，不排队）；
+        /// ② 槽还没起来（首次触发）→ 启动一条触发式槽并立即放行；
+        /// ③ 槽是连续运行（调试模式）→ 忽略触发（它本来就在跑），返回成功避免刷错误日志。
+        /// </para>
+        /// <para>【为什么不能再用 StartOne】旧实现里「外部触发」直接 <c>StartOne</c> 起连续运行的槽，
+        /// 结果一次触发就让流程永久循环 —— 这正是"不需要触发也在跑"的根因。</para>
+        /// </summary>
+        public static OpResult Trigger(string flowIdOrName)
+        {
+            FlowDefinition flow = FindFlow(flowIdOrName);
+            if (flow == null) return OpResult.Fail("找不到流程：" + (flowIdOrName ?? ""));
+
+            FlowRunSlot slot = Get(flow.Id);
+            if (slot != null && slot.IsActive)
+            {
+                if (!slot.TriggeredMode)
+                    return OpResult.Ok("流程「" + flow.Name + "」正在连续运行，忽略触发");
+
+                return slot.Trigger()
+                    ? OpResult.Ok("已触发流程「" + flow.Name + "」")
+                    : OpResult.Fail("流程「" + flow.Name + "」正忙或已暂停，本次触发被丢弃");
+            }
+
+            // 首次触发：槽还不存在 → 起一条触发式槽，再放行一轮
+            OpResult started = StartOne(flow.Id, false, true);
+            if (started == null || !started.Success) return started;
+
+            slot = Get(flow.Id);
+            if (slot == null) return OpResult.Fail("流程「" + flow.Name + "」启动后未找到运行槽");
+
+            return slot.Trigger()
+                ? OpResult.Ok("已启动并触发流程「" + flow.Name + "」")
+                : OpResult.Fail("流程「" + flow.Name + "」启动后触发失败");
+        }
+
         /// <summary>停止一条流程（置停止标志 → Join → 释放租约 + Dispose 专属执行器）。</summary>
         public static OpResult StopOne(string flowId)
         {
@@ -253,15 +324,103 @@ namespace VisionPlatform.Flow
         // =====================================================================
 
         /// <summary>
+        /// 按"要并行跑几条流程"给算法内部的 OpenCV 并行线程分配额度。
+        /// <para>
+        /// 【为什么必须做】OpenCV 默认吃满所有核。宿主本来就是每条流程一个线程并行，
+        /// 每条流程内部再开满核 ⇒ N 条流程 = N×核数 个线程抢 核数 个核。
+        /// 实测（3 条流程 / 12 核）：不限制时进程吃满 **10.5 核**，单圈算法 0.6~1.1 秒，
+        /// 总产出只有 3 fps —— 全耗在互相抢锁和缓存颠簸上，比串行还慢。
+        /// 按 核数 / 流程数 分配后，同样的活 CPU 反而降下来、节拍更稳。
+        /// </para>
+        /// <para>可用环境变量 <c>VA_ALGO_THREADS=n</c> 强制指定（n=0 表示串行），便于现场对比。</para>
+        /// </summary>
+        /// <summary>
+        /// 当前分配给"单条流程"的算法并行度（0 = 未设置）。
+        /// <para>OpenMP 的线程数设置是<strong>按线程</strong>生效的（set_num_threads 是线程局部状态），
+        /// 所以每条流程线程启动时还要再调一次 <see cref="Native.VisionAlgo.SetThreads"/>，
+        /// 否则算法里的 `#pragma omp parallel for` 仍按物理核数开满。</para>
+        /// </summary>
+        public static int AlgoThreads { get; private set; }
+
+        private static void ApplyAlgoThreadBudget(int flowCount)
+        {
+            int threads;
+
+            // 优先级：环境变量（现场临时对比）> appconfig 的 Algorithm.MaxThreads > 自动
+            string raw = Environment.GetEnvironmentVariable("VA_ALGO_THREADS");
+            int forced;
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out forced) && forced >= 0 && forced <= 64)
+            {
+                threads = forced;
+            }
+            else
+            {
+                int configured = 0;
+                try
+                {
+                    if (ConfigStore.Current != null && ConfigStore.Current.Algorithm != null)
+                        configured = ConfigStore.Current.Algorithm.MaxThreads;
+                }
+                catch (Exception) { }
+
+                if (configured > 0)
+                {
+                    threads = Math.Min(configured, 64);
+                }
+                else
+                {
+                    // 自动：先定"整个软件可用多少核"，再按流程数平分 ——
+                    // 而不是"每条流程都能拿一半核"。后者在 4 条流程时仍然会吃满整机。
+                    //   总预算 = 核数/2（上限 8，至少 2）；单流程 = 总预算 / 流程数（至少 1）
+                    // 依据：小图（1280×960）上并行收益很快见顶，多开的线程只在同步上空烧，
+                    // 实测同一流程 12 线程 8.3fps/11.5 核 与 2 线程 3.4fps/2.14 核，
+                    // 每帧 CPU 成本差 2.2 倍。
+                    int cores = Environment.ProcessorCount;
+                    int budget = Math.Max(2, Math.Min(8, cores / 2));
+                    threads = Math.Max(1, budget / Math.Max(1, flowCount));
+                }
+            }
+
+            AlgoThreads = threads;
+            int applied = Native.VisionAlgo.SetThreads(threads);
+            if (applied >= 0)
+            {
+                Logger.Info(string.Format(
+                    "算法并行度：按 {0} 条流程分配 → OpenCV 线程数 {1}（生效 {2}，本机 {3} 核）",
+                    flowCount, threads, applied, Environment.ProcessorCount));
+            }
+        }
+
+        /// <summary>
         /// 启动「当前产品过滤后 &amp; Enabled=true」的全部流程。
         /// <strong>部分失败不回滚</strong>：能跑的先跑起来，失败原因汇总返回并记 WARN（共享知识 37）。
         /// </summary>
-        public static OpResult StartAll()
+        /// <param name="triggered">
+        /// true = 触发式（起来后等外部触发，触发一次跑一轮）——产线模式；
+        /// false = 连续运行（原有行为）——调试模式。
+        /// </param>
+        public static OpResult StartAll(bool triggered = false)
         {
             List<FlowDefinition> targets = EnabledFlowsOfCurrentProduct();
 
+            // 【诊断用】VA_ONLY_FLOW=<流程名或Id>：只启动指定流程，便于现场把 CPU 定位到某一条流程。
+            // 不设该变量时不改变任何行为。
+            string only = Environment.GetEnvironmentVariable("VA_ONLY_FLOW");
+            if (!string.IsNullOrEmpty(only))
+            {
+                List<FlowDefinition> filtered = targets.FindAll(
+                    x => x != null && (x.Name == only || x.Id == only));
+                if (filtered.Count > 0)
+                {
+                    Logger.Info("[诊断] VA_ONLY_FLOW=" + only + "：只启动该流程（其余已启用流程本次跳过）");
+                    targets = filtered;
+                }
+            }
+
             if (targets.Count == 0)
                 return OpResult.Fail("当前没有可启动的流程（流程被停用或不属于当前产品）");
+
+            ApplyAlgoThreadBudget(targets.Count);
 
             int started = 0;
             var failures = new StringBuilder();
@@ -270,7 +429,7 @@ namespace VisionPlatform.Flow
             {
                 if (f == null) continue;
 
-                OpResult r = StartOne(f.Id, true);
+                OpResult r = StartOne(f.Id, true, triggered);
                 if (r != null && r.Success) { started++; continue; }
 
                 string why = r != null ? (r.Message ?? "") : "";
@@ -291,8 +450,7 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>暂停全部运行中的流程。</summary>
-        public static void PauseAll()
-        {
+        public static void PauseAll()        {
             List<FlowRunSlot> slots = Snapshot();
             foreach (FlowRunSlot s in slots)
             {

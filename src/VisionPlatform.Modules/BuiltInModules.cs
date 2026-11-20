@@ -91,6 +91,10 @@ namespace VisionPlatform.Modules
                 ModuleCategories.Recognition, ++n, "字符分割 + 模板匹配（一字符一模板）",
                 NodeStripeColors.Recognition, OcrHints());
 
+            Add(FlowNodeType.BarcodeRead, "BarcodeRead", "条码/二维码",
+                ModuleCategories.Recognition, ++n, "ZXing 识别（多码 / 免模板）",
+                NodeStripeColors.Recognition);
+
             Add(FlowNodeType.Blob, "Blob", "Blob 分析",
                 ModuleCategories.Segmentation, ++n, "连通域统计与筛选",
                 NodeStripeColors.Recognition);
@@ -184,6 +188,11 @@ namespace VisionPlatform.Modules
             Add(FlowNodeType.DistortionCorrect, "DistortionCorrect", "畸变矫正",
                 ModuleCategories.ImageProcessing, ++n, "按相机内参去畸变",
                 NodeStripeColors.Processing);
+
+            // ---- 3D 视觉 ----
+            Add(FlowNodeType.PointCloudSource, "PointCloudSource", "读取点云",
+                ModuleCategories.ThreeD, ++n, "PLY/PCD 文件或深度图 → 3D 点云（视图自动进 3D 模式，可旋转）",
+                NodeStripeColors.ThreeD);
         }
 
         private static void Add(FlowNodeType type, string key, string name,

@@ -5,6 +5,46 @@ using System.Runtime.Serialization;
 namespace VisionPlatform.Flow
 {
     /// <summary>
+    /// 节点类型的"运行控制"特征（宿主与模块包共用，避免两处各写一份判断）。
+    /// </summary>
+    /// <remarks>
+    /// 【为什么放在 Framework】同一个判断有两个消费方：模块包用它决定"要不要给参数表加 TimeoutMs"，
+    /// 宿主用它决定"这个节点的耗时要不要按超时判"。两处各写一份，迟早出现
+    /// "界面上有这个参数、运行时不判"（或反过来），而这种不一致最难自查。
+    /// </remarks>
+    public static class FlowNodeTraits
+    {
+        /// <summary>
+        /// 该节点类型是否带「算法超时」（<c>TimeoutMs</c>，默认 500ms）。
+        /// </summary>
+        /// <remarks>
+        /// 以下 4 类排除，各有明确理由，<strong>不是"还没做"</strong>：
+        /// <list type="bullet">
+        /// <item>图像源 —— 自带的 <c>TimeoutMs</c> 是"等一帧"的超时（3000），语义不同，不能混；</item>
+        /// <item>发送 / 接收数据 —— 同上，是通讯应答超时；</item>
+        /// <item>结果输出 —— 只做字符串汇总，微秒级。</item>
+        /// </list>
+        /// <para>
+        /// 【脚本已纳入】它也是最需要限时的地方（用户代码可能死循环）。虽然同步调用无法中途打断，
+        /// 但"跑完按耗时判 NG"仍然有值 —— 至少不会把一帧 8 秒的脚本判成 OK 往下游传。
+        /// </para>
+        /// </remarks>
+        public static bool HasAlgoTimeout(FlowNodeType type)
+        {
+            switch (type)
+            {
+                case FlowNodeType.ImageSource:
+                case FlowNodeType.SendData:
+                case FlowNodeType.ReceiveData:
+                case FlowNodeType.ResultOutput:
+                    return false;
+                default:
+                    return true;
+            }
+        }
+    }
+
+    /// <summary>
     /// 流程节点类型（仅内存使用；序列化时以字符串形式存入 <see cref="FlowNode.Type"/>）。
     /// </summary>
     /// <remarks>
@@ -109,5 +149,23 @@ namespace VisionPlatform.Flow
 
         /// <summary>线线测量：两直线夹角 / 交点 / 平行间距。</summary>
         LineLineMeasure,
+
+        // ===== 本期追加（同上，加在末尾）=====
+
+        /// <summary>
+        /// 条码 / 二维码识别（zxing-cpp）：不需要模板，一次可识别多个码，
+        /// 输出文本、码制、四角点与旋转框。支持一维码（Code128/39/93/Codabar/EAN/UPC/ITF/DataBar）
+        /// 与二维码（QR/MicroQR/DataMatrix/Aztec/PDF417/MaxiCode）。
+        /// </summary>
+        BarcodeRead,
+
+        // ===== 本期追加（3D：点云，加在末尾）=====
+
+        /// <summary>
+        /// 读取点云：从 PLY / PCD 文件（单文件或文件夹轮播）或深度图（内参反投影）产出点云。
+        /// <para>点云随快照直达显示视图 —— 与 2D 共用同一个 ImageViewer，进入 3D 模式后
+        /// 拖动旋转 / 滚轮缩放 / 双击复位。</para>
+        /// </summary>
+        PointCloudSource,
 }
 }

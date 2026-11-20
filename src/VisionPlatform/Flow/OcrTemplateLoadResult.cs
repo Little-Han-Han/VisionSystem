@@ -106,14 +106,14 @@ namespace VisionPlatform.Flow
             switch (State)
             {
                 case OcrTemplateState.Empty:
-                    return "字符模板库为空，当前仅做字符分割、不输出文本；点『管理模板库…』框选字符入库。";
+                    return "字符模板库为空，当前仅做字符分割、不输出文本；点『制作字符模板…』框选字符入库。";
                 case OcrTemplateState.AllFailed:
                     return string.Format(CultureInfo.InvariantCulture,
-                        "{0} 个文件均读取失败，当前仅做字符分割、不输出文本；请点『管理模板库…』查看失败原因。",
+                        "{0} 个文件均读取失败，当前仅做字符分割、不输出文本；请点『制作字符模板…』查看失败原因。",
                         FileCount);
                 case OcrTemplateState.Partial:
                     return string.Format(CultureInfo.InvariantCulture,
-                        "{0} 个模板文件读取失败，已用其余 {1} 个正常识别；失败清单见『管理模板库…』底部。",
+                        "{0} 个模板文件读取失败，已用其余 {1} 个正常识别；失败清单见『制作字符模板…』底部。",
                         Failures.Count, LoadedCount);
                 default:
                     return "";

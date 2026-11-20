@@ -18,10 +18,11 @@ const int GEOM_DIM = 5;  // 几何特征维数
 // Otsu 只给出「把直方图分成两类的阈值」，不保证前景是 255；
 // 若目标是「暗物体 + 亮背景」，二值化后最大轮廓会是背景边框，
 // 取最大轮廓就失去意义。这里把前景统一成 255。
+//
+// 【前置条件】bin 必须已经是 threshold(gray, thresh, 255, BINARY) 的结果。
+// 原实现内部又做了一次同样的阈值化 —— 每帧多一次全图扫描 + 一次分配，结果完全相同。
 void NormalizePolarity(const cv::Mat& gray, cv::Mat& bin, int thresh)
 {
-    cv::threshold(gray, bin, (double)thresh, 255.0, cv::THRESH_BINARY);
-
     double sum = 0.0;
     int n = 0;
     for (int x = 0; x < gray.cols; ++x) {
@@ -93,10 +94,11 @@ bool ExtractFeatures(const cv::Mat& gray, int featureType, std::vector<float>& f
     double otsu = cv::threshold(gray, bin, 0.0, 255.0, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
     // 用 Otsu 阈值做极性归一化，保证前景（目标）恒为 255
+    // （bin 已经是同一个阈值的结果，这里只判极性、必要时反色）
     NormalizePolarity(gray, bin, (int)otsu);
 
     std::vector<cv::Point> contour;
-    if (!LargestContour(bin, contour, err)) return false;
+    if (!LargestContour(bin, contour, err, true)) return false;   // bin 已是二值图，不再重复阈值化
 
     feat.clear();
     if (featureType == VA_FEAT_HU) {

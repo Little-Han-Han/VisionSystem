@@ -62,6 +62,7 @@ namespace VisionPlatform.UI
             chkNgOnly.Checked = s.SaveNgOnly;
             chkRequireComm.Checked = s.RequireCommBeforeRun;
             numYieldAlarm.Value = ClampPercent(s.YieldAlarmPercent);
+            SelectRunMode(s.RunMode);
 
             // 日志数据库：路径为空表示使用默认（AppPaths.LogDbFile）；保留天数 0 = 不清理
             txtDbPath.Text = s.DbPath ?? "";
@@ -79,6 +80,7 @@ namespace VisionPlatform.UI
             s.SaveNgOnly = chkNgOnly.Checked;
             s.RequireCommBeforeRun = chkRequireComm.Checked;
             s.YieldAlarmPercent = (double)numYieldAlarm.Value;
+            s.RunMode = SelectedRunMode;
 
             s.DbPath = txtDbPath.Text.Trim();
             s.LogRetentionDays = (int)numLogDays.Value;
@@ -109,9 +111,34 @@ namespace VisionPlatform.UI
             return days;
         }
 
-        /// <summary>按配置里的主题模式回填下拉框（"Light" → 浅色，其余 → 深色）。</summary>
-        private void SelectTheme(string theme)
+        /// <summary>
+        /// 回填「运行模式」下拉框：<see cref="SystemSettings.RunModeContinuous"/> → 第 2 项，
+        /// 其余（null / 空 / 未知）一律触发式第 1 项。
+        /// <para>索引与 <see cref="SelectedRunMode"/> 必须成对维护（Designer 里的 Items 顺序即语义）。</para>
+        /// </summary>
+        private void SelectRunMode(string mode)
         {
+            if (cmbRunMode == null) return;
+
+            int index = (SystemSettings.NormalizeRunMode(mode) == SystemSettings.RunModeContinuous) ? 1 : 0;
+            if (index >= cmbRunMode.Items.Count) index = 0;
+
+            cmbRunMode.SelectedIndex = index;
+        }
+
+        /// <summary>下拉框当前选中的运行模式（0=触发式，1=连续运行）。</summary>
+        private string SelectedRunMode
+        {
+            get
+            {
+                return (cmbRunMode != null && cmbRunMode.SelectedIndex == 1)
+                    ? SystemSettings.RunModeContinuous
+                    : SystemSettings.RunModeTriggered;
+            }
+        }
+
+        /// <summary>按配置里的主题模式回填下拉框（"Light" → 浅色，其余 → 深色）。</summary>
+        private void SelectTheme(string theme)        {
             if (cmbTheme == null) return;
 
             int index = (UiThemeManager.ParseMode(theme) == UiThemeMode.Light) ? 1 : 0;

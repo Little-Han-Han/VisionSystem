@@ -29,7 +29,11 @@ namespace VisionPlatform.Core
 
         static Logger()
         {
-            FileThread = new Thread(FileLoop) { IsBackground = true, Name = "LoggerFileWriter" };
+            FileThread = new Thread(delegate() { PerfProbe.Mark("日志写盘"); FileLoop(); })
+            {
+                IsBackground = true,
+                Name = "LoggerFileWriter"
+            };
             FileThread.Start();
         }
 
@@ -89,6 +93,9 @@ namespace VisionPlatform.Core
         {
             var entry = new LogEntry(level, flowName, message, detail);
             string line = entry.Format();
+
+            // 性能探针只关心"写了多少行"，开销是一次自增
+            PerfProbe.CountLog();
 
             // ERROR 必须尽快落盘（崩溃现场就靠它）：先把已有队列刷完，再同步追加。
             // 其余级别入队由后台线程批量写，单条成本从 ~6.5ms 降到微秒级。

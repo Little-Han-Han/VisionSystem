@@ -48,7 +48,14 @@ namespace VisionPlatform.Flow
         Bool,
 
         /// <summary>矩形（x, y, w, h）。</summary>
-        Rect
+        Rect,
+
+        /// <summary>
+        /// 点云（XYZ 顶点 + 可选 RGB）。追加在末尾；
+        /// <c>FlowValidator.KindName</c> / <c>FlowForm.PortKindColor</c> 的 default 分支兜底中文名/颜色，
+        /// 新增后请同步补上专属名与颜色。
+        /// </summary>
+        PointCloud
     }
 
     /// <summary>端子方向。</summary>

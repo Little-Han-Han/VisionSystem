@@ -64,11 +64,23 @@ namespace VisionPlatform
             UiTheme.SetMode(UiThemeManager.ParseMode(ConfigStore.Current.Ui.Theme));
             UiStyle.ForceOverride = UiTheme.IsLight;
 
+            // 数值框全局策略：进程级滚轮过滤器，拦住任何窗体（含运行时动态创建、
+            // 未走过主题遍历）里 NumericUpDown 的滚轮改值。必须在首个窗体创建之前装好。
+            NumericInputPolicy.Install();
+
             Logger.Info("===== VisionPlatform 启动 =====");
             Logger.Info("软件版本：" + Application.ProductVersion);
 
+            // 性能归因探针（VA_PERF_STATS=1 才启动）：把连续运行的 CPU 拆到算法/界面/线程上。
+            // 平时完全不启动线程、不产生日志。
+            Core.PerfProbe.Start();
+
             // 模块包（算法模块的声明：端子 / 参数表 / 界面提示）按需从 Modules 目录动态加载。
             // 宿主不编译期引用模块包：少一个可选模块不会让软件起不来，日志里能看到原因。
+            // 通讯：协议插件 + 点位/任务引擎（心跳、Ready/Busy、跨流程结果汇总）
+            Communication.CommHub.Initialize();
+            Communication.CommJobEngine.Initialize();
+
             Framework.Modules.FlowModuleRegistry.Log = delegate(string msg) { Logger.Info(msg); };
             Framework.Modules.FlowModuleRegistry.EnsureLoaded();
             Logger.Info(string.Format("模块包：已注册 {0} 个模块，加载失败 {1} 项（目录 {2}）",
@@ -133,8 +145,12 @@ namespace VisionPlatform
             }
 
             Camera.CameraManager.Instance.CloseAll();
+            Communication.CommJobEngine.Shutdown();
+            Communication.CommHub.Shutdown();
+            Communication.CommRegistry.Shutdown();
 
             // 先写退出日志并刷盘，再停日志库：保证最后一行一定落到文件里。
+            Core.PerfProbe.Stop();
             Logger.Info("===== VisionPlatform 退出 =====");
             Logger.Shutdown();
             LogDb.Shutdown();

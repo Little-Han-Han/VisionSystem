@@ -35,6 +35,15 @@ namespace VisionPlatform.UI
         /// <summary>套用深色工程风格树外观。可重复调用（幂等）。</summary>
         public static void Apply(TreeView tree)
         {
+            Apply(tree, null);
+        }
+
+        /// <summary>
+        /// 带字体覆盖的 Apply：<paramref name="font"/> 非 null 时用它，否则默认 10pt。
+        /// <para>脚本编辑器变量树只有 ~400px 宽，10pt 下「显示名（类型）= 值」会截尾，显式传 8.5pt。</para>
+        /// </summary>
+        public static void Apply(TreeView tree, Font font)
+        {
             if (tree == null) return;
 
             tree.BackColor = UiTheme.ColorViewBg;        // #181820，与图像区同底
@@ -43,7 +52,7 @@ namespace VisionPlatform.UI
             tree.BorderStyle = BorderStyle.None;         // 边框交给外层容器，避免双线
             // 字体比正文大一号（10pt，正文 FontBody 为 9pt）：解决树节点文字偏小、显得拥挤的问题。
             // 显式写死字体名 + 字号，保证工具箱 / 端子两棵树观感一致。
-            tree.Font = new Font(UiTheme.FamilyBody, 10f);
+            tree.Font = font ?? new Font(UiTheme.FamilyBody, 10f);
 
             // 交互：整行选中（点空白处也能选中）、失焦后仍保持高亮
             tree.FullRowSelect = true;
@@ -99,10 +108,21 @@ namespace VisionPlatform.UI
 
             if (string.IsNullOrEmpty(e.Node.Text)) return;
 
+            // 【为什么不用 e.Bounds.Width】OwnerDrawText 模式下 e.Bounds 是 comctl 按
+            // "插入节点时的字体与控件宽度"缓存的文本矩形 —— 建树通常发生在 Apply/布局之前，
+            // 之后字体变大或控件加宽，旧矩形比实际文本窄，DrawText + EndEllipsis 会把
+            // 每一行都截出 "..."（脚本编辑器变量树实测：372px 客户区里 149px 的行也被截）。
+            // 这里改画到"从文本起点到客户区右缘"，只有真的放不下才出省略号。
+            TreeView tv = sender as TreeView;
+            int textLeft = e.Bounds.Left + 2;
+            int availWidth = (tv != null)
+                ? tv.ClientSize.Width - textLeft - 2
+                : Math.Max(0, e.Bounds.Width - 4);
+
             Rectangle textRect = new Rectangle(
-                e.Bounds.Left + 2,
+                textLeft,
                 e.Bounds.Top,
-                Math.Max(0, e.Bounds.Width - 4),
+                Math.Max(0, availWidth),
                 e.Bounds.Height);
 
             TextRenderer.DrawText(e.Graphics, e.Node.Text, e.Node.NodeFont ?? ((tree != null) ? tree.Font : UiTheme.FontBody),

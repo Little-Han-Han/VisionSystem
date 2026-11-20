@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 
 namespace VisionPlatform.UI
 {
@@ -47,6 +47,8 @@ namespace VisionPlatform.UI
             this.btnCopyFlow = new VisionPlatform.UI.UiButton();
             this.btnRenameFlow = new VisionPlatform.UI.UiButton();
             this.btnDeleteFlow = new VisionPlatform.UI.UiButton();
+            this.btnFlowUp = new VisionPlatform.UI.UiButton();
+            this.btnFlowDown = new VisionPlatform.UI.UiButton();
             this.nodeParamPanel = new VisionPlatform.UI.NodeParamPanel();
             this.panelLeft.SuspendLayout();
             this.panelRight.SuspendLayout();
@@ -152,7 +154,7 @@ namespace VisionPlatform.UI
             this.panelBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelBottom.Location = new System.Drawing.Point(200, 487);
             this.panelBottom.Name = "panelBottom";
-            this.panelBottom.Size = new System.Drawing.Size(555, 150);
+            this.panelBottom.Size = new System.Drawing.Size(555, 196);
             this.panelBottom.TabIndex = 2;
             // 
             // grpBind
@@ -173,7 +175,7 @@ namespace VisionPlatform.UI
             this.grpBind.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.grpBind.Location = new System.Drawing.Point(380, 8);
             this.grpBind.Name = "grpBind";
-            this.grpBind.Size = new System.Drawing.Size(760, 134);
+            this.grpBind.Size = new System.Drawing.Size(760, 180);
             this.grpBind.TabIndex = 1;
             this.grpBind.TabStop = false;
             this.grpBind.Text = "绑定与运行";
@@ -240,12 +242,12 @@ namespace VisionPlatform.UI
             this.lblRunStatus.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(38)))));
             this.lblRunStatus.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.lblRunStatus.ForeColor = System.Drawing.Color.Silver;
-            this.lblRunStatus.Location = new System.Drawing.Point(12, 104);
+            this.lblRunStatus.Location = new System.Drawing.Point(12, 108);
             this.lblRunStatus.Multiline = true;
             this.lblRunStatus.Name = "lblRunStatus";
             this.lblRunStatus.ReadOnly = true;
             this.lblRunStatus.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.lblRunStatus.Size = new System.Drawing.Size(740, 28);
+            this.lblRunStatus.Size = new System.Drawing.Size(740, 62);
             this.lblRunStatus.TabIndex = 10;
             this.lblRunStatus.Text = "就绪";
             // 
@@ -256,6 +258,8 @@ namespace VisionPlatform.UI
             this.grpFlows.Controls.Add(this.btnCopyFlow);
             this.grpFlows.Controls.Add(this.btnRenameFlow);
             this.grpFlows.Controls.Add(this.btnDeleteFlow);
+            this.grpFlows.Controls.Add(this.btnFlowUp);
+            this.grpFlows.Controls.Add(this.btnFlowDown);
             this.grpFlows.ForeColor = System.Drawing.Color.DeepSkyBlue;
             this.grpFlows.Location = new System.Drawing.Point(8, 8);
             this.grpFlows.Name = "grpFlows";
@@ -273,7 +277,7 @@ namespace VisionPlatform.UI
             this.lstFlows.ItemHeight = 12;
             this.lstFlows.Location = new System.Drawing.Point(10, 22);
             this.lstFlows.Name = "lstFlows";
-            this.lstFlows.Size = new System.Drawing.Size(200, 100);
+            this.lstFlows.Size = new System.Drawing.Size(200, 70);
             this.lstFlows.TabIndex = 0;
             // 
             // splitMain
@@ -497,6 +501,34 @@ namespace VisionPlatform.UI
             this.btnDeleteFlow.UseVisualStyleBackColor = false;
             this.btnDeleteFlow.Click += new System.EventHandler(this.OnDeleteFlow);
             // 
+            // btnFlowUp / btnFlowDown：调整流程顺序（序号从 0 开始，顺序决定外部触发与结果寄存器的分区）
+            // 
+            this.btnFlowUp.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnFlowUp.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnFlowUp.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnFlowUp.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnFlowUp.ForeColor = System.Drawing.Color.White;
+            this.btnFlowUp.Location = new System.Drawing.Point(10, 94);
+            this.btnFlowUp.Name = "btnFlowUp";
+            this.btnFlowUp.Size = new System.Drawing.Size(95, 26);
+            this.btnFlowUp.TabIndex = 4;
+            this.btnFlowUp.Text = "▲ 上移";
+            this.btnFlowUp.UseVisualStyleBackColor = false;
+            this.btnFlowUp.Click += new System.EventHandler(this.OnFlowUp);
+
+            this.btnFlowDown.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(52)))), ((int)(((byte)(52)))), ((int)(((byte)(62)))));
+            this.btnFlowDown.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.btnFlowDown.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnFlowDown.Font = new System.Drawing.Font("微软雅黑", 9F);
+            this.btnFlowDown.ForeColor = System.Drawing.Color.White;
+            this.btnFlowDown.Location = new System.Drawing.Point(115, 94);
+            this.btnFlowDown.Name = "btnFlowDown";
+            this.btnFlowDown.Size = new System.Drawing.Size(95, 26);
+            this.btnFlowDown.TabIndex = 5;
+            this.btnFlowDown.Text = "▼ 下移";
+            this.btnFlowDown.UseVisualStyleBackColor = false;
+            this.btnFlowDown.Click += new System.EventHandler(this.OnFlowDown);
+            // 
             // nodeParamPanel
             // 
             this.nodeParamPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(42)))), ((int)(((byte)(42)))), ((int)(((byte)(50)))));
@@ -557,6 +589,8 @@ namespace VisionPlatform.UI
         private VisionPlatform.UI.UiButton btnCopyFlow;
         private VisionPlatform.UI.UiButton btnRenameFlow;
         private VisionPlatform.UI.UiButton btnDeleteFlow;
+        private VisionPlatform.UI.UiButton btnFlowUp;
+        private VisionPlatform.UI.UiButton btnFlowDown;
 
         private System.Windows.Forms.GroupBox grpBind;
         private System.Windows.Forms.Label lblCamera;

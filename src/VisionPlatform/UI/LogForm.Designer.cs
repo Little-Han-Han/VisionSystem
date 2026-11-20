@@ -1,4 +1,4 @@
-namespace VisionPlatform.UI
+﻿namespace VisionPlatform.UI
 {
     partial class LogForm
     {
@@ -242,19 +242,20 @@ namespace VisionPlatform.UI
             this.colMessage.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.None;
             this.colMessage.HeaderText = "消息";
             this.colMessage.Resizable = System.Windows.Forms.DataGridViewTriState.True;
-            this.colMessage.Width = 320;
+            this.colMessage.Width = 460;
             // 
             // colDetail
             // 
             this.colDetail.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.None;
             this.colDetail.HeaderText = "详情（异常堆栈）";
             this.colDetail.Resizable = System.Windows.Forms.DataGridViewTriState.True;
-            this.colDetail.Width = 240;
+            this.colDetail.Width = 380;
             // 
             // LogForm
             // 
             this.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(38)))), ((int)(((byte)(38)))), ((int)(((byte)(46)))));
-            this.ClientSize = new System.Drawing.Size(900, 620);
+            this.ClientSize = new System.Drawing.Size(1180, 760);
+            this.MinimumSize = new System.Drawing.Size(960, 620);
             this.Controls.Add(this.table);
             this.ForeColor = System.Drawing.Color.Gainsboro;
             this.Name = "LogForm";

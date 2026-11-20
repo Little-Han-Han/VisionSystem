@@ -9,7 +9,8 @@
  *    algo/va_preprocess.h    预处理
  *    algo/va_blob.h          连通域分析
  *    algo/va_fit.h           圆 / 直线拟合
- *    algo/va_match.h         模板训练与匹配（灰度归一化相关，仅平移）
+ *    algo/va_match.h         模板训练与匹配（灰度归一化相关，支持角度 / 缩放 / 多目标）
+ *    algo/va_barcode.h       条码 / 二维码识别与定位（zxing-cpp，支持多种码制、一次多个）
  *    algo/va_shape.h         基于边缘轮廓的形状匹配（角度 / 缩放 / 金字塔 / ROI）
  *    algo/va_measure.h       清晰度与边缘计数
  *    algo/va_caliper.h       直线 / 圆卡尺（投影找边 + 拟合 + 离群剔除）
@@ -38,6 +39,7 @@
 #include "algo/va_blob.h"
 #include "algo/va_fit.h"
 #include "algo/va_match.h"
+#include "algo/va_barcode.h"
 #include "algo/va_shape.h"
 #include "algo/va_measure.h"
 #include "algo/va_caliper.h"

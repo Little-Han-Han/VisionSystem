@@ -43,10 +43,19 @@ namespace VisionPlatform.Flow
 
                 case FlowNodeType.TemplateMatch:
                     return string.Format(CultureInfo.InvariantCulture,
-                        "{0}{1}{2}{3}",
+                        "{0}{1}{2}{3}{4}",
                         Num("{0:0.00}", m.NccScore),
                         Num(" · 角度 {0:0.0}°", m.AngleDeg),
+                        Num(" · 缩放 {0:0.000}×", m.ScaleFactor),
                         m.TargetCount >= 0 ? " · " + m.TargetCount.ToString(CultureInfo.InvariantCulture) + " 个" : "",
+                        Cost(cost));
+
+                case FlowNodeType.BarcodeRead:
+                    return string.Format(CultureInfo.InvariantCulture,
+                        "{0} 个{1}{2}{3}",
+                        m.TargetCount,
+                        m.Text != null ? " · \"" + Quote(m.Text) + "\"" : "",
+                        Num(" · {0:0.0}°", m.AngleDeg),
                         Cost(cost));
 
                 case FlowNodeType.Ocr:
@@ -99,6 +108,12 @@ namespace VisionPlatform.Flow
                         Point(m.TopCx, m.TopCy),
                         Cost(cost));
 
+                case FlowNodeType.PointCloudSource:
+                    return string.Format(CultureInfo.InvariantCulture,
+                        "{0} 点{1}",
+                        m.TargetCount,
+                        Cost(cost));
+
                 default:
                     return ComposeFallback(fallbackSummary, cost);
             }
@@ -119,6 +134,11 @@ namespace VisionPlatform.Flow
                     return string.Format(CultureInfo.InvariantCulture, "{0}{1}",
                         Num("{0:0.00}", m.NccScore), Num(" · {0:0.0}°", m.AngleDeg));
 
+                case FlowNodeType.BarcodeRead:
+                    return string.Format(CultureInfo.InvariantCulture, "{0} 个{1}",
+                        m.TargetCount,
+                        m.Text != null ? " · " + Quote(Trunc(m.Text, 10)) : "");
+
                 case FlowNodeType.Ocr:
                     if (m.TextOnly) return "仅分割 " + m.CharCount + " 字符";
                     return string.Format(CultureInfo.InvariantCulture, "\"{0}\" · {1} 字",
@@ -131,6 +151,9 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.ObjectDetect:
                     return string.Format(CultureInfo.InvariantCulture, "{0} 个{1}",
                         m.TargetCount, Num(" · {0:0.00}", m.TopScore));
+
+                case FlowNodeType.PointCloudSource:
+                    return Trim(m.TargetCount.ToString("N0", CultureInfo.InvariantCulture) + " 点");
 
                 // ---- 本期新增的测量类：卡片上只放"一个数"，细节留给结果区摘要 ----
                 case FlowNodeType.EdgePair:
@@ -221,6 +244,14 @@ namespace VisionPlatform.Flow
             string s = text.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
             while (s.Contains("  ")) s = s.Replace("  ", " ");
             return s.Trim();
+        }
+
+        /// <summary>截断到 max 个字符（超长加省略号）。卡片宽度有限，长文本必须收口。</summary>
+        private static string Trunc(string text, int max)
+        {
+            string s = OneLine(text);
+            if (max <= 0 || s.Length <= max) return s;
+            return s.Substring(0, Math.Max(1, max - 1)) + "…";
         }
     }
 }

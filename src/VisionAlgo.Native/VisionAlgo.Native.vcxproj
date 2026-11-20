@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -42,6 +42,8 @@
     <!-- OpenVINO 2025.4.1 预编译包根目录。发行包解压后是 <根>\runtime\{include,lib,bin}，
          lib/bin 再按 intel64\{Debug,Release} 分 Debug/Release，下面路径都相对 runtime。 -->
     <OpenVinoRoot>$(ProjectDir)..\..\ThirdParty\OpenVino2025.4.1\runtime</OpenVinoRoot>
+    <!-- 条码 / 二维码识别：zxing-cpp 2.3.0（ThirdParty\ZXing\ZXing.vcxproj 静态库，只读） -->
+    <ZXingRoot>$(ProjectDir)..\..\ThirdParty\ZXing</ZXingRoot>
   </PropertyGroup>
   <PropertyGroup>
     <TargetName>VisionAlgo.Native</TargetName>
@@ -53,7 +55,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_WIN64;_DEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ZXingRoot)\core\src;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
@@ -65,8 +67,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world455d.lib;openvinod.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Debug;$(ZXingRoot)\lib\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world455d.lib;openvinod.lib;zxing.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>set OV=$(OpenVinoRoot)\bin\intel64\Debug
@@ -91,7 +93,7 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;_WIN64;NDEBUG;_WINDOWS;_USRDLL;VISIONALGO_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OpenCVRoot)\include;$(OpenVinoRoot)\include;$(ZXingRoot)\core\src;$(ProjectDir)include;$(ProjectDir)Common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <!-- 形状匹配的粗扫 / 精化按位置与候选并行 -->
@@ -105,8 +107,8 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world455.lib;openvino.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OpenCVRoot)\lib\x64;$(OpenVinoRoot)\lib\intel64\Release;$(ZXingRoot)\lib\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world455.lib;openvino.lib;zxing.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>set OV=$(OpenVinoRoot)\bin\intel64\Release
@@ -128,6 +130,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClInclude Include="include\algo\va_blob.h" />
     <ClInclude Include="include\algo\va_fit.h" />
     <ClInclude Include="include\algo\va_match.h" />
+    <ClInclude Include="include\algo\va_barcode.h" />
     <ClInclude Include="include\algo\va_shape.h" />
     <ClInclude Include="include\algo\va_measure.h" />
     <ClInclude Include="include\algo\va_calib.h" />
@@ -160,6 +163,7 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClCompile Include="src\algo\algo_detect.cpp" />
     <ClCompile Include="src\algo\algo_dl.cpp" />
     <ClCompile Include="src\algo\algo_ocrdl.cpp" />
+    <ClCompile Include="src\algo\algo_barcode.cpp" />
   </ItemGroup>
   <!-- Common 文件夹：导出宏、错误码、公共类型、生命周期与内部工具，
        头文件与源文件同目录，被 include 与 src 共同引用 -->
@@ -171,5 +175,15 @@ if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(
     <ClInclude Include="Common\va_internal.h" />
     <ClCompile Include="Common\va_internal.cpp" />
   </ItemGroup>
+  <!--
+    ZXing 刻意**不进总体解决方案**：它只是本工程的构建依赖，不是需要人打开的工程。
+    因此不能用 ProjectReference —— 工程不在解决方案里时，MSBuild 会拿它自己的默认配置
+    （Debug|Win32）去建，直接报 MSB8013「此项目不包含配置和平台组合 Debug|Win32」。
+    改为在链接前按当前配置显式构建一次，再链接它产出的 zxing.lib。
+  -->
+  <Target Name="BuildZXing" BeforeTargets="Link">
+    <MSBuild Projects="$(ZXingRoot)\ZXing.vcxproj" Targets="Build"
+             Properties="Configuration=$(Configuration);Platform=x64" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

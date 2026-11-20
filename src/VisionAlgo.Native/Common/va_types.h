@@ -56,14 +56,18 @@ typedef struct VA_Line {
     double x1, y1, x2, y2;
 } VA_Line;
 
-/* 模板匹配结果：归一化相关系数法 */
+/* 模板匹配结果：归一化相关系数法（支持角度 / 缩放搜索）。
+   x/y/width/height 是**轴对齐外接框**（旋转后的模板外框），画旋转矩形请用 cx/cy + angle。 */
 typedef struct VA_MatchResult {
-    double x;           /* 匹配区域左上角 */
+    double x;           /* 匹配框左上角（轴对齐外接框） */
     double y;
-    double width;
+    double width;       /* 外接框宽（= 模板宽 × scale 的旋转外框） */
     double height;
-    double score;       /* 0~1，越接近 1 越相似 */
-    double angle;       /* 预留；当前实现只支持平移匹配，固定 0 */
+    double score;       /* 0~1，越接近 1 越相似（去 padding 的精确 NCC） */
+    double angle;       /* 匹配角度（度，顺时针为正，与形状匹配同口径） */
+    double scale;       /* 匹配缩放（1 = 模板原尺寸） */
+    double cx;          /* 匹配框中心 X（旋转矩形的中心，画图用这个） */
+    double cy;          /* 匹配框中心 Y */
 } VA_MatchResult;
 
 #ifdef __cplusplus

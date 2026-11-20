@@ -162,6 +162,51 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>
+        /// <see cref="ApplyToPoint"/> 的<strong>逆变换</strong>：把"画面上看到的整帧坐标"换算回
+        /// 节点参数里的<strong>用户坐标</strong>。
+        /// <para>
+        /// 【为什么必须有它】界面上画 ROI 是在<strong>原始帧</strong>上画的（预览显示的就是原图），
+        /// 而节点参数存的是"示教坐标系"的值，运行时才被 <see cref="ApplyToPoint"/> 变换一次。
+        /// 如果画完直接把画面坐标存进去，运行期会再变换一次 —— 结果就是"画的框和实际用的框差一个位移"，
+        /// 也就是现场说的「画的 ROI 不跟随 / 位置不对」。
+        /// </para>
+        /// </summary>
+        public PointF ApplyInverseToPoint(double x, double y)
+        {
+            if (!IsValid) return new PointF((float)x, (float)y);
+
+            // 正变换：P = Ref + R(a)·(p - Ref) + D  ⇒  p = Ref + R(-a)·(P - D - Ref)
+            double px = x - DX - RefX;
+            double py = y - DY - RefY;
+            double a = -DAngle * Math.PI / 180.0;
+            double cos = Math.Cos(a);
+            double sin = Math.Sin(a);
+
+            return new PointF((float)(RefX + cos * px - sin * py),
+                              (float)(RefY + sin * px + cos * py));
+        }
+
+        /// <summary>轴对齐矩形的逆变换（四角逆映射后取外接框）。</summary>
+        public Rectangle ApplyInverseToRect(Rectangle roi)
+        {
+            if (!IsValid || roi.Width <= 0 || roi.Height <= 0) return roi;
+
+            PointF c0 = ApplyInverseToPoint(roi.Left, roi.Top);
+            PointF c1 = ApplyInverseToPoint(roi.Right, roi.Top);
+            PointF c2 = ApplyInverseToPoint(roi.Right, roi.Bottom);
+            PointF c3 = ApplyInverseToPoint(roi.Left, roi.Bottom);
+
+            float minX = Math.Min(Math.Min(c0.X, c1.X), Math.Min(c2.X, c3.X));
+            float minY = Math.Min(Math.Min(c0.Y, c1.Y), Math.Min(c2.Y, c3.Y));
+            float maxX = Math.Max(Math.Max(c0.X, c1.X), Math.Max(c2.X, c3.X));
+            float maxY = Math.Max(Math.Max(c0.Y, c1.Y), Math.Max(c2.Y, c3.Y));
+
+            return new Rectangle((int)Math.Round(minX), (int)Math.Round(minY),
+                                 Math.Max(0, (int)Math.Round(maxX - minX)),
+                                 Math.Max(0, (int)Math.Round(maxY - minY)));
+        }
+
+        /// <summary>
         /// 把 ROI 变换到实际位置：四角绕基准点旋转 dAngle 后平移 (dX, dY)，
         /// 返回旋转后的<strong>轴对齐外接矩形</strong>（宽高为 0 时只变换位置）。
         /// </summary>
@@ -254,6 +299,12 @@ namespace VisionPlatform.Flow
         /// </summary>
         public Bitmap Frame { get; set; }
 
+        /// <summary>
+        /// 该节点产出的点云（读取点云节点）。纯托管数组，引用移交即可 —— 快照把它带到
+        /// 预览面板后直接 <c>viewer.SetPointCloud</c>，不需要 Bitmap 那套释放手续。
+        /// </summary>
+        public VisionSystem.Controls.PointCloud.PointCloudData Cloud { get; set; }
+
         public FlowNodeProgress()
         {
             NodeId = "";
@@ -300,6 +351,8 @@ namespace VisionPlatform.Flow
         /// </summary>
         public readonly List<NodeOutput> Outputs = new List<NodeOutput>();
 
+        // FlowIndex 见上方属性（默认 0 → 用 -1 表示"没算出来"，避免误当第一条）
+
         /// <summary>
         /// 脚本节点写的**命名输出**（名 → 值）。下游脚本节点按名字读取，实现跨节点传值。
         /// </summary>
@@ -308,6 +361,13 @@ namespace VisionPlatform.Flow
 
         /// <summary>被执行的流程。</summary>
         public FlowDefinition Flow { get; set; }
+
+        /// <summary>
+        /// 本条流程在「流程管理」里的序号（从 0 开始，-1 = 未解析到）。
+        /// <para>多流程时结果寄存器按 <c>基址 + FlowIndex × 步长</c> 分区，
+        /// 与外部触发位用的是同一个序号（顺序在「流程管理」里调整）。</para>
+        /// </summary>
+        public int FlowIndex { get; set; }
 
         /// <summary>取图用的相机；本地图片模式下可为 null。</summary>
         public ICamera Camera { get; set; }
@@ -345,6 +405,12 @@ namespace VisionPlatform.Flow
         public double OffsetY { get; set; }
 
         /// <summary>
+        /// 当前点云（读取点云节点产出）。引用移交，无 Bitmap 式释放手续；下游节点不消费它时
+        /// 它只是"最后产出"的残留引用，随会话回收。
+        /// </summary>
+        public VisionSystem.Controls.PointCloud.PointCloudData CurrentCloud { get; set; }
+
+        /// <summary>
         /// <strong>彩色通道</strong>的当前帧（24bpp / 32bpp BGR）；无彩色帧时为 null。
         /// </summary>
         /// <remarks>
@@ -374,6 +440,38 @@ namespace VisionPlatform.Flow
 
         /// <summary>累积结论（全部节点都通过才为 true）。</summary>
         public bool Passed { get; set; }
+
+        /// <summary>
+        /// 遇 NG 是否<strong>立即停止</strong>（来自流程的 <see cref="FlowDefinition.StopOnNg"/>，默认 true）。
+        /// <para>
+        /// 【为什么要放在会话里】停止策略是"这一轮怎么跑"的事，不是节点的事；
+        /// 放会话才能让 <see cref="FlowRunner.StepNext"/> 在 NG 当场决定要不要继续，
+        /// 而不是等跑完再看结果 —— 那已经浪费了一帧的时间。
+        /// </para>
+        /// </summary>
+        public bool StopOnNg { get; set; } = true;
+
+        /// <summary>
+        /// 整帧超时（毫秒，0 = 不限，来自 <see cref="FlowDefinition.FrameTimeoutMs"/>）。
+        /// <para>
+        /// 【和节点级 TimeoutMs 的区别】节点级管"单个算法算太久"，能在算法内部的检查点停下来；
+        /// 整帧管"这一轮跑太久"，只能在**节点之间**判 —— 多个都不慢的节点加起来超了，只有这一层能发现。
+        /// </para>
+        /// </summary>
+        public int FrameTimeoutMs { get; set; }
+
+        /// <summary>本帧是否因整帧超时被截断（<see cref="Finish"/> 据此强制判 NG）。</summary>
+        public bool FrameTimedOut { get; set; }
+
+        /// <summary>
+        /// <strong>最后一个有结论的节点</strong>的状态（Ok / Ng / Warn）。
+        /// <para>
+        /// 【用途】<c>StopOnNg=false</c>（NG 继续跑）时，流程判定取它的值 ——
+        /// 对应现场说的"按最后一个插件或脚本的返回值判 OK/NG"。
+        /// Skipped 不算结论（跳过没有判决意义），Pending / Running 更不算。
+        /// </para>
+        /// </summary>
+        public FlowNodeStatus LastVerdict { get; set; } = FlowNodeStatus.Pending;
 
         /// <summary>各节点摘要，按顺序收集。</summary>
         public List<string> Summaries { get; private set; }
@@ -422,6 +520,7 @@ namespace VisionPlatform.Flow
             Progress = new List<FlowNodeProgress>();
             Transform = new FlowRunTransform();
             Summaries = new List<string>();
+            FlowIndex = -1;
             Passed = true;
             ErrorMessage = "";
             PoseScale = 1.0;

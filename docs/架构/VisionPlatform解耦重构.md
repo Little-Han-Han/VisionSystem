@@ -103,7 +103,7 @@ flowchart TB
     end
 
     subgraph MOD["VisionPlatform.Modules（动态模块包）"]
-        DESC["28 个模块描述<br/>端子 / 默认参数 / 参数表 / 界面提示"]
+        DESC["29 个模块描述<br/>端子 / 默认参数 / 参数表 / 界面提示"]
     end
 
     subgraph FW["VisionPlatform.Framework（契约层，无 WinForms）"]
@@ -318,7 +318,7 @@ VisionSystem.sln                        VisionSystem.sln
 | `Framework/Modules/ModuleCategories.cs` | 分类与色条常量 |
 | `Framework/Modules/FlowModuleRegistry.cs` | 注册表 + 自动加载 |
 | `Framework/Modules/ModuleLoader.cs` | DLL 反射加载与错误隔离 |
-| `src/VisionPlatform.Modules/*` | 28 个模块的声明、默认参数、参数表、端子 |
+| `src/VisionPlatform.Modules/*` | 29 个模块的声明、默认参数、参数表、端子 |
 | `src/VisionPlatform.UI.Controls/ParamListControl.cs` | 声明式参数列表控件 |
 | `src/VisionPlatform.UI.Controls/IParamValueStore.cs` | 值存储 / 动态选项契约 |
 | `docs/架构/VisionPlatform解耦重构.md` | 本文 |
@@ -381,7 +381,7 @@ VisionSystem.sln                        VisionSystem.sln
 
 重点回归项：
 
-- 28 类模块的端子总数为 **131**（与改造前 §4 清单逐条一致）；
+- 29 类模块的端子总数为 **137**（与改造前 §4 清单逐条一致）；
 - 模块分类归属（深度学习 3 项、测量类 5 项、标定转换仍在定位与匹配）全部不变；
 - 参数面板的分组折叠、禁用态 tooltip、动作行、横幅卡片挂载全部通过；
 - 脚本节点可正常引用 `FlowPortKind` 并读取带类型的端口值；

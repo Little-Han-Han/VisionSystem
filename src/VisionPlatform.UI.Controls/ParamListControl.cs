@@ -106,6 +106,16 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>显示空态（隐藏参数区）。</summary>
+        /// <summary>
+        /// 从 store 重新读一遍值填进现有控件（**不重建**控件）。
+        /// <para>供"外部改了节点参数"的场景：例如字符模板训练窗体把分割参数实时写回节点，
+        /// 这边的高级参数要立刻显示同一组数，否则用户会以为没生效。</para>
+        /// </summary>
+        public void ReloadValues()
+        {
+            LoadValues();
+        }
+
         public void ShowEmpty(string text)
         {
             _body.Visible = false;
@@ -571,10 +581,16 @@ namespace VisionPlatform.UI
                     num.Minimum = f.Min;
                     num.Maximum = f.Max;
                     num.DecimalPlaces = f.Decimals;
+                    // f.Increment 是参数表的建议步长，最终统一由 NumericInputPolicy 按值语义覆盖
+                    // （int → 1 / float → 0.1 / double → 0.01）。保留赋值是为了让参数表
+                    // 单独复用时不至于退回系统默认步长 1。
                     num.Increment = f.Increment;
                     num.Dock = DockStyle.Fill;
                     StyleTextBox(num);
                     num.Tag = f;
+                    // 本控件在 UiStyle.IsSelfDrawn 名单里，主题遍历会跳过整棵子树，
+                    // 必须在这里直接套用，否则动态生成的数值框滚轮仍会误改值。
+                    NumericInputPolicy.ApplyTo(num);
                     num.ValueChanged += OnNumberChanged;
                     _inputs.Add(num);
                     return num;
@@ -765,6 +781,7 @@ namespace VisionPlatform.UI
         private static string FileDialogKind(NodeParamField f)
         {
             if (f == null || string.IsNullOrEmpty(f.Key)) return "any";
+            if (!string.IsNullOrEmpty(f.FileFilter)) return "custom";   // 参数表直接声明了过滤器
 
             string k = f.Key.ToLowerInvariant();
             if (k.Contains("model") || k.Contains("onnx")) return "model";
@@ -779,6 +796,7 @@ namespace VisionPlatform.UI
         {
             switch (FileDialogKind(f))
             {
+                case "custom": return "选择 " + (f != null ? f.Label : "文件");
                 case "model": return "选择模型文件（.onnx）";
                 case "text": return "选择文本文件（字典 / 标签）";
                 case "image": return "选择图片文件";
@@ -790,6 +808,7 @@ namespace VisionPlatform.UI
         {
             switch (FileDialogKind(f))
             {
+                case "custom": return f.FileFilter;
                 case "model":
                     return "ONNX 模型|*.onnx|OpenVINO IR|*.xml|所有文件|*.*";
                 case "text":
@@ -805,6 +824,7 @@ namespace VisionPlatform.UI
         {
             switch (FileDialogKind(f))
             {
+                case "custom": return (f != null && !string.IsNullOrEmpty(f.FileExt)) ? f.FileExt : "";
                 case "model": return "onnx";
                 case "text": return "txt";
                 case "image": return "bmp";
@@ -822,18 +842,55 @@ namespace VisionPlatform.UI
 
             var field = txt.Tag as NodeParamField;
 
-            using (var dlg = new OpenFileDialog())
+            string chosen;
+            if (field != null && field.FileAllowCreate)
             {
-                dlg.Title = FileDialogTitle(field);
-                dlg.Filter = FileDialogFilter(field);
-                dlg.DefaultExt = FileDialogDefaultExt(field);
-                dlg.CheckFileExists = true;
+                // 允许"先定名字、保存时才创建"（字符库 / 配置类文件）。
+                // 用 SaveFileDialog 但**不提示覆盖**：这里只是在选路径，不是在写文件。
+                using (var dlg = new SaveFileDialog())
+                {
+                    dlg.Title = FileDialogTitle(field);
+                    dlg.Filter = FileDialogFilter(field);
+                    dlg.DefaultExt = FileDialogDefaultExt(field);
+                    dlg.OverwritePrompt = false;
+                    dlg.CheckPathExists = false;
 
-                if (!string.IsNullOrEmpty(txt.Text)) dlg.FileName = txt.Text;
-                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                    string cur = (txt.Text ?? "").Trim();
+                    if (cur.Length > 0)
+                    {
+                        dlg.FileName = Path.GetFileName(cur);
+                        string dir = Path.GetDirectoryName(cur);
+                        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) dlg.InitialDirectory = dir;
+                    }
 
-                txt.Text = dlg.FileName;
+                    if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                    chosen = dlg.FileName;
+                }
             }
+            else
+            {
+                using (var dlg = new OpenFileDialog())
+                {
+                    dlg.Title = FileDialogTitle(field);
+                    dlg.Filter = FileDialogFilter(field);
+                    dlg.DefaultExt = FileDialogDefaultExt(field);
+                    dlg.CheckFileExists = true;
+
+                    if (!string.IsNullOrEmpty(txt.Text)) dlg.FileName = txt.Text;
+                    if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                    chosen = dlg.FileName;
+                }
+            }
+
+            // 补后缀：输入 line1 → line1.ocrtpl（否则下次按扩展名识别失败）
+            string ext = (field != null) ? field.FileExt : null;
+            if (!string.IsNullOrEmpty(ext)
+                && !string.Equals(Path.GetExtension(chosen), "." + ext, StringComparison.OrdinalIgnoreCase))
+            {
+                chosen += "." + ext;
+            }
+
+            txt.Text = chosen;
         }
 
         private void OnBrowseFolderClick(object sender, EventArgs e)

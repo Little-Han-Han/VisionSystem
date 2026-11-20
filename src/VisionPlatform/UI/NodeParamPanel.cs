@@ -98,6 +98,12 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>在参数区顶部插入横幅控件（所有权转移给面板）。</summary>
+        /// <summary>外部改了节点参数后，把面板上的值重新读一遍（不重建控件）。</summary>
+        public void ReloadValues()
+        {
+            if (_list != null) _list.ReloadValues();
+        }
+
         public void SetBanner(Control banner)
         {
             _list.SetBanner(banner);

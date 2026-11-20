@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using System.Windows.Forms;
 using VisionPlatform.Communication;
@@ -80,6 +80,24 @@ namespace VisionPlatform.UI
             InitRecvTimer();
 
             WireEvents();
+
+            // 通讯点位 / 任务 / 流程 Busy-Ready 绑定（独立窗体，避免把主配置界面撑爆）
+            var btnAutomation = new UiButton();
+            btnAutomation.Kind = UiButtonKind.Neutral;
+            btnAutomation.Text = "点位/任务…";
+            btnAutomation.Size = new System.Drawing.Size(96, 32);
+            btnAutomation.Location = new System.Drawing.Point(312, 8);
+            btnAutomation.Click += delegate
+            {
+                using (var f = new CommAutomationForm())
+                {
+                    f.ShowDialog(this);
+                }
+
+                CommRegistry.Reload();
+                RefreshGrid();
+            };
+            panelListBtns.Controls.Add(btnAutomation);
 
             _registryHandler = OnRegistryChanged;
             CommRegistry.Changed += _registryHandler;

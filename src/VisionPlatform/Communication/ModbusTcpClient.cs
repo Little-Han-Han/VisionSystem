@@ -24,7 +24,7 @@ namespace VisionPlatform.Communication
         private ushort _transactionId;
         private byte _slaveId = 1;
 
-        public bool IsConnected { get { return _client != null && _client.Connected; } }
+        public bool IsConnected { get { return _client != null && _stream != null && _client.Connected; } }
 
         /// <summary>从站（单元）标识，默认 1。</summary>
         public byte SlaveId
@@ -44,22 +44,46 @@ namespace VisionPlatform.Communication
         {
             try
             {
-                Disconnect();
-                _client = new TcpClient();
-                IAsyncResult ar = _client.BeginConnect(host, port, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(TimeoutMs))
+                // 与读写共用 _sync：连接期间到达的读写请求要么排队要么拿到失败结果，
+                // 不会读到半初始化的 _client/_stream（历史缺陷：Connect 无锁，与 ReadHoldingRegisters 竞态）。
+                lock (_sync)
                 {
-                    _client.Close();
-                    _client = null;
-                    return OpResult.Fail("Modbus 连接超时：{0}:{1}", host, port);
+                    Disconnect();
+                    _client = new TcpClient();
+                    IAsyncResult ar = _client.BeginConnect(host, port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(TimeoutMs))
+                    {
+                        _client.Close();
+                        _client = null;
+                        // 【文案即排障指南】超时 = SYN 无响应（IP 上没设备 / 不在同一网段 / 防火墙丢包），
+                        // 与「积极拒绝」（IP 通但端口没监听）是两种完全不同的病因，必须让用户一眼分辨。
+                        return OpResult.Fail(
+                            "Modbus 连接超时：{0}:{1}（{2}s 内无响应）。请确认：① 该 IP 上有 PLC 且已上电；"
+                            + "② IP / 端口（默认 502）填对；③ 双方在同一网段且能 ping 通；④ PLC 侧防火墙放行 502。",
+                            host, port, (TimeoutMs / 1000.0).ToString("0.#"));
+                    }
+                    _client.EndConnect(ar);
+                    _stream = _client.GetStream();
+                    _stream.ReadTimeout = TimeoutMs;
+                    _stream.WriteTimeout = TimeoutMs;
                 }
-                _client.EndConnect(ar);
-                _stream = _client.GetStream();
-                _stream.ReadTimeout = TimeoutMs;
-                _stream.WriteTimeout = TimeoutMs;
 
                 Logger.Info("Modbus TCP 已连接 " + host + ":" + port);
                 return OpResult.Ok("已连接");
+            }
+            catch (SocketException sex)
+            {
+                // 区分三种常见病因：端口没监听（拒绝） / 网络不可达 / 主机名解析不了。
+                string hint = "";
+                if (sex.SocketErrorCode == SocketError.ConnectionRefused)
+                    hint = "（IP 可达但端口未监听：确认端口号，并确认 PLC 侧已启用 Modbus TCP 服务）";
+                else if (sex.SocketErrorCode == SocketError.HostUnreachable
+                      || sex.SocketErrorCode == SocketError.NetworkUnreachable)
+                    hint = "（网络不可达：检查网线 / 交换机 / 网段与 VLAN 配置）";
+                else if (sex.SocketErrorCode == SocketError.HostNotFound)
+                    hint = "（主机名解析失败：建议直接填 IP）";
+
+                return OpResult.Fail("Modbus 连接失败：" + sex.Message + hint);
             }
             catch (Exception ex)
             {
@@ -69,14 +93,18 @@ namespace VisionPlatform.Communication
 
         public void Disconnect()
         {
-            try
+            // 与 Connect 同锁（可重入，Connect 内部调用不会死锁）
+            lock (_sync)
             {
-                if (_stream != null) { _stream.Close(); _stream = null; }
-                if (_client != null) { _client.Close(); _client = null; }
-            }
-            catch (Exception)
-            {
-                // 忽略
+                try
+                {
+                    if (_stream != null) { _stream.Close(); _stream = null; }
+                    if (_client != null) { _client.Close(); _client = null; }
+                }
+                catch (Exception)
+                {
+                    // 忽略
+                }
             }
         }
 
@@ -312,10 +340,35 @@ namespace VisionPlatform.Communication
             if (responsePdu.Length > 0 && (responsePdu[0] & 0x80) != 0)
             {
                 byte code = responsePdu.Length > 1 ? responsePdu[1] : (byte)0;
-                throw new Exception("Modbus 异常响应：功能码 " + responsePdu[0] + "，异常码 " + code);
+
+                // 异常响应 PDU 的首字节是「原功能码 | 0x80」（0x83 / 0x86 / 0x90），
+                // 直接打印会显示成"功能码 131"，现场根本对不上手册；这里还原原功能码并给出中文含义。
+                byte fc = (byte)(responsePdu[0] & 0x7F);
+                throw new Exception("从站返回异常：" + DescribeModbusException(fc, code));
             }
 
             return responsePdu;
+        }
+
+        /// <summary>把 Modbus 异常码翻成现场能看懂的中文（含功能码与原始码值）。</summary>
+        private static string DescribeModbusException(byte functionCode, byte code)
+        {
+            string text;
+            switch (code)
+            {
+                case 0x01: text = "非法功能码（从站不支持该功能）"; break;
+                case 0x02: text = "非法数据地址（寄存器 / 线圈地址超出从站范围）"; break;
+                case 0x03: text = "非法数据值（写入值或数量超出从站允许范围）"; break;
+                case 0x04: text = "从站设备故障"; break;
+                case 0x05: text = "已确认，但从站处理耗时较长"; break;
+                case 0x06: text = "从站忙（正在处理上一条长任务）"; break;
+                case 0x08: text = "存储奇偶校验错误"; break;
+                case 0x0A: text = "网关路径不可用（检查网关 / 串口设备是否在线）"; break;
+                case 0x0B: text = "网关目标设备无响应（串口端设备未应答）"; break;
+                default: text = "未知异常码"; break;
+            }
+
+            return string.Format("功能码 0x{0:X2}，异常码 0x{1:X2}（{2}）", functionCode, code, text);
         }
 
         private byte[] BuildMbap(byte[] pdu)

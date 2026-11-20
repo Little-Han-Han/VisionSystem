@@ -39,6 +39,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="IParamValueStore.cs" />
+    <Compile Include="NumericInputPolicy.cs" />
     <Compile Include="ParamListControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

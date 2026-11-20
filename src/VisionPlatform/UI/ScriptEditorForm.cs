@@ -46,12 +46,19 @@ namespace VisionPlatform.UI
 
             UiStyle.ApplyForm(this);
 
+            // UiTree.Apply（主题遍历会调）默认把所有树统一成 10pt；变量树只有 400px 宽，
+            // 10pt 下「显示名（类型）= 值」必然截尾。ApplyForm 之后重新 Apply 显式给 8.5pt
+            // （幂等，可重复调用），并收紧缩进 —— 缩进 16→14，两级省 4px 给正文。
+            UiTree.Apply(treeUpstream, UiTheme.FontSmall);
+            treeUpstream.Indent = 14;
+
             // 主题会把所有 TextBox 统一成 9pt 雅黑；代码区必须等宽，否则缩进一塌糊涂
             txtBody.Font = new Font("Consolas", 10f);
             txtBody.BackColor = UiTheme.ColorViewBg;
             txtBody.ForeColor = UiTheme.ColorTextPrimary;
             txtResult.Font = new Font("Consolas", 9.5f);
             txtResult.BackColor = UiTheme.ColorViewBg;
+            txtResult.ForeColor = UiTheme.ColorTextPrimary;
         }
 
         // =====================================================================
@@ -99,7 +106,10 @@ namespace VisionPlatform.UI
             panelBottom.Controls.Add(btnOk);
 
             // ---------- 左栏：输入变量（上） + 输出变量（下） ----------
-            var panelLeft = new Panel { Dock = DockStyle.Left, Width = 300, Padding = new Padding(6) };
+            // 400 起给变量树留足宽度；中间 4px 分隔条可拖宽到 600（不用 SplitContainer）。
+            // 行截断的根因是"树在构造期窄容器里建好后文本宽度被缓存"（见 OnShown 注释），
+            // 不是栏宽不够 —— 但两者一起治：栏给足 + 定型后重建。
+            var panelLeft = new Panel { Dock = DockStyle.Left, Width = 400, Padding = new Padding(6) };
 
             var grpOut = new GroupBox
             {
@@ -139,9 +149,9 @@ namespace VisionPlatform.UI
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = UiTheme.ColorPanelBg,
                 ForeColor = UiTheme.ColorTextPrimary,
-                Font = UiTheme.FontSmall
+                Font = UiTheme.FontSmall      // 8.5pt：左栏只有 400px，9pt 下"名称/类型"两列会被挤掉
             };
-            lstOutputs.Columns.Add("名称", 144);
+            lstOutputs.Columns.Add("名称", 160);
             lstOutputs.Columns.Add("类型", 76);
 
             grpOut.Controls.Add(lstOutputs);
@@ -155,14 +165,16 @@ namespace VisionPlatform.UI
                 Padding = new Padding(8, 6, 8, 8)
             };
 
+            // 注意：字体/缩进/行高最终由 UiTree.Apply 决定（ApplyForm 会覆盖这里的值），
+            // 构造器末尾会重新 Apply 显式给 8.5pt —— 见下方注释。
             treeUpstream = new TreeView
             {
                 Dock = DockStyle.Fill,
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = UiTheme.ColorPanelBg,
                 ForeColor = UiTheme.ColorTextPrimary,
-                Font = UiTheme.FontSmall,
-                HideSelection = false
+                HideSelection = false,
+                ShowNodeToolTips = true        // 树宽有限：超宽的变量行悬停看全文（ToolTipText 在建树时填）
             };
             treeUpstream.DoubleClick += OnUpstreamDoubleClick;
             grpUp.Controls.Add(treeUpstream);
@@ -194,7 +206,7 @@ namespace VisionPlatform.UI
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = UiTheme.ColorPanelBg,
                 ForeColor = UiTheme.ColorTextPrimary,
-                Font = UiTheme.FontSmall
+                Font = UiTheme.FontBody
             };
             lstResultVals.Columns.Add("输出名", 140);
             lstResultVals.Columns.Add("值", 260);
@@ -261,7 +273,53 @@ namespace VisionPlatform.UI
             panelRight.Controls.Add(lblHead);
             panelRight.Controls.Add(panelResult);
 
+            // ---------- 分隔条：拖拽调整左栏宽度（不用 SplitContainer） ----------
+            var splitter = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 4,
+                Cursor = Cursors.VSplit,
+                BackColor = UiTheme.ColorHeaderBg
+            };
+            bool dragSplit = false;
+            int dragStartX = 0, dragStartW = 0;
+            splitter.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    dragSplit = true;
+                    dragStartX = MousePosition.X;
+                    dragStartW = panelLeft.Width;
+                }
+            };
+            splitter.MouseMove += (s, e) =>
+            {
+                if (!dragSplit) return;
+                int w = dragStartW + (MousePosition.X - dragStartX);
+                panelLeft.Width = Math.Max(240, Math.Min(600, w));
+            };
+            splitter.MouseUp += (s, e) =>
+            {
+                bool changed = dragSplit;
+                dragSplit = false;
+                // 拖宽后重建树：comctl 按插入时宽度缓存文本宽度（见 OnShown 注释），
+                // 拖窄没事，拖宽会让旧行继续按旧宽度截尾
+                if (changed && panelLeft.Width != dragStartW) BuildUpstreamTree();
+            };
+
+            // 列宽随所属栏宽自适应铺满，避免长值被写死列宽截断
+            panelLeft.Resize += (s, e) =>
+            {
+                lstOutputs.Columns[0].Width = Math.Max(80, lstOutputs.ClientSize.Width - lstOutputs.Columns[1].Width - 4);
+            };
+            panelRight.Resize += (s, e) =>
+            {
+                lstResultVals.Columns[1].Width = Math.Max(80, lstResultVals.ClientSize.Width - lstResultVals.Columns[0].Width - 4);
+            };
+
+            // Dock 处理顺序 = 集合倒序：先加的 Fill 最后停靠，正好吃满剩余空间
             Controls.Add(panelRight);
+            Controls.Add(splitter);
             Controls.Add(panelLeft);
             Controls.Add(panelBottom);
         }
@@ -322,7 +380,10 @@ namespace VisionPlatform.UI
 
             foreach (NodeOutput o in _upstream)
             {
-                var root = new TreeNode(o.Name + "  [" + o.Type + "]");
+                var root = new TreeNode(o.Name + "  [" + o.Type + "]")
+                {
+                    ToolTipText = o.Name + "  [" + o.Type + "]"
+                };
 
                 foreach (PortValue v in o.Values)
                 {
@@ -338,8 +399,9 @@ namespace VisionPlatform.UI
                     else
                         code = "api.Num(\"" + o.Name + "\", \"" + v.Key + "\", 0)";
 
-                    root.Nodes.Add(new TreeNode(string.Format(CultureInfo.InvariantCulture,
-                        "{0}（{1}）= {2}", v.DisplayName, v.KindName, v.Format())) { Tag = code });
+                    string text = string.Format(CultureInfo.InvariantCulture,
+                        "{0}（{1}）= {2}", v.DisplayName, v.KindName, v.Format());
+                    root.Nodes.Add(new TreeNode(text) { Tag = code, ToolTipText = text });
                 }
 
                 treeUpstream.Nodes.Add(root);
@@ -493,6 +555,12 @@ namespace VisionPlatform.UI
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+
+            // 【显示不全的真正根因】BuildUpstreamTree 在构造函数里跑，那时树还是默认
+            // 100px 宽（布局未运行），comctl TreeView 按插入时的宽度缓存每个节点的
+            // 文本显示宽度，控件后来变宽也不会重算 —— 表现就是所有行带 "..." 被截尾，
+            // 加宽面板、改字号都无效。布局定型后重建一次树才能解除截断。
+            BuildUpstreamTree();
 
             // 打开就把光标放进代码区，用户不用先猜"哪里能写"
             try

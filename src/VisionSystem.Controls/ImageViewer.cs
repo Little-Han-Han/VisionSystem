@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -95,6 +96,37 @@ namespace VisionSystem.Controls
         private List<Bitmap> _pyramid;
         private bool _pyramidDirty = true;
 
+        /// <summary>连续换图（实时预览 / 连续运行）时为 true：用便宜插值。</summary>
+        private bool _liveStream;
+
+        /// <summary>上次 SetImage 的时间戳（Stopwatch 计），仅用于判断是否连续流。</summary>
+        private long _lastImageStamp;
+
+        /// <summary>
+        /// 当前这张图已经被绘制了几次（每次真正 DrawImage 累加，换图时归零）。
+        /// <para>【为什么用它决定要不要建金字塔】金字塔只有在"同一张图被反复重绘"（缩放 / 平移 /
+        /// 暂停检查）时才划算。而流程慢的时候（实测单圈 0.6~1.1 秒），每帧间隔远大于 300ms，
+        /// 用"帧间隔"判定连续流会把这种场景误判成"静态图"，于是**每帧都白建一遍金字塔**——
+        /// 现场实测建层耗时 620~833ms/帧，比算法本身还贵。
+        /// 改成看"同一张图第几次被画"：第一遍直接采样，只有真的要重画第二遍才建层。</para>
+        /// </summary>
+        private int _paintsOfCurrentImage;
+
+        /// <summary>
+        /// 当前是否处于「连续流」：既要刚才判定为连续换图，且距上一次换图没多久。
+        /// <para>后半句必不可少 —— 流程停下后不再有 SetImage，但用户还会缩放/平移反复重绘；
+        /// 那时必须回到高质量插值 + 金字塔，否则静止画面会一直是实时预览的低画质。</para>
+        /// </summary>
+        private bool IsLiveStreaming
+        {
+            get
+            {
+                if (!_liveStream || _lastImageStamp == 0) return false;
+                double sinceMs = (Stopwatch.GetTimestamp() - _lastImageStamp) * 1000.0 / Stopwatch.Frequency;
+                return sinceMs < LiveStreamThresholdMs;
+            }
+        }
+
         // 静态内容缓存层：背景 + 图像 + 像素网格。
         // 只在图像、缩放/平移、控件尺寸变化时重建；鼠标移动、拖拽图形时可直接复用，
         // 从而避免每帧重做大图的缩放绘制——这是交互流畅度的关键。
@@ -109,6 +141,13 @@ namespace VisionSystem.Controls
         private float _zoomStep = 1.15f;
         private bool _ownsImage = true;
         private bool _autoFitOnResize;
+
+        // ---------- 点云模式（3D） ----------
+        // 与 2D 图层互斥：SetPointCloud 进入 3D（GL 子面板盖满客户区），SetImage 退出回 2D。
+        // 合并显示 = 用户始终面对同一个 ImageViewer，2D/3D 由数据类型自动切换。
+        private PointCloud.GlPointView _glView;
+        private bool _cloudMode;
+        private PointCloud.PointCloudData _cloud;
 
         private Color _newShapeColor = Color.Lime;
         private float _newShapeLineWidth = 2f;
@@ -152,6 +191,14 @@ namespace VisionSystem.Controls
 
         /// <summary>可见源区域像素数超过该值时，改用金字塔层采样并降级插值质量。</summary>
         private const long LargeSourcePixelThreshold = 2000000L;
+
+        /// <summary>
+        /// 两次换图间隔小于该值即视为「连续流」（实时预览 / 连续运行）。
+        /// <para>实测（5MP 24bpp → 1224×1024，GDI+ 软件光栅）：HighQuality 双线性 39ms、
+        /// 普通双线性 17.6ms、最近邻 7.7ms。也就是说"每帧重建金字塔"光重采样就吃掉 39ms，
+        /// 比它省下的采样量贵得多 —— 连续流下必须跳过金字塔，直接按屏幕尺寸采样。</para>
+        /// </summary>
+        private const int LiveStreamThresholdMs = 300;
 
         /// <summary>金字塔最大层数。</summary>
         private const int MaxPyramidLevels = 12;
@@ -204,6 +251,11 @@ namespace VisionSystem.Controls
                 {
                     _image.Dispose();
                     _image = null;
+                }
+                if (_glView != null)
+                {
+                    _glView.Dispose();
+                    _glView = null;
                 }
             }
             base.Dispose(disposing);
@@ -430,6 +482,9 @@ namespace VisionSystem.Controls
         {
             if (ReferenceEquals(_image, image)) return;
 
+            // 2D 图一到，3D 点云模式就让位（互斥）
+            if (_cloudMode) ClearPointCloud();
+
             // 灰度判定必须在转换前做：转换后一律是 24bpp，就无法再区分了
             bool isGray = IsGrayImage(image);
             Bitmap displayImage = ToDisplayBitmap(image);
@@ -447,6 +502,18 @@ namespace VisionSystem.Controls
             _imageIsGray = isGray;
             _mousePixelColor = null;
             _imageLayerDirty = true;
+
+            // 判断是否处于「连续换图」：连续运行 / 实时预览时每帧都会进来，
+            // 这时重建金字塔纯属浪费（见 LiveStreamThresholdMs 的实测数据）。
+            long stamp = Stopwatch.GetTimestamp();
+            double sinceMs = _lastImageStamp == 0
+                ? double.MaxValue
+                : (stamp - _lastImageStamp) * 1000.0 / Stopwatch.Frequency;
+            _liveStream = sinceMs < LiveStreamThresholdMs;
+            _lastImageStamp = stamp;
+
+            // 新图：绘制计数归零（决定要不要建金字塔，见 _paintsOfCurrentImage 的说明）
+            _paintsOfCurrentImage = 0;
 
             // 立即释放旧金字塔，避免换图后旧层继续占着内存
             ClearPyramid();
@@ -479,6 +546,55 @@ namespace VisionSystem.Controls
         public void ClearImage()
         {
             SetImage(null);
+        }
+
+        // =====================================================================
+        //  点云显示（3D，与 2D 图层共用本控件、互斥显示）
+        // =====================================================================
+
+        /// <summary>
+        /// 显示点云（进入 3D 模式：内部创建 OpenGL 子面板，支持拖动旋转/滚轮缩放/双击复位）。
+        /// <para>传 null 或空云 = 清空点云并回到 2D 空白。仅持引用，不接管释放。</para>
+        /// </summary>
+        public void SetPointCloud(PointCloud.PointCloudData cloud)
+        {
+            if (cloud == null || cloud.Count <= 0)
+            {
+                ClearPointCloud();
+                return;
+            }
+
+            if (_glView == null)
+            {
+                _glView = new PointCloud.GlPointView { Dock = DockStyle.Fill };
+                Controls.Add(_glView);
+            }
+
+            _cloudMode = true;
+            _cloud = cloud;
+            _glView.Visible = true;
+            _glView.SetCloud(cloud);
+            _glView.BringToFront();
+        }
+
+        /// <summary>退出 3D 点云模式（回到 2D）。</summary>
+        public void ClearPointCloud()
+        {
+            _cloudMode = false;
+            _cloud = null;
+            if (_glView != null)
+            {
+                _glView.SetCloud(null);
+                _glView.Visible = false;
+            }
+            Invalidate();
+        }
+
+        /// <summary>当前是否处于 3D 点云显示模式。</summary>
+        [Browsable(false)]
+        public bool IsPointCloudMode
+        {
+            get { return _cloudMode; }
         }
 
         /// <summary>把当前图像导出为 OpenCV 可直接使用的连续像素数组。</summary>
@@ -1343,15 +1459,39 @@ namespace VisionSystem.Controls
 
             if (!_imageLayerDirty) return;
 
+            long t0 = Stopwatch.GetTimestamp();
             using (Graphics g = Graphics.FromImage(_imageLayer))
             {
                 g.Clear(_renderOptions.BackdropColor);
                 DrawImage(g);
                 DrawPixelGrid(g);
             }
+            double layerMs = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
+            LastLayerRebuildMs = layerMs;
+            LayerRebuildCount++;
+            LayerRebuildTotalMs += layerMs;
 
             _imageLayerDirty = false;
         }
+
+        /// <summary>
+        /// 累计重绘次数（诊断用）。连续运行时配合 <c>LastLayerRebuildMs</c>
+        /// 就能算出"界面这块到底占了多少 CPU"。
+        /// </summary>
+        public long PaintCount { get; private set; }
+
+        /// <summary>
+        /// 最近一次「重建缓存层」的耗时（毫秒）；还没重建过时为 0（命中缓存时不更新）。
+        /// <para>连续运行时 CPU 高最常见的原因就是这里：每来一帧都要把整幅原图缩放到视图尺寸。
+        /// 现场排查可直接看这个数（配合 <c>VA_UI_STATS=1</c> 的界面统计日志）。</para>
+        /// </summary>
+        public double LastLayerRebuildMs { get; private set; }
+
+        /// <summary>累计重建缓存层的次数（诊断用）。</summary>
+        public long LayerRebuildCount { get; private set; }
+
+        /// <summary>累计重建缓存层的总耗时（毫秒，诊断用）。用区间增量算平均才是真实值。</summary>
+        public double LayerRebuildTotalMs { get; private set; }
 
         /// <summary>
         /// 强制重建静态内容缓存层。
@@ -1385,6 +1525,7 @@ namespace VisionSystem.Controls
         /// </summary>
         protected override void OnPaint(PaintEventArgs e)
         {
+            PaintCount++;
             Graphics g = e.Graphics;
 
             EnsureImageLayer();
@@ -1421,11 +1562,18 @@ namespace VisionSystem.Controls
 
                 // 可见源区域过大时改用金字塔层：层的分辨率更贴近屏幕需求，
                 // 采样量直接下降一个数量级。缩放只是换层，不需要重新生成。
+                // 【只在"同一张图被重画"时才建】第一遍直接按屏幕尺寸采样：
+                // 流程慢的时候一帧只画一次，建层是纯浪费（现场实测 620~833ms/帧）。
+                _paintsOfCurrentImage++;
+                bool allowPyramid = _paintsOfCurrentImage > 1;
+
                 Bitmap source = _image;
                 float levelScale = 1f;
-                if ((long)(srcW * srcH) > LargeSourcePixelThreshold)
+                if (allowPyramid && (long)(srcW * srcH) > LargeSourcePixelThreshold)
                 {
-                    EnsurePyramid();
+                    // 只建当前缩放会用到的层数（fit 视图通常 2 层，而不是固定的 12 层）
+                    int needed = NeededPyramidLevels(_viewport.Zoom);
+                    EnsurePyramid(needed);
                     Bitmap level = SelectPyramidLevel(_viewport.Zoom, out levelScale);
                     if (level != null)
                         source = level;
@@ -1453,11 +1601,33 @@ namespace VisionSystem.Controls
                     mode = InterpolationMode.HighQualityBilinear;
                 }
 
+                // 连续流：HighQuality* 在这条路上是纯软件光栅的高成本分支
+                // （5MP→800×600 实测 HQ 双线性 31ms vs 普通双线性 14ms）。
+                // 实时画面只求"看得清"，不值得为插值质量付一倍 CPU。
+                if (IsLiveStreaming &&
+                    (mode == InterpolationMode.HighQualityBilinear
+                     || mode == InterpolationMode.HighQualityBicubic))
+                {
+                    mode = InterpolationMode.Bilinear;
+                }
+
                 g.InterpolationMode = mode;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
                 g.SmoothingMode = SmoothingMode.None;
 
-                g.DrawImage(source, dst, src, GraphicsUnit.Pixel);
+                // 【下采样走整数矩形】fit 视图的 dst 是 zoom 算出来的浮点矩形（如 0.5/783.2），
+                // GDI+ 遇到非整数目标矩形会退到通用仿射变换路径 —— 同一张 5MP 图，
+                // 实测整数矩形 14ms、带小数的矩形 32ms（2.3 倍）。
+                // 缩小时（zoom<1）半像素误差在屏幕上看不出来，取整换 2 倍速度；
+                // 放大检查时保留浮点精度，平移仍是亚像素顺滑。
+                if (_viewport.Zoom < 1f)
+                {
+                    g.DrawImage(source, Rectangle.Round(dst), Rectangle.Round(src), GraphicsUnit.Pixel);
+                }
+                else
+                {
+                    g.DrawImage(source, dst, src, GraphicsUnit.Pixel);
+                }
 
                 g.InterpolationMode = oldInterp;
                 g.PixelOffsetMode = oldPixelOffset;
@@ -1637,20 +1807,42 @@ namespace VisionSystem.Controls
         }
 
         /// <summary>
-        /// 生成图像金字塔：每一级是上一级的 1/2，第 i 级缩放为 1/2^(i+1)。
-        /// 逐级生成（而非每级都从原图缩），总代价约为原图的 1/3，只在换图时做一次。
-        /// 缩放时仅「换一层」，不再重新采样整图。
+        /// 当前缩放真正会用到的金字塔层数（0 = 连最细层都不够，直接用原图）。
+        /// <para>第 i 层的缩放是 1/2^(i+1)，只有 ≥ zoom 的层才会被 <see cref="SelectPyramidLevel"/> 选中。
+        /// 例：fit 到窗口时 zoom≈0.15，只需要 2 层（1/2、1/4），
+        /// 原来却无条件把 12 层全建出来 —— 每帧白算 10 层。</para>
         /// </summary>
-        private void EnsurePyramid()
+        private static int NeededPyramidLevels(float zoom)
         {
-            if (_image == null) return;
-            if (_pyramid != null && !_pyramidDirty) return;
+            if (zoom <= 0f || zoom >= 0.5f) return 0;
+
+            int levels = 0;
+            float scale = 0.5f;                       // 第 0 层的缩放
+            while (scale >= zoom && levels < MaxPyramidLevels)
+            {
+                levels++;
+                scale *= 0.5f;
+            }
+            return levels;
+        }
+
+        /// <summary>
+        /// 生成图像金字塔：每一级是上一级的 1/2，第 i 级缩放为 1/2^(i+1)。
+        /// 逐级生成（而非每级都从原图缩），总代价约为原图的 1/3。
+        /// <para>【按需生成】只建到 <paramref name="neededLevels"/> 层为止：连续运行时每帧都会
+        /// <see cref="SetImage"/>，若每帧都把 12 层重建一遍，单是重采样就吃掉大量 CPU。
+        /// 已建层数够用时直接复用（层是前缀关系，内容与全量构建一致）。</para>
+        /// </summary>
+        private void EnsurePyramid(int neededLevels)
+        {
+            if (_image == null || neededLevels <= 0) return;
+            if (_pyramid != null && !_pyramidDirty && _pyramid.Count >= neededLevels) return;
 
             ClearPyramid();
-            _pyramid = new List<Bitmap>();
+            _pyramid = new List<Bitmap>(neededLevels);
 
             Bitmap current = _image;
-            for (int i = 0; i < MaxPyramidLevels; i++)
+            for (int i = 0; i < neededLevels; i++)
             {
                 int w = current.Width / 2;
                 int h = current.Height / 2;
@@ -1757,6 +1949,7 @@ namespace VisionSystem.Controls
         private void DrawEmptyHint(Graphics g)
         {
             if (_image != null) return;
+            if (_cloudMode) return;     // 3D 点云模式：GL 子面板负责画面，不再叠"尚未载入图像"
 
             string text = "尚未载入图像" + Environment.NewLine +
                           "调用 SetImage() 或 SetCvImage() 显示图像";

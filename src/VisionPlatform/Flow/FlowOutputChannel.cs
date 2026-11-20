@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using VisionSystem.Controls.Geometry;
@@ -40,6 +40,9 @@ namespace VisionPlatform.Flow
         /// <summary>结论摘要文本。</summary>
         public string Summary { get; set; }
 
+        /// <summary>整链耗时（ms）。</summary>
+        public int ElapsedMs { get; set; }
+
         /// <summary>相机名（用于视图标题）。</summary>
         public string CameraName { get; set; }
 
@@ -53,6 +56,18 @@ namespace VisionPlatform.Flow
 
         /// <summary>流程所属产品型号；"" = 通用 / 未分类。</summary>
         public string Product { get; set; }
+
+        /// <summary>
+        /// 帧序号（同一流程每出一帧 +1）。跨流程汇总用它判断"是不是同一批"，
+        /// 旧发布方不填时为 0，汇总侧按时间窗口兜底。
+        /// </summary>
+        public long CycleId { get; set; }
+
+        /// <summary>
+        /// 点云（读取点云节点产出）。非 null 时显示端进 3D 模式（<c>view.SetPointCloud</c>），
+        /// 不再看 <see cref="Frame"/>；纯托管引用，无释放手续。
+        /// </summary>
+        public VisionSystem.Controls.PointCloud.PointCloudData Cloud { get; set; }
 
         /// <summary>初始化三个新字段为空串，保证旧发布方构造出的实例不会出现 null。</summary>
         public FlowOutputEventArgs()

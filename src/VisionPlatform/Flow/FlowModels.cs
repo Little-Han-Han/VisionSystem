@@ -280,6 +280,59 @@ namespace VisionPlatform.Flow
         [DataMember]
         public bool Enabled { get; set; }
 
+        /// <summary>
+        /// 遇到 NG 时的处理方式：<c>"Stop"</c>（默认，立即跳出整条流程）或
+        /// <c>"Continue"</c>（继续执行，最终判定取<strong>最后一个节点</strong>的返回值）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 【为什么是字符串而不是 bool】旧配置里缺这个字段反序列化得到 <c>null</c>，
+        /// 用 bool 会静默变成 <c>false</c>（= Continue），把现网"遇 NG 停"的流程
+        /// 全改成"跑到底"，行为变化没有任何提示。字符串 + null 判空才能区分
+        /// "没配过"与"显式选了 Continue"。
+        /// </para>
+        /// <para>
+        /// 【两种模式的语义差异，不是风格差异】
+        /// ①Stop：第一个 NG 就退出 —— 产线要的是"尽快停、别把后面的工位也带偏"；
+        /// ②Continue：全部跑完再判 —— 调机时要看"到底几项不合格"，
+        ///   或流程末尾挂了一个脚本/汇总节点自己决定放行与否。
+        /// </para>
+        /// </remarks>
+        [DataMember]
+        public string NgMode { get; set; }
+
+        /// <summary>遇 NG 是否立即停止（<see cref="NgMode"/> 的语义化读法；未配置时按 Stop）。</summary>
+        public bool StopOnNg
+        {
+            get { return !string.Equals(NgMode, NgModeContinue, StringComparison.OrdinalIgnoreCase); }
+        }
+
+        /// <summary>
+        /// 整帧超时（毫秒，<c>0</c> = 不限，默认）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 与节点级 <c>TimeoutMs</c> 的分工：<b>节点级管"单个算法算太久"</b>（能在算法内部检查点停下来），
+        /// <b>整帧管"这一轮跑太久"</b>（多个节点各自都不慢，加起来超了）。
+        /// </para>
+        /// <para>
+        /// 【为什么要两层】现场最常见的恰恰是后者：形状匹配 250ms + 卡尺 60ms + 预处理 40ms + 脚本 80ms…
+        /// 每个都"合规"，一帧却 600ms，已经跟不上产线节拍。只有整帧层能发现这种情况。
+        /// </para>
+        /// <para>
+        /// 【检查点】只在<strong>节点之间</strong>判（进入下一个节点前）。单个节点内部的耗时由它自己的
+        /// TimeoutMs 负责；两层叠加、互不替代。
+        /// </para>
+        /// </remarks>
+        [DataMember]
+        public int FrameTimeoutMs { get; set; }
+
+        /// <summary><see cref="NgMode"/> 的取值：继续执行到结尾。</summary>
+        public const string NgModeContinue = "Continue";
+
+        /// <summary><see cref="NgMode"/> 的取值：遇 NG 立即停止（默认）。</summary>
+        public const string NgModeStop = "Stop";
+
         [DataMember]
         public List<FlowNode> Nodes { get; set; }
 
@@ -294,6 +347,7 @@ namespace VisionPlatform.Flow
             ViewIndex = 1;
             Product = "";
             Enabled = true;
+            NgMode = NgModeStop;
             Nodes = new List<FlowNode>();
             Links = new List<FlowLink>();
         }
@@ -309,6 +363,7 @@ namespace VisionPlatform.Flow
                 ViewIndex = 1,
                 Product = "",
                 Enabled = true,
+                NgMode = NgModeStop,
                 Nodes = new List<FlowNode>(),
                 Links = new List<FlowLink>()
             };
@@ -528,6 +583,15 @@ namespace VisionPlatform.Flow
                 else if (flow.Product == null)
                 {
                     flow.Product = "";
+                    changed = true;
+                }
+
+                // ---- NG 处理方式：缺失 = 旧配置 = "遇 NG 停止"（保守，不改变现网行为）----
+                // 不加版本门禁：null 在"旧配置"和"被手工改残"两种情况下都要救回来，
+                // 幂等（只补不改），重复调用无副作用。
+                if (flow.NgMode == null)
+                {
+                    flow.NgMode = FlowDefinition.NgModeStop;
                     changed = true;
                 }
 

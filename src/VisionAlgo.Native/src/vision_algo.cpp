@@ -8,6 +8,12 @@
 
 #include "va_internal.h"
 
+#include <opencv2/core.hpp>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include <new>
 #include <cstring>
 
@@ -23,6 +29,34 @@ extern "C" {
 int VA_CALL va_get_version(void)
 {
     return 10000 + 455; // v1.00，基于 OpenCV 4.5.5
+}
+
+int VA_CALL va_set_threads(int n)
+{
+    // n <= 0 → 关闭内部并行（只用一个核）；n > 0 → 上限 n。
+    // 注意这是**进程级全局**设置：OpenCV 的 parallel_for 与 OpenVINO 的推理线程池共用这个预算。
+    int want = n > 0 ? n : 0;
+
+    va::g_vaThreads = want;       // 供 OpenVINO 侧（algo_dl / algo_ocrdl）在建 Core 时读取
+    cv::setNumThreads(want);
+
+    // 【关键】形状匹配用的是 `#pragma omp parallel for`（algo_shape.cpp），
+    // 走的是 OpenMP 运行时，**不受 cv::setNumThreads 影响**。
+    // 它的线程数默认按物理核数开满：实测单条流程跑 8 fps，OpenMP 8~11 个线程各烧满一个核，
+    // 而算法本身只需要约 1 核 —— 全是并行开销。
+    // omp_set_num_threads 是**按线程**生效的，所以宿主还必须在跑算法的那个线程里再调一次本函数。
+#ifdef _OPENMP
+    omp_set_dynamic(0);
+    omp_set_num_threads(want > 0 ? want : 1);
+#endif
+
+    return cv::getNumThreads();
+}
+
+void VA_CALL va_set_deadline_ms(int ms)
+{
+    // 只影响**调用线程**：每条流程一个线程，互不干扰（见 va_lifecycle.h 的说明）。
+    va::DeadlineSet(ms);
 }
 
 void* VA_CALL va_create(void)
@@ -49,21 +83,90 @@ int VA_CALL va_get_last_error(void* handle, char* buffer, int size)
     return n;
 }
 
+// 错误码 → 分类名。
+//
+// 【只给类别，不带原因】原因在 VA_ErrorInfo（模块 / 参数 / 实际值 / 期望）里，
+// 由 va_get_error_info 单独取。这样"要不要处理"看 code，"具体哪里错了"看结构体，
+// 不用再从一句拼接文本里猜。
 const char* VA_CALL va_error_string(int code)
 {
     switch (code) {
-        case VA_OK:              return "OK";
-        case VA_ERR_HANDLE:      return "invalid handle";
-        case VA_ERR_ARG:         return "invalid argument";
-        case VA_ERR_SIZE:        return "size mismatch";
-        case VA_ERR_TYPE:        return "unsupported image type";
-        case VA_ERR_INTERNAL:    return "internal error";
-        case VA_ERR_NO_TEMPLATE: return "template not trained";
-        case VA_ERR_TIMEOUT:     return "timeout";
-        case VA_ERR_CAMERA:      return "camera error";
-        case VA_ERR_NO_EDGE:     return "no edge found";
-        default:                 return "unknown error";
+        case VA_OK:                     return "成功";
+
+        // 通用 / 历史码
+        case VA_ERR_HANDLE:             return "句柄无效";
+        case VA_ERR_ARG:                return "参数非法";
+        case VA_ERR_SIZE:               return "尺寸不匹配";
+        case VA_ERR_TYPE:               return "图像类型不支持";
+        case VA_ERR_INTERNAL:           return "算法内部异常";
+        case VA_ERR_NO_TEMPLATE:        return "未训练模板";
+        case VA_ERR_TIMEOUT:            return "读帧超时";
+        case VA_ERR_CAMERA:             return "相机错误";
+        case VA_ERR_NO_EDGE:            return "边缘点不足";
+
+        // 输入 / 参数
+        case VA_ERR_NO_INPUT:           return "无输入帧";
+        case VA_ERR_ROI:                return "ROI 非法";
+        case VA_ERR_IMAGE_TOO_SMALL:    return "图像太小";
+        case VA_ERR_CHANNEL:            return "通道数不支持";
+        case VA_ERR_PARAM_RANGE:        return "参数越界";
+        case VA_ERR_BUFFER_TOO_SMALL:   return "输出缓冲区不足";
+
+        // 模板 / 模型
+        case VA_ERR_TEMPLATE_TOO_SMALL:  return "模板过小";
+        case VA_ERR_TEMPLATE_NO_FEATURE: return "模板无特征";
+        case VA_ERR_MODEL_NOT_LOADED:    return "模型未加载";
+        case VA_ERR_MODEL_INFER:         return "推理失败";
+
+        // 几何 / 测量
+        case VA_ERR_SCAN_DEGENERATE:    return "扫描线退化";
+        case VA_ERR_FIT_DEGENERATE:     return "拟合退化";
+        case VA_ERR_NO_EDGE_IN_ROI:     return "区域内无边缘";
+
+        // 业务
+        case VA_ERR_BARCODE_TYPE:       return "码类型非法";
+        case VA_ERR_CALIB_NOT_READY:    return "标定未就绪";
+        case VA_ERR_CAMERA_OPEN:        return "相机打开失败";
+        case VA_ERR_CAMERA_FRAME:       return "相机读帧失败";
+
+        // 运行控制
+        case VA_ERR_ALGO_TIMEOUT:       return "算法超时";
+
+        default:                        return "未知错误码";
     }
+}
+
+namespace {
+
+// 把 std::string 按 UTF-8 边界安全地拷进定长缓冲（不切断多字节字符）
+void CopyField(const std::string& s, char* dst, int cap)
+{
+    if (dst == 0 || cap <= 0) return;
+    size_t n = s.size();
+    if (n >= (size_t)cap)
+    {
+        n = (size_t)cap - 1;
+        while (n > 0 && (((unsigned char)s[n]) & 0xC0) == 0x80) --n;
+    }
+    if (n > 0) std::memcpy(dst, s.data(), n);
+    dst[n] = '\0';
+}
+
+} // namespace
+
+int VA_CALL va_get_error_info(void* handle, VA_ErrorInfo* out)
+{
+    va::Context* ctx = static_cast<va::Context*>(handle);
+    if (ctx == 0 || out == 0) return VA_ERR_HANDLE;
+
+    std::memset(out, 0, sizeof(*out));
+    out->code = ctx->lastCode;
+    CopyField(ctx->lastModule, out->module, (int)sizeof(out->module));
+    CopyField(ctx->lastParam,  out->param,  (int)sizeof(out->param));
+    CopyField(ctx->lastValue,  out->value,  (int)sizeof(out->value));
+    CopyField(ctx->lastExpect, out->expect, (int)sizeof(out->expect));
+    CopyField(ctx->lastError,  out->message, (int)sizeof(out->message));
+    return VA_OK;
 }
 
 // ---------------------- 算法分发 ----------------------
@@ -117,6 +220,27 @@ int VA_CALL va_match_template(void* handle, const VA_Image* gray, VA_MatchResult
 {
     VA_CTX();
     return va::MatchTemplate(ctx, gray, out);
+}
+
+int VA_CALL va_match_template_ex(void* handle, const VA_Image* gray, const VA_MatchParam* param,
+                                 VA_MatchResult* out_results, int max_count, int* out_count)
+{
+    VA_CTX();
+    return va::MatchTemplateEx(ctx, gray, param, out_results, max_count, out_count);
+}
+
+// ---------------------- 条码 / 二维码 ----------------------
+
+int VA_CALL va_barcode_read(void* handle, const VA_Image* gray, const VA_BarcodeParam* param,
+                            VA_Barcode* out, int max_count, int* out_count)
+{
+    VA_CTX();
+    return va::BarcodeRead(ctx, gray, param, out, max_count, out_count);
+}
+
+const char* VA_CALL va_barcode_version(void)
+{
+    return va::BarcodeVersion();
 }
 
 // ---------------------- 形状匹配（基于边缘轮廓）----------------------

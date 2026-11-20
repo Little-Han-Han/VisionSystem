@@ -38,6 +38,28 @@ namespace VisionPlatform.Flow
         /// <summary>逐节点进度（供画布状态标注与预览区回看）。</summary>
         public List<FlowNodeProgress> Progress { get; set; }
 
+        /// <summary>本帧是否写入了有效的位置修正。</summary>
+        public bool TransformValid { get; set; }
+
+        /// <summary>位置修正的平移量 X（帧坐标，像素）。</summary>
+        public double TransformDx { get; set; }
+
+        /// <summary>位置修正的平移量 Y（帧坐标，像素）。</summary>
+        public double TransformDy { get; set; }
+
+        /// <summary>位置修正的旋转量（度，顺时针为正）。</summary>
+        public double TransformDAngle { get; set; }
+
+        /// <summary>修正是否已经烘进像素（整图对齐模式）。此时 ROI 用原坐标即可。</summary>
+        public bool TransformWarped { get; set; }
+
+        /// <summary>
+        /// 本帧的位姿变换对象（含基准点，可做正/逆变换）。
+        /// <para>界面画 ROI 时要用它把"画面坐标"换回"示教坐标"（<c>ApplyInverseToRect</c>），
+        /// 否则运行期会再变换一次，正好差一个位移。</para>
+        /// </summary>
+        public FlowRunTransform Transform { get; set; }
+
         /// <summary>总耗时（毫秒）。</summary>
         public int ElapsedMs { get; set; }
 
@@ -105,6 +127,12 @@ namespace VisionPlatform.Flow
         /// <summary>上一轮模板加载的结构化结果（指纹未变时直接复用，避免每帧重建失败清单）。</summary>
         private OcrTemplateLoadResult _ocrTemplateResult;
 
+        // 单文件字符库（.ocrtpl）的缓存：与目录缓存分开记，避免两套口径互相把对方的指纹当"没变"。
+        private string _ocrLibPath;
+        private string _ocrLibStamp;
+        private List<OcrCharSample> _ocrLibSamples;
+        private OcrTemplateLoadResult _ocrLibResult;
+
         /// <summary>结果产出事件（FlowForm 转发给 FlowOutputChannel）。</summary>
         public event EventHandler<FlowOutputEventArgs> OutputReady;
 
@@ -135,6 +163,48 @@ namespace VisionPlatform.Flow
         /// <param name="flow">待执行流程。</param>
         /// <param name="camera">取图相机；图像源为「本地图片」时允许为 null。</param>
         /// <param name="captureFrames">是否为每个节点保存输出帧副本（单步预览需要）。</param>
+        /// <summary>
+        /// 多流程地址偏移 = 流程序号 × <c>MbFlowStride</c>。
+        /// <para>步长 0 / 序号未知（-1）/ 序号 0 时一律返回 0 —— 单流程配置完全不受影响。</para>
+        /// </summary>
+        private static int FlowAddressShift(FlowRunSession s, FlowNode node)
+        {
+            if (s == null || node == null) return 0;
+
+            int stride = node.GetInt("MbFlowStride", 0);
+            if (stride <= 0) return 0;
+            if (s.FlowIndex <= 0) return 0;
+
+            return stride * s.FlowIndex;
+        }
+
+        /// <summary>
+        /// 流程在「流程管理」里的序号（0 起）。多流程结果分区用它：
+        /// 与实际触发位用的是同一张顺序表，改顺序即改分区（见 FlowForm 的上移/下移）。
+        /// </summary>
+        private static int FlowIndexOf(FlowDefinition flow)
+        {
+            if (flow == null) return -1;
+
+            try
+            {
+                FlowSettings fs = ConfigStore.Current.Flows;
+                if (fs == null || fs.Flows == null) return -1;
+
+                for (int i = 0; i < fs.Flows.Count; i++)
+                {
+                    FlowDefinition f = fs.Flows[i];
+                    if (f == null) continue;
+                    if (ReferenceEquals(f, flow)) return i;
+                    if (!string.IsNullOrEmpty(flow.Id)
+                        && string.Equals(f.Id, flow.Id, StringComparison.OrdinalIgnoreCase)) return i;
+                }
+            }
+            catch (Exception) { }
+
+            return -1;
+        }
+
         public FlowRunSession Begin(FlowDefinition flow, ICamera camera, bool captureFrames = false,
                                     bool clearAutoRefs = true, bool captureSourceFrame = false)
         {
@@ -148,10 +218,13 @@ namespace VisionPlatform.Flow
 
             var s = new FlowRunSession();
             s.Flow = flow;
+            s.FlowIndex = FlowIndexOf(flow);
             s.Camera = camera;
             s.CaptureFrames = captureFrames;
             s.CaptureSourceFrame = captureSourceFrame;
             s.CaptureProgressFrames = true;
+            s.StopOnNg = (flow == null) || flow.StopOnNg;   // 未配置时按"遇 NG 停止"
+            s.FrameTimeoutMs = (flow != null) ? flow.FrameTimeoutMs : 0;   // 0 = 不限
 
             if (flow == null)
             {
@@ -196,6 +269,17 @@ namespace VisionPlatform.Flow
             if (session.Aborted) return null;
             if (session.Chain == null || session.Cursor >= session.Chain.Count) return null;
 
+            // 整帧超时：只在这里（节点之间）判一次。
+            // 【为什么不放在节点内部】节点内部有自己的 TimeoutMs，两层职责不同：
+            // 这里管"多个都不慢的节点加起来超了"，那里管"单个算法算太久"。
+            // 【为什么不是 0 就跳过】0 = 不限，绝大多数流程不设；不设时零开销。
+            if (session.FrameTimeoutMs > 0 && session.Watch != null
+                && session.Watch.ElapsedMilliseconds > session.FrameTimeoutMs)
+            {
+                StopChainByFrameTimeout(session);
+                return null;
+            }
+
             FlowNode node = session.Chain[session.Cursor];
 
             var p = new FlowNodeProgress();
@@ -217,9 +301,17 @@ namespace VisionPlatform.Flow
             }
 
             var sw = Stopwatch.StartNew();
+
+            // 节点级软超时：给本线程设截止时间，算法在自己的检查点主动退出。
+            // 0 / 负数 = 不限（老配置或用户显式关闭）。
+            // 【只对带这个参数的节点判】图像源/通讯/脚本那几类不参与（判据在 FlowNodeTraits，
+            // 与参数表同源）。否则脚本节点会被 500ms 默认值误杀 —— 用户代码跑 600ms 是正常的。
+            int timeoutMs = FlowNodeTraits.HasAlgoTimeout(type) ? node.GetInt("TimeoutMs", 500) : 0;
+
             bool ok;
             try
             {
+                VisionAlgo.SetDeadline(timeoutMs);
                 ok = ExecuteNode(session, node, type, p);
             }
             catch (Exception ex)
@@ -229,6 +321,12 @@ namespace VisionPlatform.Flow
                 // 完整异常（含原生 OpenCV 报错里的文件:行号与断言内容）写入日志，便于排查「显示不全」的报错
                 Logger.Error("节点「" + node.Name + "」(" + type + ") 执行异常：" + ex);
             }
+            finally
+            {
+                // 【必须清】deadline 是 thread_local：不清掉，下一个节点会继承上一帧的截止时间，
+                // 表现为"刚报过一次超时，后面所有节点都秒超时"。
+                VisionAlgo.SetDeadline(0);
+            }
             sw.Stop();
 
             // 每个节点执行完后刷新彩色通道：节点可能换过工作帧（灰度化 / 保持彩色 / 像素级变换），
@@ -237,6 +335,19 @@ namespace VisionPlatform.Flow
 
             p.ElapsedMs = (int)sw.ElapsedMilliseconds;
 
+            // 节点级超时的**兜底判据**：算法自己的检查点只能停在"两次 OpenCV 调用之间"，
+            // 单次 cv::matchTemplate / OpenVINO 推理内部是拦不住的。所以这里再按实际耗时判一次：
+            // 只要过了线，不管算法自己怎么报，都按超时判 NG —— 否则现场会看到
+            // "设了 500ms，实际跑了 1.2s 还判 OK"。
+            if (timeoutMs > 0 && p.ElapsedMs > timeoutMs)
+            {
+                ok = false;
+                if (p.Status != FlowNodeStatus.Ng) p.Status = FlowNodeStatus.Ng;
+
+                string detail = string.IsNullOrEmpty(p.Summary) ? "" : ("：" + p.Summary);
+                p.Summary = "超时（" + p.ElapsedMs + "ms > " + timeoutMs + "ms）" + detail;
+            }
+
             // 节点内部已显式设置 Skipped / Warn 时保持原状，不要覆盖成 Ok。
             // ⚠️ 这是 Warn 唯一的"让位点"：此后任何覆盖 p.Status 的代码都必须先检查
             //    是不是 Warn（Warn 只影响显示，绝不等于 NG，也不得被 Ok 抹平）。
@@ -244,7 +355,16 @@ namespace VisionPlatform.Flow
             if (p.Status == FlowNodeStatus.Running)
                 p.Status = ok ? FlowNodeStatus.Ok : FlowNodeStatus.Ng;
 
-            if (!ok) session.Passed = false;
+            // 记下"最后一个有结论的节点"：NG 继续跑模式下的流程判定就取它的值。
+            // Skipped 不算结论（被跳过 = 没有判决），Warn 算"通过但有话说"（Warn 永不等于 NG）。
+            if (p.Status == FlowNodeStatus.Ok || p.Status == FlowNodeStatus.Ng
+                || p.Status == FlowNodeStatus.Warn)
+            {
+                session.LastVerdict = p.Status;
+            }
+
+            // 遇 NG：Stop 模式累积失败并停止；Continue 模式只记进度，最终判定在 Finish 里按 LastVerdict 算。
+            if (!ok && session.StopOnNg) session.Passed = false;
 
             // 记录本次节点产出（脚本节点与后续数据联动从这里读）
             RecordOutput(session, node, type, p);
@@ -258,7 +378,79 @@ namespace VisionPlatform.Flow
 
             if (!string.IsNullOrEmpty(p.Summary)) session.Summaries.Add(p.Summary);
             session.Cursor++;
+
+            // 「遇 NG 立即停止」：把剩余节点记成 Skipped 再收链。
+            // 【为什么要补这些条目】不补的话，结果区只显示"跑到第 3 个就没了"，
+            // 用户无法区分"策略停止"与"流程只有 3 个节点 / 程序崩了"。
+            if (!ok && session.StopOnNg) StopChainByNg(session, node);
+
             return p;
+        }
+
+        /// <summary>
+        /// 「遇 NG 立即停止」时收尾：剩余节点全部记一条 Skipped，并把游标推到末尾。
+        /// </summary>
+        private static void StopChainByNg(FlowRunSession session, FlowNode failedNode)
+        {
+            if (session == null || session.Chain == null) return;
+
+            string reason = "前序节点「" + (failedNode != null ? failedNode.Name : "?")
+                          + "」NG，按「遇 NG 立即停止」策略跳过";
+
+            while (session.Cursor < session.Chain.Count)
+            {
+                FlowNode n = session.Chain[session.Cursor];
+                var skip = new FlowNodeProgress();
+                skip.NodeId = n != null ? n.Id : "";
+                skip.NodeName = n != null ? n.Name : "";
+                skip.Index = session.Cursor + 1;
+                skip.Total = session.Chain.Count;
+                skip.Status = FlowNodeStatus.Skipped;
+                skip.Summary = reason;
+                skip.ElapsedMs = 0;
+                session.Progress.Add(skip);
+                session.Summaries.Add(skip.Summary);
+                session.Cursor++;
+            }
+        }
+
+        /// <summary>
+        /// 整帧超时收尾：剩余节点记 Skipped、游标推到末尾，并标记本帧被截断。
+        /// </summary>
+        /// <remarks>
+        /// 【文案要点】必须报出<strong>实际耗时</strong>与<strong>在哪一步被截断</strong>：
+        /// 现场看到"第 4 个节点没跑"时，第一反应会是"流程少配了节点"，
+        /// 而真实原因是前面 3 个节点加起来已经超了。
+        /// </remarks>
+        private static void StopChainByFrameTimeout(FlowRunSession session)
+        {
+            if (session == null || session.Chain == null) return;
+
+            session.FrameTimedOut = true;
+            session.Passed = false;
+
+            long used = session.Watch != null ? session.Watch.ElapsedMilliseconds : 0;
+            string reason = "整帧超时（已用 " + used + "ms > " + session.FrameTimeoutMs
+                          + "ms），剩余节点未执行";
+
+            bool first = true;
+            while (session.Cursor < session.Chain.Count)
+            {
+                FlowNode n = session.Chain[session.Cursor];
+                var skip = new FlowNodeProgress();
+                skip.NodeId = n != null ? n.Id : "";
+                skip.NodeName = n != null ? n.Name : "";
+                skip.Index = session.Cursor + 1;
+                skip.Total = session.Chain.Count;
+                skip.Status = FlowNodeStatus.Skipped;
+                // 只在第一条写明细，后面统一写"整帧超时未执行" —— 否则结果区会刷一屏同样的长句
+                skip.Summary = first ? reason : "整帧超时，未执行";
+                skip.ElapsedMs = 0;
+                session.Progress.Add(skip);
+                session.Summaries.Add(skip.Summary);
+                session.Cursor++;
+                first = false;
+            }
         }
 
         /// <summary>收尾并产出结果。不释放会话（帧所有权仍归会话，由调用方决定何时释放）。</summary>
@@ -276,6 +468,15 @@ namespace VisionPlatform.Flow
             result.Progress = session.Progress;
             result.Shapes = CollectShapes(session);
 
+            // 把本帧的位姿修正留在结果里：界面据此把"选中节点的 ROI 轮廓"画到工件实际所在的位置，
+            // 否则位置修正生效后，预览上的 ROI 框还停在示教位、看起来像"没跟着工件走"。
+            result.TransformValid = session.Transform.IsValid;
+            result.TransformDx = session.Transform.DX;
+            result.TransformDy = session.Transform.DY;
+            result.TransformDAngle = session.Transform.DAngle;
+            result.TransformWarped = session.Transform.Warped;
+            result.Transform = session.Transform;
+
             if (session.Aborted && !string.IsNullOrEmpty(session.ErrorMessage))
             {
                 result.Message = session.ErrorMessage;
@@ -284,7 +485,22 @@ namespace VisionPlatform.Flow
             }
 
             result.Success = true;
-            result.Passed = session.Passed;
+
+            // 流程判定：
+            //   Stop 模式（默认）—— 任一节点 NG 即整条失败（Passed 在 StepNext 里累积）。
+            //   Continue 模式     —— 不看"有没有人 NG 过"，只取**最后一个有结论的节点**
+            //                        （对应现场："按最后一个插件或脚本的返回值判 OK/NG"）。
+            //                        一个都没跑成（全 Skipped / 空链）时沿用 Passed，避免"空流程算 NG"。
+            result.Passed = session.StopOnNg
+                ? session.Passed
+                : (session.LastVerdict == FlowNodeStatus.Pending
+                    ? session.Passed
+                    : session.LastVerdict != FlowNodeStatus.Ng);
+
+            // 整帧超时是"这一轮没跑完"，跟末节点判了什么无关 —— 必须无条件压成 NG。
+            // （否则 Continue 模式下末节点恰好 OK，会把一个只跑了半个流程的帧判成良品。）
+            if (session.FrameTimedOut) result.Passed = false;
+
             result.Summary = string.Join("；", session.Summaries);
             result.BaselineTaught = _baselineTaught;
             result.BaselineNodeId = _baselineNodeId ?? "";
@@ -327,7 +543,10 @@ namespace VisionPlatform.Flow
                         // 【本轮追加】多流程并行时用于区分结果归属（FR-PAR-04）
                         FlowId = flow != null ? (flow.Id ?? "") : "",
                         FlowName = flow != null ? (flow.Name ?? "") : "",
-                        Product = flow != null ? (flow.Product ?? "") : ""
+                        Product = flow != null ? (flow.Product ?? "") : "",
+
+                        // 3D：本周期产出过点云时一并带出（引用，无释放手续）
+                        Cloud = session.CurrentCloud
                     };
 
                     EventHandler<FlowOutputEventArgs> handler = OutputReady;
@@ -401,6 +620,8 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.PointPointMeasure: return RunPointPointMeasure(s, node, p);
                 case FlowNodeType.PointLineMeasure:  return RunPointLineMeasure(s, node, p);
                 case FlowNodeType.LineLineMeasure:   return RunLineLineMeasure(s, node, p);
+                case FlowNodeType.BarcodeRead:       return RunBarcode(s, node, p);
+                case FlowNodeType.PointCloudSource:  return RunPointCloudSource(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -528,7 +749,8 @@ namespace VisionPlatform.Flow
             // 还是执行顺序不对（脚本没排在链尾）。
             p.Summary += string.Format(CultureInfo.InvariantCulture, "（上游 {0} 个节点）", s.Outputs.Count);
             if (api.SetNames.Count > 0)
-                p.Summary += "（输出：" + string.Join("、", api.SetNames.ToArray()) + "）";
+                // 【带值】只报变量名等于没报：现场要的就是 PosX=512.3 这类具体结果。
+                p.Summary += "（输出：" + DescribeNamedValues(api) + "）";
 
             // 声明的输出变量必须都写过，否则下游拿到的是空值 —— 在摘要里点名
             string missing = MissingOutputs(node.GetString("OutDefs", ""), api.SetNames);
@@ -545,6 +767,37 @@ namespace VisionPlatform.Flow
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 把脚本写出的命名输出拼成 <c>PosX=512.3、PosY=349.8</c>。
+        /// <para>数值统一保留 4 位小数（坐标 / 角度够用，且不会因为 512.30000000001 这种浮点尾巴刷屏）；
+        /// 非数值原样输出；空值写 <c>--</c>，一眼能区分"没算出来"和"算出来是 0"。</para>
+        /// </summary>
+        private static string DescribeNamedValues(ScriptApi api)
+        {
+            var parts = new List<string>();
+            foreach (string name in api.SetNames)
+            {
+                object v = api.GetValue(name);
+                parts.Add(name + "=" + DescribeValue(v));
+            }
+            return string.Join("、", parts.ToArray());
+        }
+
+        private static string DescribeValue(object v)
+        {
+            if (v == null) return "--";
+            if (v is bool) return ((bool)v) ? "true" : "false";
+            if (v is string) return (string)v;
+
+            if (v is double || v is float || v is decimal || v is int || v is long || v is short)
+            {
+                double d = Convert.ToDouble(v, CultureInfo.InvariantCulture);
+                return d.ToString("0.####", CultureInfo.InvariantCulture);
+            }
+
+            return v.ToString();
         }
 
         /// <summary>OutDefs 里声明了、但脚本没有 api.Set 的输出名（逗号分隔）。</summary>
@@ -868,10 +1121,30 @@ namespace VisionPlatform.Flow
             catch (Exception) { }
         }
 
+        /// <summary>
+        /// 把一次算法失败的文案拼成「<前缀>[错误码名] 具体原因」。
+        /// <para>
+        /// 【为什么要带错误码】原来只拼一句人读文本，操作员看到"形状匹配失败"却不知道是
+        /// 配置错（ROI 越界）、还是模板没特征、还是真没找到目标 —— 处理动作完全不同。
+        /// 码名进摘要后，一眼能分到"该去改参数"还是"该去看料"。
+        /// </para>
+        /// </summary>
+        private string Fail(string prefix, OpResult r)
+        {
+            ErrorInfo info = _algo.LastErrorInfo;
+            string tag = (info != null && info.Code > 0) ? "[" + VaResult.ToString(info.Code) + "] " : "";
+            string msg = (info != null && !string.IsNullOrEmpty(info.Message))
+                         ? info.Message
+                         : (r != null ? r.Message : "");
+            return prefix + tag + msg;
+        }
+
         private static string Shorten(string s, int max)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            return s.Length <= max ? s : s.Substring(0, max) + "…";
+            // 换行必须压平：二维码/条码内容常带换行，直接塞进标签会把行撑断
+            string t = s.Replace("\r", " ").Replace("\n", " ").Trim();
+            return t.Length <= max ? t : t.Substring(0, Math.Max(1, max - 1)) + "…";
         }
 
         /// <summary>
@@ -1581,6 +1854,99 @@ namespace VisionPlatform.Flow
                 || string.Equals(source, "Folder", StringComparison.OrdinalIgnoreCase);
         }
 
+        // =====================================================================
+        //  读取点云（3D）
+        // =====================================================================
+
+        /// <summary>点云文件夹模式接受的扩展名（点云本身 + 深度图）。</summary>
+        private static readonly string[] PointCloudExts =
+        {
+            ".ply", ".pcd", ".png", ".bmp", ".jpg", ".jpeg", ".tif", ".tiff"
+        };
+
+        /// <summary>
+        /// 读取点云节点：PLY / PCD 文件（单文件或文件夹轮播）或深度图（内参反投影）→ 点云。
+        /// 产出写到 <see cref="FlowRunSession.CurrentCloud"/>（主界面显示）与
+        /// <see cref="FlowNodeProgress.Cloud"/>（流程预览显示）；两者都是引用移交，无释放手续。
+        /// </summary>
+        private bool RunPointCloudSource(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            string source = node.GetString("Source", "File");
+            string frameNote = "";
+            string path;
+
+            try
+            {
+                if (string.Equals(source, "Folder", StringComparison.OrdinalIgnoreCase))
+                {
+                    string folder = node.GetString("FolderPath", "");
+                    string listError;
+                    string[] files = ImageFolderSource.List(folder, PointCloudExts, "点云", out listError);
+                    if (files.Length == 0)
+                    {
+                        p.Summary = "点云源：" + (listError ?? "文件夹内没有点云");
+                        return false;
+                    }
+
+                    // 与图像源同一套游标：同链两个点云源各自计数，换目录自动回到第一个
+                    string cursorKey = ImageFolderCursor.Key(s.Flow, node, folder);
+                    int idx = ImageFolderCursor.Next(cursorKey, files.Length,
+                                                     node.GetBool("FolderPersist", false),
+                                                     node.GetInt("FolderHoldMs", 0));
+                    path = files[idx];
+
+                    frameNote = string.Format(CultureInfo.InvariantCulture, "第 {0}/{1} 个 · {2}",
+                                              idx + 1, files.Length, System.IO.Path.GetFileName(path));
+                }
+                else
+                {
+                    path = node.GetString("FilePath", "");
+                    if (string.IsNullOrWhiteSpace(path))
+                    {
+                        p.Summary = "点云源：未选择点云文件";
+                        return false;
+                    }
+                    if (!System.IO.File.Exists(path))
+                    {
+                        p.Summary = "点云源：文件不存在（" + path + "）";
+                        return false;
+                    }
+                }
+
+                double fx = node.GetDouble("Fx", 1000);
+                double fy = node.GetDouble("Fy", 1000);
+                double cx = node.GetDouble("Cx", 320);
+                double cy = node.GetDouble("Cy", 240);
+                double zScale = node.GetDouble("ZScale", 1);
+
+                string loadError;
+                VisionSystem.Controls.PointCloud.PointCloudData cloud =
+                    VisionSystem.Controls.PointCloud.PointCloudFileReader.Load(path, fx, fy, cx, cy, zScale, out loadError);
+                if (cloud == null)
+                {
+                    p.Summary = "点云源：" + (loadError ?? "读取失败");
+                    return false;
+                }
+
+                // 会话留最新点云（主界面 OutputReady 用）；预览按节点带一份引用
+                s.CurrentCloud = cloud;
+                if (s.CaptureFrames) p.Cloud = cloud;
+
+                p.Outputs.Add(new PortValue("Count", "点数", FlowPortKind.Number, (double)cloud.Count));
+                if (p.Metrics != null) p.Metrics.TargetCount = cloud.Count;   // 结果区类型化输出同源
+
+                p.Summary = (frameNote.Length > 0 ? frameNote + " · " : "")
+                          + "点数 " + cloud.Count.ToString("N0", CultureInfo.InvariantCulture)
+                          + (cloud.HasColor ? " · 含颜色" : "");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                p.Summary = "点云源：读取失败（" + ex.Message + "）";
+                return false;
+            }
+        }
+
         /// <summary>
         /// 读图片到内存位图；失败返回 null 并给出原因。
         /// <para>先 <c>Image.FromFile</c> 再拷贝：避免 Bitmap 长期持有文件句柄（否则用户想删/换图会被占住）。</para>
@@ -1614,7 +1980,7 @@ namespace VisionPlatform.Flow
             var pr = _algo.Preprocess(s.Current, BuildPreprocess(node));
             if (!pr.Success)
             {
-                p.Summary = "预处理失败：" + pr.Message;
+                p.Summary = Fail("预处理失败：", pr);
                 return false;
             }
 
@@ -1922,6 +2288,7 @@ namespace VisionPlatform.Flow
             //    位置修正带旋转时走**仿射裁剪**（拿到的图跟着工件一起转），否则原样整数裁剪。
             Rectangle roi = Rectangle.Empty;
             bool roiAffine = false;
+            double roiAngle = RoiAngleOf(node);   // ROI 自身角度（示教时画出来的倾斜）
             Bitmap crop = null;
             Bitmap gray = null;
             bool grayOwned = false;
@@ -1953,6 +2320,10 @@ namespace VisionPlatform.Flow
                     Invert = node.GetBool("Invert", false),
                     MinCharH = node.GetDouble("MinCharH", 0),
                     MaxCharH = node.GetDouble("MaxCharH", 0),
+                    MinCharW = node.GetDouble("MinCharW", 0),
+                    MaxCharW = node.GetDouble("MaxCharW", 0),
+                    MinArea = node.GetDouble("MinArea", 0),
+                    MaxArea = node.GetDouble("MaxArea", 0),
                     MinAspect = node.GetDouble("MinAspect", 0),
                     MaxAspect = node.GetDouble("MaxAspect", 0),
                     MaxGap = node.GetInt("MaxGap", 3),
@@ -1988,7 +2359,30 @@ namespace VisionPlatform.Flow
                     dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dirName);
                 }
 
-                OpResult<OcrTemplateLoadResult> tpl = EnsureOcrTemplates(dir);
+                // ③ **必须先设参、再灌模板**：
+                //   模板在 native 侧要"二值化 + 归一化"后才进库，用的正是 ctx->ocr.param。
+                //   之前这里先灌模板、后设参，结果模板按"上一次的参数甚至全 0"处理，
+                //   与候选（按节点参数）尺寸/极性对不上 —— 表现就是"有模板却大量字认不出来"。
+                OpResult sp = _algo.SetOcrParam(op);
+                if (!sp.Success)
+                {
+                    p.Summary = "字符识别：" + Tail(sp.Message);
+                    return false;
+                }
+
+                // 这几个参数会改变模板的二进制表示，改了就**必须重灌模板**，否则库里还是旧样子
+                string normKey = op.Threshold.ToString(CultureInfo.InvariantCulture) + "|"
+                               + (op.Invert ? "1" : "0") + "|"
+                               + op.NormW.ToString(CultureInfo.InvariantCulture) + "|"
+                               + op.NormH.ToString(CultureInfo.InvariantCulture);
+
+                // ③' 字符源：训练出来的 .ocrtpl 优先；没有库时回落到旧目录（一个字符一张图）。
+                string libPath = OcrCharLibraryFile.ResolveActive(node.GetString("LibFile", ""),
+                                                                  (s.Flow != null) ? s.Flow.Id : "");
+                OpResult<OcrTemplateLoadResult> tpl = (libPath != null)
+                    ? EnsureOcrLibrary(libPath, normKey)
+                    : EnsureOcrTemplates(dir, normKey);
+
                 if (!tpl.Success)
                 {
                     p.Summary = "字符识别：" + Tail(tpl.Message);
@@ -2039,16 +2433,18 @@ namespace VisionPlatform.Flow
                 {
                     if (roiAffine)
                     {
-                        // 仿射：区域框本身也要跟着转，否则看起来像"框没跟随"
-                        PointF c = s.Transform.ApplyToPoint(roi.X + roi.Width / 2.0,
-                                                            roi.Y + roi.Height / 2.0);
-                        var regionRot = new RotatedRectShape(c, roi.Width, roi.Height, (float)s.Transform.DAngle);
+                        // 仿射：区域框本身也要跟着转（绕 ROI 中心 = RoiAngle + dAngle），
+                        // 否则看起来像"框没跟随"——画成轴对齐外接框时尤其明显：
+                        // 界面上的轮廓转了，运行期的框没转，用户看到的就是"有一个 ROI 一直不变"。
+                        double effAngle = RoiAffineMap.EffectiveAngle(s.Transform, roiAngle);
+                        PointF c = RoiAffineMap.FrameCenter(s.Transform, roi);
+                        var regionRot = new RotatedRectShape(c, roi.Width, roi.Height, (float)effAngle);
                         regionRot.StrokeColor = FlowShapes.ColorOcrRegion;
                         regionRot.LineWidth = 1.5f;
                         regionRot.IsEditable = false;
                         regionRot.Name = "OcrRegion";
                         regionRot.Label = "OCR 区域 " + roi.Width + "×" + roi.Height
-                                          + "（旋转 " + s.Transform.DAngle.ToString("F1") + "°）";
+                                          + "（旋转 " + effAngle.ToString("F1") + "°）";
                         p.AuxShapes.Add(regionRot);
                     }
                     else
@@ -2062,19 +2458,27 @@ namespace VisionPlatform.Flow
                     }
                 }
 
+                // ⑧ 之前的公共量：仿射下字符框/串框的角度就是生效角度
+                double boxAngle = roiAffine ? RoiAffineMap.EffectiveAngle(s.Transform, roiAngle) : 0.0;
+
                 // ⑦ 合并字符串框（默认开）：按行归并，一行一个框，标签就是该行的识别文本。
                 //    逐字符框是另一个开关，默认关 —— "一行 30 个框"是噪声不是清晰。
                 if (showStringBox && chars.Count > 0)
                 {
                     foreach (OcrLine line in GroupOcrLines(chars))
                     {
-                        PointF lineC = MapRoiPoint(s, roi, roiAffine,
+                        PointF lineC = MapRoiPoint(s, roi, roiAngle, roiAffine,
                             line.X + line.W / 2.0, line.Y + line.H / 2.0);
-                        var lineBox = FlowShapes.OcrStringBox(
-                            new Rectangle((int)Math.Round(lineC.X - line.W / 2.0),
-                                          (int)Math.Round(lineC.Y - line.H / 2.0),
-                                          Math.Max(1, (int)Math.Round(line.W)), Math.Max(1, (int)Math.Round(line.H))),
-                            string.IsNullOrEmpty(line.Text) ? "?" : line.Text);
+                        string txt = string.IsNullOrEmpty(line.Text) ? "?" : line.Text;
+
+                        IGeometryShape lineBox = roiAffine
+                            ? (IGeometryShape)FlowShapes.OcrStringRotBox(lineC, line.W, line.H, boxAngle, txt)
+                            : FlowShapes.OcrStringBox(
+                                new Rectangle((int)Math.Round(lineC.X - line.W / 2.0),
+                                              (int)Math.Round(lineC.Y - line.H / 2.0),
+                                              Math.Max(1, (int)Math.Round(line.W)),
+                                              Math.Max(1, (int)Math.Round(line.H))),
+                                txt);
                         if (lineBox != null) p.AuxShapes.Add(lineBox);
                     }
                 }
@@ -2088,9 +2492,12 @@ namespace VisionPlatform.Flow
                     {
                         string label = (string.IsNullOrEmpty(c.Label) ? "?" : c.Label)
                                      + " " + c.Score.ToString("F2", CultureInfo.InvariantCulture);
-                        PointF cc = MapRoiPoint(s, roi, roiAffine,
+                        PointF cc = MapRoiPoint(s, roi, roiAngle, roiAffine,
                             c.X + c.W / 2.0, c.Y + c.H / 2.0);
-                        var box = FlowShapes.OcrBox(cc.X - c.W / 2.0, cc.Y - c.H / 2.0, c.W, c.H, label);
+
+                        IGeometryShape box = roiAffine
+                            ? (IGeometryShape)FlowShapes.OcrCharRotBox(cc, c.W, c.H, boxAngle, label)
+                            : FlowShapes.OcrBox(cc.X - c.W / 2.0, cc.Y - c.H / 2.0, c.W, c.H, label);
                         if (box != null) box.Name = "OcrChar";
                         p.Shapes.Add(box);
                     }
@@ -2252,12 +2659,32 @@ namespace VisionPlatform.Flow
 
             string mode = node.GetString("DataMode", "FixedText");
             bool autoConnect = node.GetBool("AutoConnect", true);
+            string upstream = FindUpstreamText(s);
 
             string content;
             if (string.Equals(mode, "ModbusWrite", StringComparison.OrdinalIgnoreCase))
             {
-                int addr = node.GetInt("MbAddress", 0);
+                // 批量映射优先：把上游数值（坐标 / 角度 / 结论）一次写进多个寄存器。
+                // 单寄存器那套（MbAddress + MbValue）只能写固定值，产线上根本不够用。
+                string map = node.GetString("MbMap", "");
+                if (!string.IsNullOrWhiteSpace(map))
+                    return RunModbusMap(s, node, p, commName, map, autoConnect);
+
+                // 多流程分区：实际地址 = 配置地址 + 流程序号 × 步长（步长 0 = 关闭，老行为不变）
+                int flowShift = FlowAddressShift(s, node);
+
+                int addr = node.GetInt("MbAddress", 0) + flowShift;
                 int val = node.GetInt("MbValue", 0);
+
+                // 高频笔误：把 Modbus 端口 502 填进了"寄存器地址"。502 本身是合法寄存器号，
+                // 光看范围查不出来，但写进 PLC 的 502 号寄存器不会有任何业务效果 —— 提前点破。
+                if (addr == 502)
+                {
+                    p.Summary = "发送数据：寄存器地址填的是 502 —— 那是 Modbus 的端口号，不是寄存器地址；"
+                              + "这里要填 PLC 的保持寄存器号（0 起，例如结果位 20）";
+                    return false;
+                }
+
                 if (addr < 0 || addr > 65535 || val < 0 || val > 65535)
                 {
                     p.Summary = "发送数据：Modbus 地址 / 写入值需在 0~65535（当前 "
@@ -2266,11 +2693,31 @@ namespace VisionPlatform.Flow
                     return false;
                 }
 
-                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p)) return false;
+                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p))
+                {
+                    if (IsTransferUnavailable(p.Summary))
+                    {
+                        // 链路未就绪（PLC 掉线 / 监听没起来 / 自动连接冷却）不是检测失败：
+                        // 判 Warn（只影响显示、永不等于 NG），否则整帧 NG、产线永远不是良品。
+                        p.Status = FlowNodeStatus.Warn;
+                        p.Summary = p.Summary + "（本次未发送，不判 NG）";
+                        CaptureCommFrame(s, p);
+                        return true;
+                    }
+                    return false;
+                }
 
                 OpResult wr = CommRegistry.ModbusWrite(commName, (ushort)addr, (ushort)val);
                 if (!wr.Success)
                 {
+                    if (IsTransferUnavailable(wr.Message))
+                    {
+                        p.Status = FlowNodeStatus.Warn;
+                        p.Summary = "发送数据：" + commName + " → 未写入（" + Tail(wr.Message) + "，不判 NG）";
+                        CaptureCommFrame(s, p);
+                        return true;
+                    }
+
                     p.Summary = "发送数据：" + Tail(wr.Message);
                     return false;
                 }
@@ -2279,23 +2726,251 @@ namespace VisionPlatform.Flow
             }
             else
             {
+                // 【配置错误兜底】目标是 Modbus 却选了文本模式：直接给出可执行的改法。
+                // 否则会落到 CommRegistry.SendText 的"不支持文本发送"，现场看不出该改什么，
+                // 表现就是"点了发送一点反应都没有、模拟器那边什么都没收到"。
+                CommEndpointConfig ep = CommRegistry.Config(commName);
+                if (ep != null && CommKind.Normalize(ep.Kind) == CommKind.ModbusTcp)
+                {
+                    p.Summary = "发送数据：「" + commName + "」是 Modbus TCP，只能写寄存器 —— "
+                              + "请把「发送方式」改成「Modbus 写寄存器」（并填寄存器地址 / 写入值），"
+                              + "或把通讯换成 TCP 客户端 / 服务端";
+                    return false;
+                }
+
                 content = string.Equals(mode, "Format", StringComparison.OrdinalIgnoreCase)
-                    ? ExpandCommFormat(node.GetString("Format", ""), s)
+                    ? ExpandCommFormat(node.GetString("Format", ""), s).Replace("{Input}", upstream)
                     : node.GetString("Text", "");
 
-                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p)) return false;
+                // 固定文本留空时自动取上游文本输出：Text 输入端子真正可用
+                // （脚本 / OCR → 发送数据直连即可发上游文本，不必把内容抄进参数）
+                if (content.Length == 0 && upstream.Length > 0) content = upstream;
+
+                if (autoConnect && !EnsureCommConnected(commName, "发送数据", p))
+                {
+                    if (IsTransferUnavailable(p.Summary))
+                    {
+                        p.Status = FlowNodeStatus.Warn;
+                        p.Summary = p.Summary + "（本次未发送，不判 NG）";
+                        CaptureCommFrame(s, p);
+                        return true;
+                    }
+                    return false;
+                }
 
                 OpResult sr = CommRegistry.SendText(commName, content);
                 if (!sr.Success)
                 {
+                    if (IsTransferUnavailable(sr.Message))
+                    {
+                        // 典型场景：MES 是 TCP 服务端但还没有客户端接入 → Broadcast 返回"没有客户端连接"。
+                        // 视觉侧没有可发的对象，不是检测失败，判 Warn 并在摘要里说清（与「接收数据无数据判跳过」同口径）。
+                        p.Status = FlowNodeStatus.Warn;
+                        p.Summary = "发送数据：" + commName + " → 未发出（" + Tail(sr.Message) + "，不判 NG）";
+                        CaptureCommFrame(s, p);
+                        return true;
+                    }
+
                     p.Summary = "发送数据：" + Tail(sr.Message);
                     return false;
                 }
             }
 
+            // Text 输出端子承载实际发出的内容：下游脚本 / 结果输出按端子读取
+            if (p.Metrics != null) p.Metrics.Text = content;
+
             CaptureCommFrame(s, p);
             p.Summary = "发送数据：" + commName + " ← " + ClipText(content, 80);
             return true;
+        }
+
+        /// <summary>
+        /// Modbus 批量写：按 <c>名:地址:类型</c> 把上游数值一次写进多个寄存器。
+        /// <para>【为什么需要】单寄存器模式只能写固定值，坐标 / 角度 / OK-NG 都进不了 PLC；
+        /// 产线要的是"这一轮的 X/Y/角度/结论"按约定地址落到 PLC 寄存器里。
+        /// 源名取脚本节点的命名输出（<c>api.Set("PosX", …)</c>），
+        /// <c>OkNg</c> / <c>Passed</c> 是内置源：本帧到目前为止没有 NG 就写 1。</para>
+        /// <para>中途某一项失败即停止并报出是哪一项，不吞错 —— 半套坐标比没有坐标更危险。</para>
+        /// </summary>
+        private bool RunModbusMap(FlowRunSession s, FlowNode node, FlowNodeProgress p, string commName,
+                                  string map, bool autoConnect)
+        {
+            var items = new List<string[]>();
+            foreach (string raw in map.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] cols = raw.Split(':');
+                if (cols.Length < 2)
+                {
+                    p.Summary = "发送数据：批量写格式应为「名:地址:类型」，例如 PosX:30:Int32；当前解析不了：" + raw.Trim();
+                    return false;
+                }
+
+                string name = cols[0].Trim();
+                int addr;
+                if (!int.TryParse(cols[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out addr)
+                    || addr < 0 || addr > 65535)
+                {
+                    p.Summary = "发送数据：批量写里「" + name + "」的地址需为 0~65535，当前：" + cols[1].Trim();
+                    return false;
+                }
+
+                string type = cols.Length > 2 && cols[2].Trim().Length > 0 ? cols[2].Trim() : "UInt16";
+                if (!TryParseModbusType(type, out ModbusDataType _))
+                {
+                    p.Summary = "发送数据：批量写里「" + name + "」的类型「" + type
+                              + "」不认识（可用 Int16 / UInt16 / Int32 / UInt32 / Float32 / Float64）";
+                    return false;
+                }
+
+                items.Add(new[] { name, addr.ToString(CultureInfo.InvariantCulture), type });
+            }
+
+            if (items.Count == 0)
+            {
+                p.Summary = "发送数据：批量写没有任何有效项";
+                return false;
+            }
+
+            if (autoConnect && !EnsureCommConnected(commName, "发送数据", p))
+            {
+                if (IsTransferUnavailable(p.Summary))
+                {
+                    p.Status = FlowNodeStatus.Warn;
+                    p.Summary = p.Summary + "（本次未写入，不判 NG）";
+                    CaptureCommFrame(s, p);
+                    return true;
+                }
+                return false;
+            }
+
+            int shift = FlowAddressShift(s, node);
+            var done = new List<string>();
+            foreach (string[] it in items)
+            {
+                string name = it[0];
+                int addr = int.Parse(it[1], CultureInfo.InvariantCulture) + shift;
+                ModbusDataType mdt;
+                TryParseModbusType(it[2], out mdt);
+
+                string text;
+                if (string.Equals(name, "OkNg", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "Passed", StringComparison.OrdinalIgnoreCase))
+                {
+                    text = FramePassedSoFar(s) ? "1" : "0";
+                }
+                else
+                {
+                    double value;
+                    if (!TryGetNamedNumber(s, name, out value))
+                    {
+                        p.Summary = "发送数据：上游没有名为「" + name + "」的数值输出"
+                                  + "（脚本节点要先 Set(\"" + name + "\", 值)；当前已有："
+                                  + DescribeNamedValueNames(s) + "）";
+                        return false;
+                    }
+                    text = FormatForModbus(mdt, value);
+                }
+
+                OpResult wr = CommRegistry.ModbusWriteAs(commName, mdt, (ushort)addr, text,
+                                                         ModbusWordOrder.ABCD);
+                if (!wr.Success)
+                {
+                    if (IsTransferUnavailable(wr.Message))
+                    {
+                        p.Status = FlowNodeStatus.Warn;
+                        p.Summary = "发送数据：" + commName + " → 未写入（" + Tail(wr.Message) + "，不判 NG）";
+                        CaptureCommFrame(s, p);
+                        return true;
+                    }
+
+                    p.Summary = "发送数据：" + name + "@" + addr + " 写入失败：" + Tail(wr.Message);
+                    return false;
+                }
+
+                done.Add(name + "@" + addr + "=" + text);
+            }
+
+            if (p.Metrics != null) p.Metrics.Text = string.Join("、", done.ToArray());
+            CaptureCommFrame(s, p);
+            p.Summary = "发送数据：" + commName + " ← " + ClipText(string.Join("、", done.ToArray()), 120);
+            return true;
+        }
+
+        /// <summary>帧内到目前为止没有 NG 节点即视为通过（发送节点通常排在链尾，能看到全部上游结论）。</summary>
+        private static bool FramePassedSoFar(FlowRunSession s)
+        {
+            if (s == null || s.Outputs == null) return true;
+            foreach (NodeOutput o in s.Outputs)
+                if (o != null && o.Status == FlowNodeStatus.Ng) return false;
+            return true;
+        }
+
+        private static bool TryGetNamedNumber(FlowRunSession s, string name, out double value)
+        {
+            value = 0;
+            if (s == null || s.NamedValues == null || string.IsNullOrEmpty(name)) return false;
+
+            object v;
+            if (!s.NamedValues.TryGetValue(name, out v) || v == null) return false;
+
+            try
+            {
+                value = Convert.ToDouble(v, CultureInfo.InvariantCulture);
+                return !double.IsNaN(value) && !double.IsInfinity(value);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static string DescribeNamedValueNames(FlowRunSession s)
+        {
+            if (s == null || s.NamedValues == null || s.NamedValues.Count == 0) return "无";
+            var names = new List<string>();
+            foreach (string k in s.NamedValues.Keys) names.Add(k);
+            names.Sort(StringComparer.Ordinal);
+            return string.Join("、", names.ToArray());
+        }
+
+        private static bool TryParseModbusType(string text, out ModbusDataType type)
+        {
+            type = ModbusDataType.UInt16;
+            if (string.IsNullOrWhiteSpace(text)) return true;
+
+            foreach (ModbusDataType t in ModbusData.AllTypes())
+            {
+                if (string.Equals(t.ToString(), text.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    type = t;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>按数据类型把数值格式化成 <see cref="ModbusTcpClient.WriteAs"/> 能解析的文本。</summary>
+        private static string FormatForModbus(ModbusDataType type, double value)
+        {
+            if (type == ModbusDataType.Float32 || type == ModbusDataType.Float64)
+                return value.ToString("0.######", CultureInfo.InvariantCulture);
+
+            // 整数类型：四舍五入后写整数字面量（写成 512.0 会被 Encode 判为非法整数）
+            double rounded = Math.Round(value, MidpointRounding.AwayFromZero);
+            return ((long)rounded).ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>取上游最近一个非空文本输出（OCR / 脚本 / 接收数据都会写 Text）；没有返回空串。</summary>
+        private static string FindUpstreamText(FlowRunSession s)
+        {
+            if (s == null || s.Outputs == null) return "";
+
+            for (int i = s.Outputs.Count - 1; i >= 0; i--)
+            {
+                NodeOutput o = s.Outputs[i];
+                if (o != null && !string.IsNullOrEmpty(o.Text)) return o.Text;
+            }
+            return "";
         }
 
         /// <summary>
@@ -2370,6 +3045,10 @@ namespace VisionPlatform.Flow
                 content = text;
             }
 
+            // Text 输出端子承载收到的文本，Number 端子承载长度（端子表与实际输出一致）
+            if (p.Metrics != null) p.Metrics.Text = content;
+            p.Outputs.Add(new PortValue("Length", "长度", FlowPortKind.Number, content.Length));
+
             CaptureCommFrame(s, p);
             p.Summary = "接收数据：" + commName + " → " + ClipText(content, 80);
             return true;
@@ -2392,12 +3071,14 @@ namespace VisionPlatform.Flow
             return name;
         }
 
-        /// <summary>AutoConnect 时未连接就连一次；连接失败写摘要并返回 false（已连接直接 true）。</summary>
+        /// <summary>AutoConnect 时未连接就自动连一次（带失败冷却）；连接失败写摘要并返回 false（已连接直接 true）。</summary>
         private static bool EnsureCommConnected(string commName, string prefix, FlowNodeProgress p)
         {
             if (CommRegistry.IsConnected(commName)) return true;
 
-            OpResult r = CommRegistry.Connect(commName);
+            // 自动路径必须带冷却：流程每帧都可能走到这里，对掉线的 PLC
+            // 不加冷却就是"每帧一次秒级连接"，节点耗时被连接超时吃掉。
+            OpResult r = CommRegistry.ConnectAuto(commName);
             if (r.Success) return true;
 
             p.Summary = prefix + "：" + Tail(r.Message);
@@ -2416,6 +3097,29 @@ namespace VisionPlatform.Flow
                 try { p.Frame = (Bitmap)s.Current.Clone(); }
                 catch (Exception) { p.Frame = null; }
             }
+        }
+
+        /// <summary>
+        /// 判断一次通讯失败是否属于「链路 / 对端未就绪」——这类失败<strong>不判 NG</strong>，
+        /// 只判 <see cref="FlowNodeStatus.Warn"/> 并在摘要里写清。
+        /// <para>
+        /// 【为什么】"输出信号"节点在 <c>MES 是 TCP 服务端但还没客户端接入</c>、
+        /// <c>PLC 掉线（自动连接冷却中）</c>时必然发不出去，这是运行条件不足，不是检测结论；
+        /// 判 NG 会让整帧 NG，现场看到的却是"检测明明过了却一直 NG"。
+        /// 与「接收数据收不到数据判 Skipped」是同一口径：链路问题不冒充算法结论。
+        /// </para>
+        /// <para>真正的失败（端口占用、插件未装、寄存器地址非法、队列超时）仍判 NG。</para>
+        /// </summary>
+        private static bool IsTransferUnavailable(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return false;
+
+            return message.IndexOf("没有客户端", StringComparison.Ordinal) >= 0
+                || message.IndexOf("冷却中", StringComparison.Ordinal) >= 0
+                || message.IndexOf("未连接", StringComparison.Ordinal) >= 0
+                || message.IndexOf("未启动", StringComparison.Ordinal) >= 0
+                || message.IndexOf("正在连接中", StringComparison.Ordinal) >= 0
+                || message.IndexOf("未处于运行状态", StringComparison.Ordinal) >= 0;
         }
 
         /// <summary>
@@ -2464,7 +3168,124 @@ namespace VisionPlatform.Flow
         /// ③ 读失败的原因逐条保留（0 字节 / 不是有效图像 / 尺寸异常 / 读盘异常），
         ///    只有"给不出原因"的失败才允许只报计数。
         /// </remarks>
-        private OpResult<OcrTemplateLoadResult> EnsureOcrTemplates(string dir)
+        /// <summary>
+        /// 装载单文件字符库（<c>.ocrtpl</c>）。
+        /// <para>
+        /// 与 <see cref="EnsureOcrTemplates"/> 的关系：两者产出的 <see cref="OcrTemplateLoadResult"/>
+        /// 完全同构（四态 / 失败清单 / Brief 都复用），上层无需分支；区别只在"从哪读样本"。
+        /// </para>
+        /// <para>
+        /// 【库坏了不当场抛】读不出来时返回"0 个模板 + 失败清单"，让流程继续做字符分割 ——
+        /// 现场一条库文件损坏不应该让整条产线停摆，但必须把原因带到结果摘要里。
+        /// </para>
+        /// </summary>
+        private OpResult<OcrTemplateLoadResult> EnsureOcrLibrary(string path, string normKey)
+        {
+            string stamp;
+            try
+            {
+                var fi = new FileInfo(path);
+                stamp = fi.Exists ? (fi.Length.ToString(CultureInfo.InvariantCulture) + "|" +
+                                     fi.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture))
+                                  : "missing";
+                stamp += "|" + (normKey ?? "");     // 归一化参数变了 → 视为换了源，必须重灌
+            }
+            catch (Exception ex)
+            {
+                return OpResult<OcrTemplateLoadResult>.Fail("无法读取字符库状态 " + path + "：" + ex.Message);
+            }
+
+            OpResult<int> cur = _algo.OcrTemplateCount();
+            if (!cur.Success) return OpResult<OcrTemplateLoadResult>.Fail(cur.Message);
+
+            bool sameSource = string.Equals(path, _ocrLibPath, StringComparison.OrdinalIgnoreCase)
+                              && string.Equals(stamp, _ocrLibStamp, StringComparison.Ordinal);
+            if (cur.Value > 0 && sameSource && _ocrLibSamples != null && _ocrLibResult != null)
+            {
+                _ocrLibResult.FromCache = true;
+                return OpResult<OcrTemplateLoadResult>.Ok(_ocrLibResult);
+            }
+
+            if (cur.Value > 0)
+            {
+                OpResult clr = _algo.ClearOcrTemplates();
+                if (!clr.Success) return OpResult<OcrTemplateLoadResult>.Fail(clr.Message);
+            }
+
+            List<OcrCharSample> samples;
+            bool missing;
+            string err;
+            if (!OcrCharLibraryFile.Load(path, out samples, out missing, out err))
+            {
+                var broken = new OcrTemplateLoadResult
+                {
+                    Dir = path,
+                    FileCount = missing ? 0 : 1,
+                    ScannedAt = DateTime.Now
+                };
+                if (!missing)
+                {
+                    broken.Failures.Add(new OcrTemplateFailure
+                    {
+                        FileName = Path.GetFileName(path),
+                        Reason = err
+                    });
+                }
+
+                _ocrLibPath = path;
+                _ocrLibStamp = stamp;
+                _ocrLibSamples = null;
+                _ocrLibResult = broken;
+                return OpResult<OcrTemplateLoadResult>.Ok(broken);
+            }
+
+            var result = new OcrTemplateLoadResult
+            {
+                Dir = path,
+                FileCount = samples.Count,
+                ScannedAt = DateTime.Now
+            };
+
+            for (int i = 0; i < samples.Count; i++)
+            {
+                OcrCharSample s = samples[i];
+                if (s == null) continue;
+
+                using (Bitmap bmp = OcrCharLibraryFile.ToBitmap(s))
+                {
+                    if (bmp == null)
+                    {
+                        result.Failures.Add(new OcrTemplateFailure
+                        {
+                            FileName = s.Label,
+                            Reason = "样本无法还原成图像"
+                        });
+                        continue;
+                    }
+
+                    OpResult r = _algo.AddOcrTemplate(bmp, s.Label);
+                    if (!r.Success)
+                    {
+                        result.Failures.Add(new OcrTemplateFailure
+                        {
+                            FileName = s.Label,
+                            Reason = "原生加载失败（" + r.Message + "）"
+                        });
+                        continue;
+                    }
+                    result.LoadedCount++;
+                }
+            }
+
+            _ocrLibPath = path;
+            _ocrLibStamp = stamp;
+            _ocrLibSamples = samples;
+            _ocrLibResult = result;
+            result.FromCache = false;
+            return OpResult<OcrTemplateLoadResult>.Ok(result);
+        }
+
+        private OpResult<OcrTemplateLoadResult> EnsureOcrTemplates(string dir, string normKey)
         {
             if (string.IsNullOrWhiteSpace(dir)) dir = "OCRModel";
 
@@ -2479,7 +3300,8 @@ namespace VisionPlatform.Flow
             }
 
             List<string> files = ListOcrTemplateFiles(dir);
-            string fingerprint = OcrTemplateFingerprint(dir, files);
+            // 归一化参数也进指纹：模板是按这些参数二值化/归一化后进库的，改一个就得重灌
+            string fingerprint = OcrTemplateFingerprint(dir, files) + "|" + (normKey ?? "");
 
             OpResult<int> cur = _algo.OcrTemplateCount();
             if (!cur.Success) return OpResult<OcrTemplateLoadResult>.Fail(cur.Message);
@@ -3205,7 +4027,7 @@ namespace VisionPlatform.Flow
             var fr = _algo.FindShapeModel(s.Current, param, search);
             if (!fr.Success)
             {
-                p.Summary = "形状匹配失败：" + fr.Message;
+                p.Summary = Fail("形状匹配失败：", fr);
                 return false;
             }
 
@@ -3231,7 +4053,44 @@ namespace VisionPlatform.Flow
 
             if (matches.Count == 0)
             {
-                p.Summary = "形状匹配：未找到目标" + RetrainSuffix(retrained, retrainMs);
+                // 0 命中时补一次"不设阈值"的匹配，把**最高分**捞出来：
+                // "差多少没到阈值"是调参唯一的依据，只报"未找到目标"等于让人闭眼拧。
+                // 只在失败路径多花一次匹配时间，正常路径零成本。
+                double best = double.NaN;
+                if (param.MinScore > 0.0)
+                {
+                    ShapeParam probe = new ShapeParam
+                    {
+                        AngleStart = param.AngleStart,
+                        AngleEnd = param.AngleEnd,
+                        AngleStep = param.AngleStep,
+                        ScaleMin = param.ScaleMin,
+                        ScaleMax = param.ScaleMax,
+                        ScaleStep = param.ScaleStep,
+                        PyramidLevels = param.PyramidLevels,
+                        MinScore = 0.0,
+                        MaxMatches = 1,
+                        MaxOverlap = param.MaxOverlap,
+                        Subpixel = param.Subpixel,
+                        Greediness = param.Greediness
+                    };
+                    OpResult<List<ShapeMatchResult>> diag = _algo.FindShapeModel(s.Current, probe, search);
+                    if (diag.Success && diag.Value != null && diag.Value.Count > 0)
+                    {
+                        best = diag.Value[0].Score;
+                        p.Metrics.TopScore = best;
+                        p.Metrics.TopCx = diag.Value[0].Cx;
+                        p.Metrics.TopCy = diag.Value[0].Cy;
+                    }
+                }
+
+                p.Summary = double.IsNaN(best)
+                    ? "形状匹配：未找到目标" + RetrainSuffix(retrained, retrainMs)
+                    : string.Format(CultureInfo.InvariantCulture,
+                        "形状匹配：未找到目标（最高得分 {0:F3} < 阈值 {1:F2}，已搜 {2} 姿态、金字塔 {3} 层）"
+                        + "；可降阈值 / 放宽角度范围 / 检查模板 ROI 是否框到了工件",
+                        best, param.MinScore, param.PoseCount, param.PyramidLevels)
+                      + RetrainSuffix(retrained, retrainMs);
                 return false;
             }
 
@@ -3280,7 +4139,22 @@ namespace VisionPlatform.Flow
                 catch (Exception) { p.Frame = null; }
             }
 
-            double minScore = node.GetDouble("MinScore", 0.8);
+            // 匹配参数（角度 / 缩放 / 金字塔 / 多目标）。默认只搜平移 —— 与旧版行为一致。
+            var param = new MatchParam
+            {
+                AngleStart = node.GetDouble("AngleStart", 0),
+                AngleEnd = node.GetDouble("AngleEnd", 0),
+                AngleStep = node.GetDouble("AngleStep", 1),
+                ScaleMin = node.GetDouble("ScaleMin", 1),
+                ScaleMax = node.GetDouble("ScaleMax", 1),
+                ScaleStep = node.GetDouble("ScaleStep", 0),
+                PyramidLevels = node.GetInt("PyramidLevels", 3),
+                MinScore = node.GetDouble("MinScore", 0.8),
+                MaxMatches = node.GetInt("MaxMatches", 1),
+                MaxOverlap = node.GetDouble("MaxOverlap", 0.5),
+                Subpixel = node.GetBool("Subpixel", true)
+            };
+            double minScore = param.MinScore;
 
             // 训练来源 = 落盘资产（不再是当前帧）。NCC 没有训练参数，签名里只有模板戳。
             string flowId = (s.Flow != null) ? s.Flow.Id : "";
@@ -3369,52 +4243,263 @@ namespace VisionPlatform.Flow
                     }
                 }
 
-                OpResult<MatchResult> mr = _algo.MatchTemplate(probe);
+                OpResult<List<MatchResult>> mr = _algo.MatchTemplate(probe, param);
                 if (!mr.Success)
                 {
-                    p.Summary = "模板匹配失败：" + mr.Message;
+                    p.Summary = Fail("模板匹配失败：", mr);
                     return false;
                 }
 
-                MatchResult r = mr.Value;
+                List<MatchResult> all = mr.Value ?? new List<MatchResult>();
+                MatchResult r = all.Count > 0 ? all[0] : null;
                 double score = r != null ? r.Score : 0.0;
 
-                if (r == null || score < minScore)
+                // 阈值在 C# 侧判：未达标时仍要把"最高得分"报出来，这是调阈值唯一的依据
+                var hits = new List<MatchResult>();
+                for (int i = 0; i < all.Count; i++)
                 {
-                    // 未达阈值也要把"最高得分"报出来：这是调阈值时唯一的依据
+                    if (all[i].Score >= minScore) hits.Add(all[i]);
+                }
+
+                p.Metrics.NccScore = score;
+                p.Metrics.TopScore = score;
+                p.Metrics.AngleDeg = r != null ? r.Angle : 0.0;
+                // 缩放只在真的搜了缩放（≠1）时才写，避免结果区恒定挂一个 "1.000×"
+                p.Metrics.ScaleFactor = (r != null && Math.Abs(r.Scale - 1.0) > 1e-6) ? r.Scale : double.NaN;
+
+                if (hits.Count == 0)
+                {
                     p.Metrics.TargetCount = 0;
-                    p.Metrics.NccScore = score;
                     p.Summary = string.Format(CultureInfo.InvariantCulture,
                         "模板匹配：未找到目标，最高得分 {0:F3}", score) + RetrainSuffix(retrained, retrainMs);
                     return false;
                 }
 
                 // 裁剪搜索时把结果坐标加回搜索区左上角
-                double bx = r.X + (useRoi ? search.X : 0);
-                double by = r.Y + (useRoi ? search.Y : 0);
+                double offX = useRoi ? search.X : 0.0;
+                double offY = useRoi ? search.Y : 0.0;
 
-                var box = new Rectangle((int)Math.Round(bx), (int)Math.Round(by),
-                                        Math.Max(1, (int)Math.Round(r.Width)),
-                                        Math.Max(1, (int)Math.Round(r.Height)));
-                p.Shapes.Add(FlowShapes.NccBox(box, true,
-                    string.Format(CultureInfo.InvariantCulture, "#1 {0:0.00}", score)));
+                // 多目标：叠加层最多画 20 个，避免 MaxMatches 拉到 1000 时把画面糊死
+                int drawCount = Math.Min(hits.Count, 20);
+                for (int i = 0; i < drawCount; i++)
+                {
+                    MatchResult m = hits[i];
+                    p.Shapes.Add(FlowShapes.NccMatchBox(
+                        m.Cx + offX, m.Cy + offY, m.Width, m.Height, m.Angle, i == 0,
+                        string.Format(CultureInfo.InvariantCulture, "#{0} {1:0.00}", i + 1, m.Score)));
+                }
 
-                // 主判据：得分 + 角度（NCC 只平移，角度恒 0）+ 目标数
-                p.Metrics.TargetCount = 1;
-                p.Metrics.NccScore = score;
-                p.Metrics.AngleDeg = 0.0;
+                // 主判据：目标数 + 得分 + 角度 +（搜了缩放时的）缩放
+                p.Metrics.TargetCount = hits.Count;
+                p.Metrics.TopCx = r.Cx + offX;
+                p.Metrics.TopCy = r.Cy + offY;
 
-                // 记录实时位姿（NCC 不支持旋转 / 缩放，角度恒 0、缩放恒 1）
-                s.SetPose(bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
-                s.SetNodePose(node.Id, bx + r.Width * 0.5, by + r.Height * 0.5, 0.0, 1.0);
+                // 记录实时位姿（角度/缩放现在都来自匹配结果，下游 ROI 可据此旋转）
+                s.SetPose(r.Cx + offX, r.Cy + offY, r.Angle, r.Scale);
+                s.SetNodePose(node.Id, r.Cx + offX, r.Cy + offY, r.Angle, r.Scale);
+
+                string extra = string.Format(CultureInfo.InvariantCulture, " · 角度 {0:F1}°", r.Angle);
+                if (Math.Abs(r.Scale - 1.0) > 1e-6)
+                    extra += string.Format(CultureInfo.InvariantCulture, " · 缩放 {0:F3}×", r.Scale);
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture,
-                    "模板匹配：得分 {0:F3} @({1:F0},{2:F0})", score, bx, by) + RetrainSuffix(retrained, retrainMs);
+                    "模板匹配：{0} 个 · 最高 {1:F3} @({2:F0},{3:F0}){4}",
+                    hits.Count, score, r.Cx + offX, r.Cy + offY, extra) + RetrainSuffix(retrained, retrainMs);
                 return true;
             }
             finally
             {
                 if (cropped != null) cropped.Dispose();
+            }
+        }
+
+        // ---------------------- 条码 / 二维码（zxing-cpp）----------------------
+
+        /// <summary>
+        /// 条码 / 二维码识别：免模板，一次可识别多个码。
+        /// <para>
+        /// 【为什么没识别到要单独写一段文案】barcode 失败最常见的原因不是"算法不行"，而是
+        /// 参数把自己坑了（ROI 贴着码边、开了降采样、码制限死、勾了纯码模式）。
+        /// 只说"未找到目标"会让人去怀疑算法，所以这里按实际参数逐条点出可疑项。
+        /// </para>
+        /// </summary>
+        private bool RunBarcode(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "条码/二维码：无输入帧";
+                return true;
+            }
+
+            if (s.CaptureFrames && s.Current != null)
+            {
+                if (p.Frame != null) p.Frame.Dispose();
+                try { p.Frame = (Bitmap)s.Current.Clone(); }
+                catch (Exception) { p.Frame = null; }
+            }
+
+            // 码类型：单选（一种码一个节点）。选具体类型既快，也不会把近亲码认错。
+            int codeType = node.GetInt("CodeType", BarcodeCodeType.Auto);
+            if (codeType < BarcodeCodeType.Auto || codeType > BarcodeCodeType.MaxType)
+                codeType = BarcodeCodeType.Auto;
+
+            var param = new BarcodeParam
+            {
+                CodeType = codeType,
+                MaxCount = Math.Max(1, Math.Min(255, node.GetInt("MaxCount", 8))),
+                TryHarder = node.GetBool("TryHarder", false),
+                TryRotate = node.GetBool("TryRotate", true),
+                TryDownscale = node.GetBool("TryDownscale", false),
+                TryInvert = node.GetBool("TryInvert", true),
+                IsPure = node.GetBool("IsPure", false)
+            };
+            int minCount = Math.Max(1, node.GetInt("MinCount", 1));
+
+            Rectangle roi = ApplyRoi(s, node, "RoiX", "RoiY", "RoiW", "RoiH");
+            bool useRoi = roi.Width > 0 && roi.Height > 0
+                          && (roi.X != 0 || roi.Y != 0
+                              || roi.Width != s.Current.Width || roi.Height != s.Current.Height);
+
+            Bitmap probe = s.Current;
+            Bitmap cropped = null;
+            try
+            {
+                if (useRoi)
+                {
+                    Rectangle real = Rectangle.Intersect(roi, new Rectangle(0, 0, s.Current.Width, s.Current.Height));
+                    if (real.Width > 0 && real.Height > 0)
+                    {
+                        cropped = s.Current.Clone(real, s.Current.PixelFormat);
+                        probe = cropped;
+                        roi = real;
+                    }
+                    else
+                    {
+                        useRoi = false;
+                    }
+                }
+
+                OpResult<List<BarcodeResult>> rr = _algo.ReadBarcodes(probe, param);
+                if (!rr.Success)
+                {
+                    p.Status = FlowNodeStatus.Ng;
+                    p.Summary = Fail("条码/二维码：", rr);
+                    return false;
+                }
+
+                List<BarcodeResult> all = rr.Value ?? new List<BarcodeResult>();
+                double offX = useRoi ? roi.X : 0.0;
+                double offY = useRoi ? roi.Y : 0.0;
+
+                int drawCount = Math.Min(all.Count, 20);
+                for (int i = 0; i < drawCount; i++)
+                {
+                    BarcodeResult b = all[i];
+                    p.Shapes.Add(FlowShapes.BarcodeBox(
+                        b.Cx + offX, b.Cy + offY, b.Width, b.Height, b.Angle, i == 0,
+                        string.Format(CultureInfo.InvariantCulture, "{0} {1}", b.Format, Shorten(b.Text, 14))));
+                }
+
+                p.Metrics.TargetCount = all.Count;
+
+                if (all.Count == 0)
+                {
+                    p.Status = FlowNodeStatus.Ng;
+                    p.Summary = "条码/二维码：" + BarcodeMissReason(param, probe.Width, probe.Height, useRoi);
+                    return false;
+                }
+
+                BarcodeResult first = all[0];
+                p.Metrics.TopCx = first.Cx + offX;
+                p.Metrics.TopCy = first.Cy + offY;
+                p.Metrics.Text = first.Text;
+                p.Metrics.AngleDeg = first.Angle;
+
+                // 记进执行期位姿：下游 ROI / 标定转换可直接用码中心与码的旋转角
+                s.SetPose(first.Cx + offX, first.Cy + offY, first.Angle, 1.0);
+                s.SetNodePose(node.Id, first.Cx + offX, first.Cy + offY, first.Angle, 1.0);
+
+                string head = all.Count == 1
+                    ? string.Format(CultureInfo.InvariantCulture, "{0} \"{1}\"", first.Format, Shorten(first.Text, 24))
+                    : string.Format(CultureInfo.InvariantCulture, "{0} 个（首个 {1} \"{2}\"）",
+                                    all.Count, first.Format, Shorten(first.Text, 18));
+
+                if (all.Count < minCount)
+                {
+                    p.Status = FlowNodeStatus.Ng;
+                    p.Summary = string.Format(CultureInfo.InvariantCulture,
+                        "条码/二维码：{0} · 少于要求 {1} 个", head, minCount);
+                    return false;
+                }
+
+                p.Summary = "条码/二维码：" + head;
+                return true;
+            }
+            finally
+            {
+                if (cropped != null) cropped.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// 没识别到码时的**可行动诊断**：按当前参数逐条点出最可能的坑，而不是只说"未找到"。
+        /// 依据都来自本次实际生效的参数，所以不会给出与现场无关的建议。
+        /// </summary>
+        private static string BarcodeMissReason(BarcodeParam p, int w, int h, bool useRoi)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("未识别到码");
+            sb.Append("（码类型：").Append(BarcodeTypeName(p.CodeType)).Append('）');
+            sb.Append("；区域 ").Append(w).Append('x').Append(h);
+            if (!useRoi) sb.Append("（全图）");
+
+            var tips = new List<string>();
+            if (p.CodeType != BarcodeCodeType.Auto)
+                tips.Add("确认码类型选对了（选错一个也读不出）");
+            if (p.TryDownscale) tips.Add("关掉「降采样加速」（会让小码直接消失）");
+            if (p.IsPure) tips.Add("关掉「纯码模式」（它要求只有 1 个正对镜头的码）");
+            if (!p.TryHarder) tips.Add("勾上「更努力」");
+            if (!p.TryRotate) tips.Add("勾上「多方向」");
+            if (w < 40 || h < 40) tips.Add("ROI 太小，放宽到码外留 10~20 像素");
+            tips.Add("一维码两侧要留静区（左右别贴着码条）");
+
+            sb.Append("；建议：");
+            for (int i = 0; i < tips.Count; i++)
+            {
+                if (i > 0) sb.Append(" / ");
+                sb.Append(tips[i]);
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>码类型名字（只用于运行期诊断文案；界面上的选项文字在参数表里）。</summary>
+        private static string BarcodeTypeName(int t)
+        {
+            switch (t)
+            {
+                case BarcodeCodeType.Auto: return "自动（不限）";
+                case BarcodeCodeType.Ean13: return "EAN-13";
+                case BarcodeCodeType.UpcA: return "UPC-A";
+                case BarcodeCodeType.Codabar: return "Codabar";
+                case BarcodeCodeType.Code39: return "CODE 39";
+                case BarcodeCodeType.Code128: return "CODE 128";
+                case BarcodeCodeType.Itf: return "ITF";
+                case BarcodeCodeType.QrCode: return "QR Code";
+                case BarcodeCodeType.DataMatrix: return "Data Matrix";
+                case BarcodeCodeType.Aztec: return "Aztec";
+                case BarcodeCodeType.Pdf417: return "PDF 417";
+                case BarcodeCodeType.MaxiCode: return "MaxiCode";
+                case BarcodeCodeType.Ean8: return "EAN-8";
+                case BarcodeCodeType.UpcE: return "UPC-E";
+                case BarcodeCodeType.Code93: return "CODE 93";
+                case BarcodeCodeType.MicroQrCode: return "Micro QR Code";
+                case BarcodeCodeType.RmQrCode: return "RMQR Code";
+                case BarcodeCodeType.DataBar: return "GS1 DataBar";
+                case BarcodeCodeType.DataBarExpanded: return "GS1 DataBar Expanded";
+                case BarcodeCodeType.DataBarLimited: return "GS1 DataBar Limited";
+                case BarcodeCodeType.DxFilmEdge: return "DX Film Edge";
+                default: return "第 " + t + " 项（未知）";
             }
         }
 
@@ -3491,7 +4576,7 @@ namespace VisionPlatform.Flow
                 if (roiW > 0 && roiH > 0 && blobAffine)
                 {
                     Rectangle raw = RawRoi(s, node);
-                    cropped = CropAffine(input, raw, s.Transform);
+                    cropped = CropAffine(input, raw, 0.0, s.Transform);
                     if (cropped != null)
                     {
                         analyzeOn = cropped;
@@ -3525,7 +4610,7 @@ namespace VisionPlatform.Flow
                 var br = _algo.AnalyzeBlobs(analyzeOn, minArea, maxArea, cap);
                 if (!br.Success)
                 {
-                    p.Summary = "Blob 失败：" + br.Message;
+                    p.Summary = Fail("Blob 失败：", br);
                     return false;
                 }
 
@@ -3548,7 +4633,7 @@ namespace VisionPlatform.Flow
                 for (int i = 0; i < kept.Count; i++)
                 {
                     BlobResult b = kept[i];
-                    PointF bc = MapRoiPoint(s, usedRoi, blobAffine, b.Cx, b.Cy);
+                    PointF bc = MapRoiPoint(s, usedRoi, 0.0, blobAffine, b.Cx, b.Cy);
                     double cx = bc.X;
                     double cy = bc.Y;
                     string label = string.Format(CultureInfo.InvariantCulture,
@@ -3570,7 +4655,7 @@ namespace VisionPlatform.Flow
                 for (int i = 0; i < kept.Count; i++)
                 {
                     BlobResult b2 = kept[i];
-                    PointF bc2 = MapRoiPoint(s, usedRoi, blobAffine, b2.Cx, b2.Cy);
+                    PointF bc2 = MapRoiPoint(s, usedRoi, 0.0, blobAffine, b2.Cx, b2.Cy);
                     p.Regions.Add(new RegionInfo
                     {
                         Index = i + 1,
@@ -3594,10 +4679,11 @@ namespace VisionPlatform.Flow
                 {
                     if (blobAffine)
                     {
-                        PointF rc = s.Transform.ApplyToPoint(usedRoi.X + usedRoi.Width / 2.0,
-                                                             usedRoi.Y + usedRoi.Height / 2.0);
+                        // 与 OCR 同一口径（RoiAffineMap）：区域轮廓必须连同角度一起画，
+                        // 画成轴对齐外接框会让人以为"ROI 没跟着转"。
+                        PointF rc = RoiAffineMap.FrameCenter(s.Transform, usedRoi);
                         var roiRot = new RotatedRectShape(rc, usedRoi.Width, usedRoi.Height,
-                                                          (float)s.Transform.DAngle);
+                                                          (float)RoiAffineMap.EffectiveAngle(s.Transform, 0.0));
                         roiRot.StrokeColor = FlowShapes.ColorRoi;
                         roiRot.LineWidth = 1.5f;
                         roiRot.IsEditable = false;
@@ -4899,7 +5985,26 @@ namespace VisionPlatform.Flow
         /// <summary>本帧位置修正是否带旋转（带旋转时矩形 ROI 必须走仿射裁剪，否则只是外接框）。</summary>
         private static bool HasRoiRotation(FlowRunSession s)
         {
-            return s.Transform.IsValid && Math.Abs(s.Transform.DAngle) > 0.01;
+            return RoiAffineMap.NeedsAffine(s.Transform, 0.0);
+        }
+
+        /// <summary>
+        /// 本帧是否需要仿射裁剪：<strong>ROI 自身角度</strong>或<strong>位姿旋转</strong>任一非零。
+        /// <para>
+        /// 只看 <c>DAngle</c> 是不够的：用户在画布上拖旋转手柄转出来的 ROI（<c>RoiAngle</c>）
+        /// 会在"界面轮廓"里显示成斜的，但运行期按轴对齐裁剪 —— 于是现场看到
+        /// 「有一个 ROI 是一直不变的」。两者必须一起判定。
+        /// </para>
+        /// </summary>
+        private static bool HasRoiRotation(FlowRunSession s, double roiAngleDeg)
+        {
+            return RoiAffineMap.NeedsAffine(s.Transform, roiAngleDeg);
+        }
+
+        /// <summary>节点配置的 ROI 角度（度，绕 ROI 中心，顺时针为正）。</summary>
+        private static double RoiAngleOf(FlowNode node)
+        {
+            return (node != null) ? node.GetDouble("RoiAngle", 0.0) : 0.0;
         }
 
         /// <summary>
@@ -4917,40 +6022,12 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>
-        /// <strong>仿射裁剪</strong>：把"用户坐标 ROI"按位置修正（绕基准旋转 + 平移）采成轴对齐小块。
-        /// <para>
-        /// 映射关系：目标像素 (u,v) ← 整帧上的点 <c>T(roi.TL + (u,v))</c>。
-        /// 实现上用 Graphics 的反变换（dst → src）采样：
-        /// <c>dst(u,v) = R(-dA)·(src − c) + (w/2, h/2)</c>，其中 <c>c = T(ROI 中心)</c>。
-        /// </para>
-        /// <para>
-        /// 【为什么必须这么做】`ApplyToRect` 给的是旋转后的<strong>外接矩形</strong>：
-        /// 工件转 10° 时 ROI 会变胖一圈，OCR 会把邻域的杂边也框进来，卡尺/测量也会读错位置。
-        /// 真仿射裁剪拿到的是一块"跟着工件一起转"的图，识别结果与不旋转时完全等价。
-        /// </para>
+        /// <strong>仿射裁剪</strong>：把"用户坐标 ROI"按 <c>RoiAngle + dAngle</c> 采成轴对齐小块。
+        /// <para>实现与坐标映射同源，见 <see cref="RoiAffineMap.Crop"/> / <see cref="RoiAffineMap.MapPoint"/>。</para>
         /// </summary>
-        private static Bitmap CropAffine(Bitmap frame, Rectangle roi, FlowRunTransform t)
+        private static Bitmap CropAffine(Bitmap frame, Rectangle roi, double roiAngleDeg, FlowRunTransform t)
         {
-            if (frame == null || roi.Width <= 0 || roi.Height <= 0) return null;
-
-            int w = roi.Width;
-            int h = roi.Height;
-
-            var dst = new Bitmap(w, h, PixelFormat.Format24bppRgb);
-            using (var g = Graphics.FromImage(dst))
-            {
-                g.Clear(Color.Black);   // 旋转露出的边角填黑：与整图对齐（Warp）时的口径一致
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
-                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-
-                PointF c = t.ApplyToPoint(roi.X + w / 2.0, roi.Y + h / 2.0);
-
-                g.TranslateTransform(w / 2f, h / 2f);
-                g.RotateTransform(-(float)t.DAngle);
-                g.TranslateTransform(-c.X, -c.Y);
-                g.DrawImage(frame, new Rectangle(0, 0, frame.Width, frame.Height));
-            }
-            return dst;
+            return RoiAffineMap.Crop(frame, roi, roiAngleDeg, t);
         }
 
         /// <summary>
@@ -4963,7 +6040,8 @@ namespace VisionPlatform.Flow
                                       out Rectangle roiUsed, out bool affine)
         {
             Rectangle raw = RawRoi(s, node);
-            affine = HasRoiRotation(s);
+            double roiAngle = RoiAngleOf(node);
+            affine = HasRoiRotation(s, roiAngle);
 
             if (!affine)
             {
@@ -4972,18 +6050,16 @@ namespace VisionPlatform.Flow
             }
 
             roiUsed = raw;
-            return CropAffine(frame, raw, s.Transform);
+            return CropAffine(frame, raw, roiAngle, s.Transform);
         }
 
         /// <summary>
-        /// ROI 局部坐标 (u,v) → 整帧坐标。仿射裁剪时走 <c>T(roi.TL + (u,v))</c>，
-        /// 否则直接加 AABB 偏移（老路径，行为不变）。
+        /// ROI 局部坐标 (u,v) → 整帧坐标（三种情形见 <see cref="RoiAffineMap.MapPoint"/>）。
         /// </summary>
-        private static PointF MapRoiPoint(FlowRunSession s, Rectangle roiUsed, bool affine, double u, double v)
+        private static PointF MapRoiPoint(FlowRunSession s, Rectangle roiUsed, double roiAngleDeg,
+                                          bool affine, double u, double v)
         {
-            return affine
-                ? s.Transform.ApplyToPoint(roiUsed.X + u, roiUsed.Y + v)
-                : new PointF((float)(u + roiUsed.X), (float)(v + roiUsed.Y));
+            return RoiAffineMap.MapPoint(s.Transform, roiUsed, roiAngleDeg, affine, u, v);
         }
 
         private static Rectangle ResolveRoi(FlowRunSession s, FlowNode node, int width, int height)
@@ -5293,6 +6369,10 @@ namespace VisionPlatform.Flow
 
                 FlowNodeType t;
                 if (!n.TryGetType(out t)) continue;
+
+                // 读取点云全部走本地文件（PLY/PCD/深度图），整链不需要相机
+                if (t == FlowNodeType.PointCloudSource) return false;
+
                 if (t != FlowNodeType.ImageSource) continue;
 
                 // 只要有一个图像源节点选了「本地图片 / 本地图片文件夹」，整链就不需要相机

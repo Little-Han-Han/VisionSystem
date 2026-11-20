@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -89,6 +89,31 @@ namespace VisionPlatform.UI
         /// 避免连续运行逐帧重建表格/重绘导致的卡顿（数值只在判定事件产生时变化，而非每渲染帧）。</summary>
         private volatile bool _statsDirty = false;
 
+        /// <summary>
+        /// 状态栏 / 统计卡片的最小刷新间隔（毫秒）。
+        /// <para>【为什么需要】连续运行时每帧都会 <see cref="RecordFlowVerdict"/> 把 _statsDirty 置 true，
+        /// 于是"只在变化时刷新"退化成"每帧刷新"：两行长 string.Format + 5 个按钮态 + 右栏 4 个标签，
+        /// 30fps 下纯属白烧 CPU。数字仍然是按件精确累计，只是把<strong>显示</strong>合并到 5Hz；
+        /// 停止/暂停/切配方等状态变化仍走 <see cref="UpdateStatus"/> 立即刷新，不会滞后。</para>
+        /// </summary>
+        private const int StatusUiMinIntervalMs = 200;
+
+        /// <summary>上次刷新状态栏的时间戳（Environment.TickCount，仅用于间隔比较）。</summary>
+        private int _lastStatusUiTick;
+
+        /// <summary>连续运行时的 UI 计数（仅在 VA_UI_STATS=1 时每 5s 落一条日志，用于定位"谁在刷"）。</summary>
+        private int _uiFrameCount;
+        private int _uiStatusRefreshCount;
+        private int _uiStatsRefreshCount;
+        private int _uiStatTickBase;
+        private readonly bool _uiStatsProbe =
+            Environment.GetEnvironmentVariable("VA_UI_STATS") == "1";
+
+        /// <summary>流程名解析缓存（见 <see cref="ActiveFlowName"/>）：配置对象或 ActiveFlowId 变了才重算。</summary>
+        private FlowSettings _activeFlowSettings;
+        private string _activeFlowIdStamp;
+        private string _activeFlowName = "--";
+
         /// <summary>单流程 OK/NG 累计（仅供 <see cref="_flowStats"/> 使用）。</summary>
         private sealed class FlowOkNg
         {
@@ -145,6 +170,7 @@ namespace VisionPlatform.UI
         private Bitmap _pendingLiveFrame;        // 覆盖式：后台线程只保留「最新一帧」
         private int _pendingLivePosted;          // 0=无待显示帧；1=已投递一帧待处理
         private bool _liveViewerFitted;          // 首个实时帧做一次 FitToWindow
+        private int _lastLiveRenderTick;         // 上次实时预览渲染时刻（显示节流用）
 
         // ---- 流程结果合并显示（诉求 2 回归修复）----
         // 多流程并行后，每条流程每帧都经 FlowOutputChannel 回传；若逐结果一次 BeginInvoke 做
@@ -160,18 +186,48 @@ namespace VisionPlatform.UI
             public Bitmap Frame;                 // 输出图像（原图；所有权在此，替换时释放）
             public Bitmap DisplayFrame;          // 显示用合成帧（掩膜/伪彩）；为空则显示 Frame
             public List<IGeometryShape> Shapes;  // 最新叠加图形（引用，不克隆）
+            public VisionSystem.Controls.PointCloud.PointCloudData Cloud;  // 3D 点云（引用，无释放手续）；非空时优先显示
             public bool Passed;
             public string Summary = "";
             public string CameraName = "";
             public int Posted;                   // 0=无待处理；1=已投递一次 BeginInvoke
+            public int LastRenderTick;           // 上次真正渲染该视图的时刻（Environment.TickCount）
+        }
+
+        /// <summary>
+        /// 视图渲染的最小间隔（毫秒，默认 66ms ≈ 15fps）。
+        /// <para>【为什么限】每渲染一帧都要把 5MP 原图重采样到视图尺寸（GDI+ 软件光栅下约 14ms），
+        /// 30fps 时单视图就吃掉半个核，多视图并行更惨。人眼对 15fps 的实时画面几乎没有区别，
+        /// 算法侧的运行节拍完全不受影响（本限制只作用于显示）。</para>
+        /// <para>需要更高刷新率时设环境变量 <c>VA_UI_RENDER_FPS=30</c>。</para>
+        /// </summary>
+        private static readonly int MinRenderIntervalMs = ResolveMinRenderIntervalMs();
+
+        private static int ResolveMinRenderIntervalMs()
+        {
+            string raw = Environment.GetEnvironmentVariable("VA_UI_RENDER_FPS");
+            int fps;
+            if (int.TryParse(raw, out fps) && fps >= 1 && fps <= 240)
+                return Math.Max(1, 1000 / fps);
+            return 66;   // 15fps
         }
 
         // ---- 日志批量拉取（诉求 2 回归修复）----
         // Logger 在后台线程同步触发 Logged，原 OnLogged 每行一次 BeginInvoke；并行下 RESULT 行可达
         // 90 行/秒，同样淹没 UI 线程。改为缓冲 + UI 线程定时器批量拉取（与 LogPanel 设计意图一致）。
-        private List<string> _logBuffer = new List<string>();
+        private List<LogEntry> _logBuffer = new List<LogEntry>();
+
+        /// <summary>日志区横向滚动范围（按已出现的最长行累计，只增不减）。</summary>
+        private int _logMaxWidth;
+        private readonly List<LogEntry> _logHistory = new List<LogEntry>();
         private readonly object _logSync = new object();
         private System.Windows.Forms.Timer _logTimer;
+        private ToolStripComboBox _tsLogFilter;
+        private const int LogFilterAll = 0;
+        private const int LogFilterResult = 1;
+        private const int LogFilterError = 2;
+        private const int LogFilterReal = 3;
+        private const int LogFilterSim = 4;
 
         // ---- 主界面流程下拉运行（选流程 → 选本地图片 → 运行，结果经既有通道显示到主视图）----
         // 与流程编排页(FlowForm) / 并行槽(FlowRunManager) 各自持有独立的 FlowRunner，互不干扰。
@@ -188,6 +244,13 @@ namespace VisionPlatform.UI
             _initializing = true;
 
             InitializeComponent();
+
+            // 性能归因：把 UI 线程登记进去，并把"重绘次数 / 建层耗时"的来源交给探针
+            PerfProbe.Mark("界面");
+            if (PerfProbe.Enabled)
+            {
+                PerfProbe.SetPaintSource(SumViewPaintCount, SumViewRebuildCount, SumViewRebuildMs);
+            }
 
             // 主题在 InitializeComponent 之后统一套用：Designer 只写结构，颜色 / 字体单点来自 UiTheme
             ApplyTheme();
@@ -213,7 +276,8 @@ namespace VisionPlatform.UI
             BuildViews(LayoutPresets[startIdx, 0], LayoutPresets[startIdx, 1]);
 
             RefreshCameraList();
-            Logger.Logged += OnLogged;
+            InitLogFilter();
+            Logger.EntryLogged += OnEntryLogged;
             RecipeStore.CurrentChanged += OnRecipeChanged;
             CameraManager.Instance.CurrentChanged += OnCameraManagerChanged;
 
@@ -222,6 +286,10 @@ namespace VisionPlatform.UI
             _logTimer = new System.Windows.Forms.Timer { Interval = 200 };
             _logTimer.Tick += OnLogTimerTick;
             _logTimer.Start();
+
+            // 双击日志行 → 弹窗显示完整内容（原本长行被控件宽度裁掉，只能看前半截）。
+            // 事件在构造函数里挂（Designer 重序列化会丢掉手写的 += ，见项目铁律）。
+            listLog.DoubleClick += OnLogDoubleClick;
             ConfigStore.Changed += OnConfigChanged;
             FlowOutputChannel.OutputReady += OnFlowOutput;
             FlowRunManager.StatusChanged += OnFlowManagerStatusChanged;
@@ -262,6 +330,29 @@ namespace VisionPlatform.UI
         {
             base.OnShown(e);
             RefreshCameraListFromCache();   // 走枚举缓存：不要在首帧同步重新枚举（见方法注释）
+
+            // 【默认运行模式】窗体首次显示后自动进入运行态（工位开机即生产）：
+            //   · 通讯连接 / 心跳 / 触发轮询由 CommRuntime.Activate 在「运行」时建立，此处即触发；
+            //   · 静默启动：前置条件不满足（无启用流程 / 无相机 / 通讯没起来）只记日志，不弹窗；
+            //   · 访客权限下照样运行（只读看板），暂停 / 停止需管理员登录后操作 —— 这是权限位既有口径。
+            // 延迟 800ms 让布局/相机下拉先就位，避免和首帧渲染抢时间。
+            var autoStart = new Timer { Interval = 800 };
+            autoStart.Tick += delegate
+            {
+                autoStart.Stop();
+                autoStart.Dispose();
+
+                try
+                {
+                    Logger.Info("[启动] 默认运行模式：自动执行「运行」");
+                    StartLoop(true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("[启动] 自动运行失败：" + ex.Message);
+                }
+            };
+            autoStart.Start();
         }
 
         /// <summary>视图绑定下拉框的条目；CameraId 为空表示「自动分配」。</summary>
@@ -799,6 +890,16 @@ namespace VisionPlatform.UI
                     if (IsDisposed || !IsHandleCreated) { bmp.Dispose(); return; }
                     if (_views.Count == 0 || _views[0] == null) { bmp.Dispose(); return; }
 
+                    // 与流程结果同一套显示节流：实时预览也不必逐帧重采样
+                    int liveTick = Environment.TickCount;
+                    if (_lastLiveRenderTick != 0
+                        && unchecked(liveTick - _lastLiveRenderTick) < MinRenderIntervalMs)
+                    {
+                        bmp.Dispose();
+                        return;
+                    }
+                    _lastLiveRenderTick = liveTick;
+
                     try
                     {
                         _views[0].SetImage(bmp, false);
@@ -937,26 +1038,44 @@ namespace VisionPlatform.UI
         /// <summary>
         /// 当前生效的流程名（用于视图标题条「相机名 · 流程名」，FR-UI-08）。
         /// 取不到时返回 "--"，不抛异常、不留空白。
+        /// <para>【缓存】连续运行时每帧都要用它拼标题条文案，而原实现每次都 new 一个 lambda 把
+        /// 整个流程列表扫一遍 —— 30fps × N 视图纯属白烧 CPU 和 GC。这里缓存解析结果，
+        /// 只有当"配置对象换了"或"ActiveFlowId 变了"才重算，语义完全一致。</para>
         /// </summary>
-        private static string ActiveFlowName
+        private string ActiveFlowName
         {
             get
             {
+                FlowSettings fs = null;
+                try { fs = ConfigStore.Current.Flows; }
+                catch (Exception) { }
+
+                if (ReferenceEquals(fs, _activeFlowSettings)
+                    && (_activeFlowSettings == null || _activeFlowIdStamp == _activeFlowSettings.ActiveFlowId))
+                {
+                    return _activeFlowName;
+                }
+
+                _activeFlowSettings = fs;
+                _activeFlowIdStamp = fs != null ? fs.ActiveFlowId : null;
+
+                string name = "--";
                 try
                 {
-                    FlowSettings fs = ConfigStore.Current.Flows;
-                    if (fs == null || fs.Flows == null || fs.Flows.Count == 0) return "--";
-
-                    FlowDefinition active = fs.Flows.Find(x => x != null && x.Id == fs.ActiveFlowId);
-                    if (active != null && !string.IsNullOrEmpty(active.Name)) return active.Name;
-                    if (fs.Flows[0] != null && !string.IsNullOrEmpty(fs.Flows[0].Name)) return fs.Flows[0].Name;
+                    if (fs != null && fs.Flows != null && fs.Flows.Count > 0)
+                    {
+                        FlowDefinition active = fs.Flows.Find(x => x != null && x.Id == fs.ActiveFlowId);
+                        if (active != null && !string.IsNullOrEmpty(active.Name)) name = active.Name;
+                        else if (fs.Flows[0] != null && !string.IsNullOrEmpty(fs.Flows[0].Name)) name = fs.Flows[0].Name;
+                    }
                 }
                 catch (Exception)
                 {
                     // 配置损坏时不应影响界面刷新
                 }
 
-                return "--";
+                _activeFlowName = name;
+                return name;
             }
         }
 
@@ -1073,7 +1192,13 @@ namespace VisionPlatform.UI
         /// 全部流程（含本地图片源，无需相机），因此相机不再是硬性要求——流程自身会按需校验相机；
         /// 若设置中开启了通讯校验，仍要求至少有一条通讯链路可用。
         /// </summary>
-        private bool CanRunLoop(out string reason)
+        /// <param name="waitComm">
+        /// 通讯未就绪时是否短暂等待（仅用户点「运行」时为 true）。
+        /// <para>【为什么需要】通讯连接现在由「运行」触发（<see cref="CommRuntime.Activate"/>），
+        /// 刚点下运行的那一瞬间链路还在建立：不等待就会误判成"通讯未连接"而拒绝启动。
+        /// 但运行中的周期性复查（<see cref="OnLoopTick"/>）<b>不能</b>等 —— 那会把 UI 线程每拍卡 1.5s。</para>
+        /// </param>
+        private bool CanRunLoop(out string reason, bool waitComm = false)
         {
             reason = null;
 
@@ -1086,6 +1211,8 @@ namespace VisionPlatform.UI
 
             if (ConfigStore.Current.System.RequireCommBeforeRun && !CommState.HasActiveChannel)
             {
+                if (waitComm && WaitCommReady(1500)) return true;
+
                 reason = "通讯未连接（TCP 客户端 / TCP 服务端 / Modbus 均未就绪）。\r\n\r\n"
                        + "请先在「通讯」中建立连接，或在「系统设置」中关闭「循环运行前要求通讯已连接」。";
                 return false;
@@ -1094,16 +1221,71 @@ namespace VisionPlatform.UI
             return true;
         }
 
+        /// <summary>
+        /// 等待通讯就绪（最多 <paramref name="timeoutMs"/> 毫秒）。
+        /// <para>只在用户点「运行」时用：链路是在那一刻才开始建立的，必须给它一点时间。</para>
+        /// </summary>
+        private static bool WaitCommReady(int timeoutMs)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                if (CommState.HasActiveChannel) return true;
+                System.Threading.Thread.Sleep(50);
+            }
+            return CommState.HasActiveChannel;
+        }
+
+        /// <summary>
+        /// 当前是否为「触发式运行」（默认）。
+        /// <para>触发式：流程线程起来后停在 <see cref="FlowSlotStatus.Waiting"/>，只有外部信号
+        /// （<see cref="FlowRunManager.Trigger"/>，通常经通讯「触发流程」任务）才跑一轮，
+        /// 跑完回到等待。连续式：起手就按帧率循环，仅供调试。</para>
+        /// </summary>
+        private static bool IsTriggeredRunMode
+        {
+            get
+            {
+                try
+                {
+                    SystemSettings s = ConfigStore.Current.System;
+                    return s == null || s.IsTriggeredRun;
+                }
+                catch (Exception)
+                {
+                    return true;   // 读不到配置也按触发式（安全侧：宁可不动，不要乱跑）
+                }
+            }
+        }
+
         private void OnStartLoop(object sender, EventArgs e)
         {
+            StartLoop(false);
+        }
+
+        /// <summary>
+        /// 启动 / 继续循环运行。
+        /// <para>【步骤顺序】先 <see cref="CommRuntime.Activate"/>（运行态才建立通讯连接），
+        /// 再校验前置条件，最后启动流程 —— 顺序颠倒会因"通讯还没连"而拒绝启动。</para>
+        /// </summary>
+        /// <param name="silent">静默模式：失败只记日志不弹窗（启动首帧自动运行时用）。</param>
+        private bool StartLoop(bool silent)
+        {
+            // 运行态：建立通讯（后台线程连接，不冻 UI）+ 启动心跳/轮询任务
+            try { CommRuntime.Activate(); }
+            catch (Exception ex) { Logger.Warn("进入运行态失败：" + ex.Message); }
+
             string reason;
-            if (!CanRunLoop(out reason))
+            if (!CanRunLoop(out reason, !_running))
             {
                 Logger.Warn("无法启动循环运行：" + reason);
-                MessageBox.Show(this, reason, "无法启动循环运行",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!silent)
+                {
+                    MessageBox.Show(this, reason, "无法启动循环运行",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 UpdateStatus();
-                return;
+                return false;
             }
 
             if (_running)
@@ -1121,29 +1303,42 @@ namespace VisionPlatform.UI
                 // 旧配方检测（SyncGrabCore / loopTimer）已不再使用。
                 _running = true;
                 _paused = false;
-                var r = FlowRunManager.StartAll();
+
+                // 【运行模式分支】触发式（默认）：线程起来后停在 Waiting，等外部信号；
+                // 连续式：起手就跑（调试 / 离线验证用）。二者的区别只在 StartOne 的 triggered 形参。
+                bool triggered = IsTriggeredRunMode;
+                var r = FlowRunManager.StartAll(triggered);
                 if (r == null || !r.Success)
                 {
                     _running = false;
                     string msg = r != null ? r.Message : "启动流程失败";
                     Logger.Warn("循环运行启动失败：" + msg);
-                    MessageBox.Show(this, msg, "循环运行启动失败",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (!silent)
+                    {
+                        MessageBox.Show(this, msg, "循环运行启动失败",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
                 else
                 {
-                    Logger.Info("开始循环运行（全部流程）：" + (r.Message ?? ""));
+                    Logger.Info((triggered ? "进入运行态，等待触发（全部流程）：" : "开始连续运行（全部流程）：")
+                        + (r.Message ?? ""));
 
                     // 部分流程未能启动（相机未打开 / 拓扑校验未过 / 产品不匹配 / 已被占用等）：
                     // 逐条列出原因，避免「看似没并行」却无从查证。完全成功时 r.Message 不含「失败」。
                     if (!string.IsNullOrEmpty(r.Message) && r.Message.IndexOf("失败") >= 0)
                     {
                         Logger.Warn("循环运行部分启动失败：" + r.Message);
-                        MessageBox.Show(this, r.Message, "部分流程未启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        if (!silent)
+                        {
+                            MessageBox.Show(this, r.Message, "部分流程未启动",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
                     }
                 }
             }
             UpdateStatus();
+            return _running;
         }
 
         private void OnPause(object sender, EventArgs e)
@@ -1154,12 +1349,21 @@ namespace VisionPlatform.UI
             // 诉求 2：暂停/继续映射到全部流程的 PauseAll/ResumeAll（旧 loopTimer 已弃用）
             try
             {
-                if (_paused) FlowRunManager.PauseAll();
-                else FlowRunManager.ResumeAll();
+                if (_paused)
+                {
+                    FlowRunManager.PauseAll();
+                    // 通讯一起停：心跳 / 触发轮询 / Busy·Ready 写入全部挂起（连接保活，继续时不重连）
+                    CommRuntime.Suspend();
+                }
+                else
+                {
+                    CommRuntime.Activate();
+                    FlowRunManager.ResumeAll();
+                }
             }
             catch (Exception ex) { Logger.Warn("暂停/继续流程失败：" + ex.Message); }
 
-            Logger.Info(_paused ? "已暂停" : "已继续");
+            Logger.Info(_paused ? "已暂停（流程与通讯任务均已挂起）" : "已继续");
             UpdateStatus();
         }
 
@@ -1168,6 +1372,9 @@ namespace VisionPlatform.UI
             // 诉求 2：停止全部并行流程（并行 Join + 释放各自执行器）；旧 loopTimer 一并停掉
             try { FlowRunManager.StopAll(); }
             catch (Exception ex) { Logger.Warn("停止流程失败：" + ex.Message); }
+            // 停止 = 退出运行态：通讯任务与自动连接一并停下，不再空转刷线程
+            try { CommRuntime.Suspend(); }
+            catch (Exception ex) { Logger.Warn("停止通讯任务失败：" + ex.Message); }
             loopTimer.Stop();
             _running = false;
             _paused = false;
@@ -1508,7 +1715,43 @@ namespace VisionPlatform.UI
             if (label != null && label.Text != text) label.Text = text;
         }
 
-        /// <summary>FlowRunManager 状态变化 → 刷新各流程状态列。事件可能在非 UI 线程触发，回 UI 线程。</summary>
+        /// <summary>全部视图的累计重绘次数（性能探针用，只读）。</summary>
+        private long SumViewPaintCount()
+        {
+            long sum = 0;
+            for (int i = 0; i < _views.Count; i++)
+            {
+                ImageViewer v = _views[i];
+                if (v != null) sum += v.PaintCount;
+            }
+            return sum;
+        }
+
+        /// <summary>全部视图累计"重建缓存层"的次数（性能探针用）。</summary>
+        private long SumViewRebuildCount()
+        {
+            long sum = 0;
+            for (int i = 0; i < _views.Count; i++)
+            {
+                ImageViewer v = _views[i];
+                if (v != null) sum += v.LayerRebuildCount;
+            }
+            return sum;
+        }
+
+        /// <summary>全部视图累计"重建缓存层"的耗时（毫秒，性能探针用）。</summary>
+        private double SumViewRebuildMs()
+        {
+            double sum = 0;
+            for (int i = 0; i < _views.Count; i++)
+            {
+                ImageViewer v = _views[i];
+                if (v != null) sum += v.LayerRebuildTotalMs;
+            }
+            return sum;
+        }
+
+        /// <summary>流程运行状态变化 → 刷新各流程状态列（见 OnFlowManagerStatusChanged）。</summary>
         private void OnFlowManagerStatusChanged(object sender, EventArgs e)
         {
             if (IsDisposed || !IsHandleCreated) return;
@@ -1629,7 +1872,18 @@ namespace VisionPlatform.UI
             RecipeModel recipe = RecipeStore.Current;
             CameraInfo cam = SelectedCameraInfo;
 
-            string runState = _running ? (_paused ? "已暂停" : "运行中") : "已停止";
+            string runState;
+            if (!_running) runState = "已停止";
+            else if (_paused) runState = "已暂停";
+            else if (IsTriggeredRunMode)
+            {
+                // 触发式：没有槽在跑就是「等触发」；有槽在跑说明本轮正在执行。
+                // 文案写全：现场曾把"等待触发时画面不动"误判成"图像采集控件坏了"。
+                runState = FlowRunManager.ExecutingCount > 0
+                    ? "运行中（触发）"
+                    : "等待触发（等 PLC 信号，画面不动是正常的）";
+            }
+            else runState = "运行中";
 
             tsLabelStatus.Text = string.Format("{0}    |    配方：{1}    |    算法库：{2}",
                 user,
@@ -1698,20 +1952,23 @@ namespace VisionPlatform.UI
         /// </summary>
         private void SetVerdict(bool? passed)
         {
+            // 结论没变就不要重新配一次徽标（配色/字体/内边距都写一遍 → 控件重绘）。
+            // 连续运行时同一结论会连着几千帧，跳过这一下等于省掉几千次无关重绘。
+            bool changed = !Nullable.Equals(_verdict, passed);
             _verdict = passed;
 
             if (!passed.HasValue)
             {
-                UiTheme.StyleBadge(lblVerdict, UiVerdict.None);
+                if (changed) UiTheme.StyleBadge(lblVerdict, UiVerdict.None);
             }
             else if (passed.Value)
             {
-                UiTheme.StyleBadge(lblVerdict, UiVerdict.Ok);
+                if (changed) UiTheme.StyleBadge(lblVerdict, UiVerdict.Ok);
                 _consecutiveNg = 0;
             }
             else
             {
-                UiTheme.StyleBadge(lblVerdict, UiVerdict.Ng);
+                if (changed) UiTheme.StyleBadge(lblVerdict, UiVerdict.Ng);
                 _consecutiveNg++;
             }
 
@@ -1721,16 +1978,84 @@ namespace VisionPlatform.UI
             if (alarm) lblConsecutiveNg.Text = "连续 NG：" + _consecutiveNg;
         }
 
-        private void OnLogged(object sender, string line)
+        private void OnEntryLogged(object sender, LogEntry entry)
         {
-            if (IsDisposed || !IsHandleCreated) return;
-            if (string.IsNullOrEmpty(line)) return;
+            if (IsDisposed || !IsHandleCreated || entry == null) return;
 
             // 仅入缓冲，由 UI 线程的 _logTimer 批量拉取（见 OnLogTimerTick）。
             // 不在后台线程逐行 BeginInvoke —— 并行运行下 RESULT 行可达 90 行/秒，逐条投递会淹没 UI 线程。
             lock (_logSync)
             {
-                _logBuffer.Add(line);
+                _logBuffer.Add(entry);
+            }
+        }
+
+        /// <summary>主界面日志过滤下拉（只影响显示；文件与 SQLite 日志仍记录全部）。</summary>
+        private void InitLogFilter()
+        {
+            _tsLogFilter = new ToolStripComboBox();
+            _tsLogFilter.AutoSize = false;
+            _tsLogFilter.Width = 118;
+            _tsLogFilter.DropDownStyle = ComboBoxStyle.DropDownList;
+            _tsLogFilter.BackColor = Color.FromArgb(30, 30, 38);
+            _tsLogFilter.ForeColor = Color.Gainsboro;
+            _tsLogFilter.ToolTipText = "只影响主界面显示；完整日志仍写入文件与日志库";
+            _tsLogFilter.Items.AddRange(new object[]
+            {
+                "日志：全部", "日志：结果", "日志：仅异常", "日志：实拍", "日志：模拟"
+            });
+            _tsLogFilter.SelectedIndex = LogFilterResult;
+            _tsLogFilter.SelectedIndexChanged += delegate { RebuildLogList(); };
+
+            toolStrip.Items.Add(new ToolStripSeparator());
+            toolStrip.Items.Add(new ToolStripLabel("日志"));
+            toolStrip.Items.Add(_tsLogFilter);
+        }
+
+        private int CurrentLogFilter
+        {
+            get { return _tsLogFilter != null ? _tsLogFilter.SelectedIndex : LogFilterResult; }
+        }
+
+        private bool IsSimulatedEntry(LogEntry e)
+        {
+            if (e == null) return false;
+
+            string flow = e.FlowName ?? "";
+            if (flow.StartsWith("[模拟]", StringComparison.Ordinal)) return true;
+            if (flow.StartsWith("[实拍]", StringComparison.Ordinal)) return false;
+
+            string msg = e.Message ?? "";
+            return msg.IndexOf("SIM-0", StringComparison.OrdinalIgnoreCase) >= 0
+                   || msg.IndexOf("模拟", StringComparison.Ordinal) >= 0
+                   || msg.IndexOf("本地图片", StringComparison.Ordinal) >= 0;
+        }
+
+        private bool MatchLogFilter(LogEntry e)
+        {
+            if (e == null) return false;
+
+            switch (CurrentLogFilter)
+            {
+                case LogFilterAll:
+                    return true;
+
+                case LogFilterError:
+                    return e.Level == LogLevel.Warn || e.Level == LogLevel.Error || e.Level == LogLevel.ResultNg;
+
+                case LogFilterReal:
+                    return !IsSimulatedEntry(e);
+
+                case LogFilterSim:
+                    return IsSimulatedEntry(e);
+
+                default: // Result：隐藏普通 INFO，保留 OK/NG/WARN/ERROR
+                    if (e.Level != LogLevel.Info) return true;
+                    // 兼容主界面旧的「视图N 检测 OK/NG」INFO 行
+                    string msg = e.Message ?? "";
+                    return msg.IndexOf("检测", StringComparison.Ordinal) >= 0
+                           && (msg.IndexOf("OK", StringComparison.Ordinal) >= 0
+                               || msg.IndexOf("NG", StringComparison.Ordinal) >= 0);
             }
         }
 
@@ -1738,27 +2063,171 @@ namespace VisionPlatform.UI
         /// 日志批量拉取（UI 线程，200ms 一次）：把缓冲中的日志行一次性追加到 listLog 并裁剪到上限，
         /// 把并行运行下 90+ 行/秒的日志洪流从「逐行 BeginInvoke」压成「每秒约 5 次批量追加」。
         /// </summary>
-        private void OnLogTimerTick(object sender, EventArgs e)
+        /// <summary>切换过滤后立即用历史重绘（不改变已落盘日志）。</summary>
+        private void RebuildLogList()
         {
             if (IsDisposed || !IsHandleCreated) return;
 
-            List<string> batch;
+            try
+            {
+                listLog.BeginUpdate();
+                listLog.Items.Clear();
+                _logMaxWidth = 0;
+                listLog.HorizontalExtent = 0;
+
+                int start = Math.Max(0, _logHistory.Count - 2000);
+                for (int i = start; i < _logHistory.Count; i++)
+                {
+                    LogEntry e = _logHistory[i];
+                    if (e == null || !MatchLogFilter(e)) continue;
+                    string rebuilt = e.Format();
+                    listLog.Items.Add(rebuilt);
+                    GrowLogHorizontalExtent(rebuilt);
+                    while (listLog.Items.Count > UiTheme.LogMaxLines) listLog.Items.RemoveAt(0);
+                }
+
+                listLog.EndUpdate();
+                if (listLog.Items.Count > 0) listLog.TopIndex = listLog.Items.Count - 1;
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// UI 刷新计数探针（仅在环境变量 <c>VA_UI_STATS=1</c> 时输出，默认不产生任何日志）。
+        /// <para>连续运行时"CPU 高"最常见的来源不是算法，而是界面被无节制地重刷。
+        /// 打开后每 5 秒落一条：帧回调 = 流程回传的显示帧数；状态栏刷新 = 真正执行
+        /// <see cref="UpdateStatus"/> 的次数（应远小于帧数）；日志行 = 追加到 listLog 的行数。
+        /// 三个数字一对比就知道是谁在刷。</para>
+        /// </summary>
+        private void ReportUiRefreshStats()
+        {
+            if (!_uiStatsProbe) return;
+
+            int now = Environment.TickCount;
+            if (_uiStatTickBase == 0) { _uiStatTickBase = now; return; }
+
+            int elapsed = unchecked(now - _uiStatTickBase);
+            if (elapsed < 5000) return;
+
+            int frames = _uiFrameCount;
+            int status = _uiStatusRefreshCount;
+            int stats = _uiStatsRefreshCount;
+
+            _uiFrameCount = 0;
+            _uiStatusRefreshCount = 0;
+            _uiStatsRefreshCount = 0;
+            _uiStatTickBase = now;
+
+            double sec = elapsed / 1000.0;
+            Logger.Info(string.Format(
+                "[UI统计] {0:F1}s 内：帧显示 {1} 次（{2:F1}/s）｜状态栏刷新 {3} 次（{4:F1}/s）｜统计卡片 {5} 次｜日志行 {6} 行",
+                sec, frames, frames / sec, status, status / sec, stats, listLog.Items.Count));
+        }
+
+        /// <summary>
+        /// 按最长一行维护横向滚动范围。
+        /// <para>【为什么需要】ListBox 单行不换行，长日志（整串节点摘要 / 完整路径）会被控件宽度直接裁掉，
+        /// 现场只能看到前半截。只增不减，避免每批日志都全量重测。</para>
+        /// </summary>
+        private void GrowLogHorizontalExtent(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return;
+
+            int width;
+            try { width = TextRenderer.MeasureText(line, UiTheme.FontMono).Width; }
+            catch (Exception) { return; }
+
+            if (width + 16 <= _logMaxWidth) return;
+
+            _logMaxWidth = width + 16;
+            listLog.HorizontalExtent = _logMaxWidth;
+        }
+
+        /// <summary>双击日志行：弹窗显示完整内容（可选中复制）。</summary>
+        private void OnLogDoubleClick(object sender, EventArgs e)
+        {
+            int i = listLog.SelectedIndex;
+            if (i < 0 || i >= listLog.Items.Count) return;
+
+            string text = listLog.Items[i] as string ?? "";
+            if (text.Length == 0) return;
+
+            ShowTextDialog("日志详情", text);
+        }
+
+        /// <summary>只读文本弹窗（深色主题、等宽字体、支持打断行查看与复制）。</summary>
+        private void ShowTextDialog(string title, string text)
+        {
+            try
+            {
+                using (var f = new Form())
+                {
+                    f.Text = title;
+                    f.StartPosition = FormStartPosition.CenterParent;
+                    f.Size = new Size(940, 300);
+                    f.MinimizeBox = false;
+                    f.ShowInTaskbar = false;
+                    f.BackColor = UiTheme.ColorAppBg;
+                    f.ForeColor = UiTheme.ColorTextPrimary;
+
+                    var box = new TextBox
+                    {
+                        Multiline = true,
+                        ReadOnly = true,
+                        WordWrap = false,
+                        ScrollBars = ScrollBars.Both,
+                        Dock = DockStyle.Fill,
+                        Font = UiTheme.FontMono,
+                        Text = text.Replace("\r\n", " ").Replace('\n', ' '),
+                        BackColor = UiTheme.ColorViewBg,
+                        ForeColor = UiTheme.ColorTextPrimary,
+                        BorderStyle = BorderStyle.FixedSingle
+                    };
+
+                    f.Controls.Add(box);
+                    UiStyle.ApplyForm(f);
+                    f.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("打开日志详情失败：" + ex.Message);
+            }
+        }
+
+        private void OnLogTimerTick(object sender, EventArgs e)
+        {            if (IsDisposed || !IsHandleCreated) return;
+
+            ReportUiRefreshStats();
+
+            List<LogEntry> batch;
             lock (_logSync)
             {
                 if (_logBuffer.Count == 0) return;
                 batch = _logBuffer;
-                _logBuffer = new List<string>();
+                _logBuffer = new List<LogEntry>();
+
+                _logHistory.AddRange(batch);
+                int overflow = _logHistory.Count - 2000;
+                if (overflow > 0) _logHistory.RemoveRange(0, overflow);
             }
 
             try
             {
-                foreach (string line in batch)
+                listLog.BeginUpdate();
+                foreach (LogEntry entry in batch)
                 {
+                    if (!MatchLogFilter(entry)) continue;
+
+                    string line = entry.Format();
                     listLog.Items.Add(line);
+                    GrowLogHorizontalExtent(line);
                     // FR-UI-09：日志上限 500 行，超出移除最旧一行（控制 5 分钟连续运行的内存增长）
                     while (listLog.Items.Count > UiTheme.LogMaxLines) listLog.Items.RemoveAt(0);
                 }
-                listLog.TopIndex = listLog.Items.Count - 1;
+                listLog.EndUpdate();
+
+                if (listLog.Items.Count > 0) listLog.TopIndex = listLog.Items.Count - 1;
             }
             catch (Exception)
             {
@@ -1819,6 +2288,10 @@ namespace VisionPlatform.UI
         /// </summary>
         private void ApplyTheme()
         {
+            // 主界面没走 UiStyle.ApplyForm（手写 ApplyTheme），数值框策略要在这里单独补上。
+            // ApplyTree 幂等，构造与主题切换重复调用无副作用。
+            NumericInputPolicy.ApplyTree(this);
+
             // ---- 窗体与容器 ----
             BackColor = UiTheme.ColorAppBg;
             ForeColor = UiTheme.ColorTextPrimary;
@@ -2040,9 +2513,17 @@ namespace VisionPlatform.UI
         {
             if (e == null) return;
 
+            // 性能归因：算法侧的产出速率与单帧耗时（探针关闭时是一次空判断）
+            PerfProbe.CountFrame(e.ElapsedMs);
+
             // 每收到一条流程输出即计入对应流程的 OK/NG（独立于下方帧显示节流，保证计数精确，
             // 且合帧跳过显示时数字仍实时累加）
             RecordFlowVerdict(e.FlowId, e.FlowName, e.Passed);
+
+            // 【耗时必须在这里更新】_lastElapsedMs 原来只在旧的 RunInspection（配方检测链路）
+            // 里赋值；走流程并行槽之后没有任何地方写它，于是状态栏「耗时」永远是 "--"。
+            _lastElapsedMs = e.ElapsedMs;
+            _statsDirty = true;
 
             int idx = e.ViewIndex - 1;
 
@@ -2100,6 +2581,7 @@ namespace VisionPlatform.UI
                 slot.Frame = e.Frame;            // 取得帧所有权（原事件持有）
                 e.DisplayFrame = null;
                 slot.Shapes = e.Shapes;
+                slot.Cloud = e.Cloud;            // 引用即可（托管数据）
                 slot.Passed = e.Passed;
                 slot.Summary = e.Summary ?? "";
                 slot.CameraName = e.CameraName ?? "";
@@ -2117,9 +2599,13 @@ namespace VisionPlatform.UI
                     Bitmap frame;
                     Bitmap displayFrame;
                     List<IGeometryShape> shapes;
+                    VisionSystem.Controls.PointCloud.PointCloudData cloud;
                     bool passed;
                     string summary;
                     string cameraName;
+                    // 所有权标记：交给视图的那一份不能在 finally 里再释放（否则显示中的位图被销毁）
+                    bool frameHanded = false;
+                    bool displayFrameHanded = false;
 
                     lock (_pendingOutputsSync)
                     {
@@ -2128,6 +2614,8 @@ namespace VisionPlatform.UI
                         // 取出最新快照后释放锁，再操作 UI
                         frame = s.Frame;
                         displayFrame = s.DisplayFrame;
+                        cloud = s.Cloud;
+                        s.Cloud = null;
                         shapes = s.Shapes;
                         passed = s.Passed;
                         summary = s.Summary;
@@ -2144,27 +2632,66 @@ namespace VisionPlatform.UI
                         return;
                     }
 
+                    // 显示节流（默认 15fps）：中间帧直接丢掉，只保留"最新画面"。
+                    // 算法按自己的节拍跑，画面不需要跟到 30fps —— 每渲染一帧就是一次
+                    // 5MP 重采样（约 14ms 纯 CPU），多视图并行时这就是主要占用。
+                    int tickNow = Environment.TickCount;
+                    if (s.LastRenderTick != 0
+                        && unchecked(tickNow - s.LastRenderTick) < MinRenderIntervalMs)
+                    {
+                        if (frame != null) frame.Dispose();
+                        if (displayFrame != null) displayFrame.Dispose();
+                        return;
+                    }
+                    s.LastRenderTick = tickNow;
+
                     try
                     {
                         ImageViewer view = _views[idx];
-                        // 有合成帧就显示它（掩膜/伪彩），否则显示原图帧
-                        Bitmap srcForView = displayFrame ?? frame;
-                        Bitmap disp = srcForView != null ? (Bitmap)srcForView.Clone() : null;
-                        if (disp != null) view.SetImage(disp, true);   // 克隆后由控件持有，原帧随后释放
+                        // 3D：本周期产出过点云就进 3D 模式（与 2D 共用查看器），位图帧走常规释放
+                        if (cloud != null && cloud.Count > 0)
+                        {
+                            view.SetPointCloud(cloud);
+                        }
+                        // 有合成帧就显示它（掩膜/伪彩），否则显示原图帧。
+                        // 【不再 Clone】视图自身持有所有权（详见 ImageViewer.OwnsImage），
+                        // 原先每帧先克隆一份 5MP 位图（15MB/帧）纯属白拷贝 —— 30fps 下约 450MB/s 的无用流量。
+                        // 两张帧谁被交给视图就由视图负责释放，剩下的在 finally 里放掉（不能两个都放）。
+                        else if (displayFrame != null)
+                        {
+                            view.SetImage(displayFrame, true);
+                            displayFrameHanded = true;
+                        }
+                        else if (frame != null)
+                        {
+                            view.SetImage(frame, true);
+                            frameHanded = true;
+                        }
 
+                        // 标题条文案：只在真的变化时赋值（Label.Text 每次都写会触发一次重绘）
                         if (idx < _captions.Count && _captions[idx] != null)
-                            _captions[idx].Text = "  " + (string.IsNullOrEmpty(cameraName) ? "流程结果" : cameraName)
-                                                  + " · " + ActiveFlowName;
+                        {
+                            string caption = "  " + (string.IsNullOrEmpty(cameraName) ? "流程结果" : cameraName)
+                                             + " · " + ActiveFlowName;
+                            if (_captions[idx].Text != caption) _captions[idx].Text = caption;
+                        }
 
                         // 流程结论同样驱动右栏徽标、视图角标与状态栏（与配方检测链路同一套口径）
                         _lastSummary = summary ?? "";
                         SetVerdict(passed);
                         SetViewVerdict(idx, passed);
-                        // OK/NG 数字只在「计数真正变化」时刷新（_statsDirty），而非逐渲染帧重建——
-                        // 连续运行下每帧都重算+重绘表格/状态栏正是卡顿根因，现在仅随判定事件刷新
-                        if (_statsDirty)
+
+                        // 状态栏 / 统计卡片合并到 5Hz 刷新（见 StatusUiMinIntervalMs 的说明）：
+                        // 每帧都刷两行长文本 + 按钮态是连续运行 CPU 偏高的固定开销之一，
+                        // 而人眼对 30fps 的数字跳动并没有需求。计数本身仍然按件精确累加。
+                        _uiFrameCount++;
+                        if (_statsDirty
+                            && unchecked(Environment.TickCount - _lastStatusUiTick) >= StatusUiMinIntervalMs)
                         {
+                            _lastStatusUiTick = Environment.TickCount;
                             _statsDirty = false;
+                            _uiStatsRefreshCount++;
+                            _uiStatusRefreshCount++;
                             UpdateStats();
                             UpdateStatus();
                         }
@@ -2179,8 +2706,9 @@ namespace VisionPlatform.UI
                     }
                     finally
                     {
-                        if (frame != null) frame.Dispose();
-                        if (displayFrame != null) displayFrame.Dispose();
+                        // 交给视图的那一份由视图负责释放（换图/销毁时），这里只放没交出去的
+                        if (!frameHanded && frame != null) frame.Dispose();
+                        if (!displayFrameHanded && displayFrame != null) displayFrame.Dispose();
                     }
                 });
             }
@@ -2528,7 +3056,7 @@ namespace VisionPlatform.UI
         /// </summary>
         private void DetachStaticEvents()
         {
-            Logger.Logged -= OnLogged;
+            Logger.EntryLogged -= OnEntryLogged;
             RecipeStore.CurrentChanged -= OnRecipeChanged;
             CameraManager.Instance.CurrentChanged -= OnCameraManagerChanged;
             ConfigStore.Changed -= OnConfigChanged;

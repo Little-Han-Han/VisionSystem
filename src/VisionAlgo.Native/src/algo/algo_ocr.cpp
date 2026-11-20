@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -189,6 +190,14 @@ std::vector<std::vector<cv::Rect> > SegmentLines(const cv::Mat& gray,
         if (p->min_char_h > 0.0 && h < p->min_char_h) continue;
         if (p->max_char_h > 0.0 && h > p->max_char_h) continue;
 
+        if (p->min_char_w > 0.0 && w < p->min_char_w) continue;
+        if (p->max_char_w > 0.0 && w > p->max_char_w) continue;
+
+        // 面积按**连通域像素数**算，不是外接框面积：细划痕外接框可能很大但像素很少
+        const double area = (double)stats.at<int>(i, cv::CC_STAT_AREA);
+        if (p->min_area > 0.0 && area < p->min_area) continue;
+        if (p->max_area > 0.0 && area > p->max_area) continue;
+
         double aspect = (h > 1e-6) ? (w / h) : 0.0;
         if (p->min_aspect > 0.0 && aspect < p->min_aspect) continue;
         if (p->max_aspect > 0.0 && aspect > p->max_aspect) continue;
@@ -275,12 +284,20 @@ double StdDevOf(const cv::Mat& m)
 // 两边都归一化到同一画布 W×H 后，matchTemplate 只会输出 1×1，对 1px 抖动零容忍。
 // 因此取模板**中心 (W-2)×(H-2) 子区**当滑动窗，在候选画布上滑 → 输出 3×3 → 取最大值。
 // 缩放比例不变（两边已是同一画布尺寸），只是把「对位误差」吸收掉。
-double MatchScore(const cv::Mat& tpl, const cv::Mat& canvas)
+//
+// tplStd 是「模板中心子区的标准差」，由训练侧一次算好传进来（见 OcrState::tplStd）：
+// 它是模板自身的属性，与候选无关。原实现每次比对都重算一遍 meanStdDev，
+// N 个模板 × M 个字符 = N×M 次全图统计，纯属重复劳动。
+double MatchScore(const cv::Mat& tpl, const cv::Mat& canvas, double tplStd)
 {
     if (tpl.empty() || canvas.empty()) return 0.0;
     if (tpl.size() != canvas.size()) return 0.0;
     if (tpl.channels() != 1 || canvas.channels() != 1) return 0.0;
     if (tpl.depth() != CV_8U || canvas.depth() != CV_8U) return 0.0;
+
+    // 尺寸必须与候选一致：不一致说明模板是用另一套 NormW/NormH 归一化的，
+    // 直接返回 0 分会让用户以为是"识别不准"，这里在调用点已保证一致，兜底防崩。
+    if (tpl.cols != canvas.cols || tpl.rows != canvas.rows) return 0.0;
 
     const int W = tpl.cols, H = tpl.rows;
     const int sw = (W > 2) ? (W - 2) : W;   // 滑动窗宽
@@ -288,11 +305,10 @@ double MatchScore(const cv::Mat& tpl, const cv::Mat& canvas)
     const int x0 = (W - sw) / 2;
     const int y0 = (H - sh) / 2;
 
-    cv::Mat win = tpl(cv::Rect(x0, y0, sw, sh));
-
     // 方差保护：任一方差 ≈ 0 时 TM_CCOEFF_NORMED 无意义（全 255 / 全 0）
-    if (StdDevOf(win) < 1e-6 || StdDevOf(canvas) < 1e-6) return 0.0;
+    if (tplStd < 1e-6 || StdDevOf(canvas) < 1e-6) return 0.0;
 
+    cv::Mat win = tpl(cv::Rect(x0, y0, sw, sh));
     cv::Mat res;
     cv::matchTemplate(canvas, win, res, cv::TM_CCOEFF_NORMED);
 
@@ -306,16 +322,33 @@ double MatchScore(const cv::Mat& tpl, const cv::Mat& canvas)
     return mx;
 }
 
+// 模板中心子区的标准差 —— 训练时算一次即可（与 MatchScore 内的判据完全同口径）
+double TemplateCenterStd(const cv::Mat& tpl)
+{
+    if (tpl.empty() || tpl.channels() != 1 || tpl.depth() != CV_8U) return 0.0;
+    const int W = tpl.cols, H = tpl.rows;
+    const int sw = (W > 2) ? (W - 2) : W;
+    const int sh = (H > 2) ? (H - 2) : H;
+    const int x0 = (W - sw) / 2;
+    const int y0 = (H - sh) / 2;
+    return StdDevOf(tpl(cv::Rect(x0, y0, sw, sh)));
+}
+
 // 与模板库比对，返回最佳标签与分数；模板库为空时返回 ("?", 0)
-void MatchAgainstTemplates(const cv::Mat& normChar, const OcrState& st,
+/* 返回 false = 被软超时打断（此时 outScore 只是"已比出来的最高分"，不代表识别完成）。 */
+bool MatchAgainstTemplates(const cv::Mat& normChar, const OcrState& st,
                            std::string& outLabel, double& outScore)
 {
     outLabel = "?";
     outScore = 0.0;
-    if (normChar.empty() || st.templates.empty()) return;
+    if (normChar.empty() || st.templates.empty()) return true;
 
     for (size_t t = 0; t < st.templates.size(); ++t) {
         if (t >= st.labels.size()) break;
+
+        // 软超时：库大 + 字符多时这一层是主要开销（每字符 × 每模板一次 matchTemplate）。
+        // 到点直接收手，已经比出的最高分仍然有效 —— 上层会拿到"部分识别"而不是空结果。
+        if (DeadlineHit()) return false;
 
         const cv::Mat& tpl = st.templates[t];
         if (tpl.empty()) continue;
@@ -331,9 +364,10 @@ void MatchAgainstTemplates(const cv::Mat& normChar, const OcrState& st,
             cand = resized;
         }
 
-        double s = MatchScore(tpl, cand);
+        double s = MatchScore(tpl, cand, (t >= st.tplStd.size()) ? TemplateCenterStd(tpl) : st.tplStd[t]);
         if (s > outScore) { outScore = s; outLabel = st.labels[t]; }
     }
+    return true;
 }
 
 // 把 UTF-8 字符串安全拷进定长 buffer：不越界，且**不切断多字节字符**。
@@ -358,14 +392,18 @@ void CopyLabelSafe(const std::string& s, char* dst, int cap)
 
 int OcrSetParam(Context* ctx, const VA_OcrParam* param)
 {
-    if (param == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (param == 0)
+        return SetErrorEx(ctx, VA_ERR_ARG, "字符识别", "param", "空指针", "必须传入参数结构",
+                          "字符识别：参数为空");
     ctx->ocr.param = *param;
     return VA_OK;
 }
 
 int OcrAddTemplate(Context* ctx, const VA_Image* gray, const char* label)
 {
-    if (gray == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (gray == 0)
+        return SetErrorEx(ctx, VA_ERR_NO_INPUT, "字符识别", "gray", "空指针", "必须传入一帧图像",
+                          "字符识别：图像为空（未传入帧）");
 
     try
     {
@@ -385,7 +423,15 @@ int OcrAddTemplate(Context* ctx, const VA_Image* gray, const char* label)
 
         cv::Mat bin  = MakeBinary(one, &tp);
         cv::Mat norm = NormalizeChar(bin, w, h);
-        if (norm.empty()) { SetError(ctx, "empty template image"); return VA_ERR_ARG; }
+        if (norm.empty())
+        {
+            char buf[192];
+            std::snprintf(buf, sizeof(buf),
+                          "字符识别：模板图归一化结果为空（原图 %dx%d 里没有可用的前景像素）；"
+                          "请确认模板图上真的有字符", one.cols, one.rows);
+            SetError(ctx, buf);
+            return VA_ERR_ARG;
+        }
 
         std::string lb = (label != 0) ? std::string(label) : std::string("?");
         if (lb.empty()) lb = "?";
@@ -398,6 +444,7 @@ int OcrAddTemplate(Context* ctx, const VA_Image* gray, const char* label)
 
         ctx->ocr.templates.push_back(norm);
         ctx->ocr.labels.push_back(kept);
+        ctx->ocr.tplStd.push_back(TemplateCenterStd(norm));
         return VA_OK;
     }
     catch (const cv::Exception& e) { SetError(ctx, e); return VA_ERR_INTERNAL; }
@@ -415,6 +462,7 @@ int OcrClearTemplates(Context* ctx)
 {
     ctx->ocr.templates.clear();
     ctx->ocr.labels.clear();
+    ctx->ocr.tplStd.clear();
     return VA_OK;
 }
 
@@ -423,18 +471,26 @@ int OcrClearTemplates(Context* ctx)
 int OcrSegment(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                VA_OcrChar* outChars, int maxCount, int* outCount)
 {
-    if (gray == 0 || outCount == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (gray == 0 || outCount == 0)
+        return SetErrorEx(ctx, VA_ERR_ARG, "字符识别", "gray / out_count", "存在空指针", "全部必填",
+                          "字符识别：图像或输出计数为空");
 
     *outCount = 0;
 
     const VA_OcrParam* p = (param != 0) ? param : &ctx->ocr.param;
+
+    // 把"本次实际使用的参数"落到上下文：AddTemplate 的二值化 / 归一化读的是 ctx->ocr.param。
+    // 不落这一步就会出现「模板按上一次的参数（甚至是 memset 全 0）归一化、候选按本次参数归一化」，
+    // 尺寸或极性对不上 → 明明有模板却全是 '?'。
+    if (param != 0) ctx->ocr.param = *param;
 
     try
     {
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return VA_ERR_ARG;
         if (g.channels() != 1) {
-            SetError(ctx, "ocr requires single channel gray image");
+            SetErrorEx(ctx, VA_ERR_CHANNEL, "字符识别", "图像通道数", "彩色图", "单通道灰度",
+                        "字符识别：只接受单通道灰度图（上游请先接「预处理」转灰度）");
             return VA_ERR_TYPE;
         }
 
@@ -484,12 +540,14 @@ int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                    VA_OcrChar* outChars, int charsCap, int* outCharCount,
                    char* outText, int textCap, double* outMeanScore)
 {
-    if (gray == 0 || outCharCount == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
+    if (gray == 0 || outCharCount == 0) { SetError(ctx, "字符识别：图像或输出计数为空"); return VA_ERR_ARG; }
 
     *outCharCount = 0;
     if (outMeanScore != 0) *outMeanScore = 0.0;
     if (outText != 0) {
-        if (textCap <= 0) { SetError(ctx, "invalid text capacity"); return VA_ERR_ARG; }
+        if (textCap <= 0)
+        return SetErrorEx(ctx, VA_ERR_PARAM_RANGE, "字符识别", "text_cap", "<= 0", "> 0",
+                          "字符识别：文本缓冲区容量 <= 0");
         outText[0] = '\0';
     }
 
@@ -500,7 +558,8 @@ int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
         cv::Mat g;
         if (!ToMat(gray, g, ctx->lastError)) return VA_ERR_ARG;
         if (g.channels() != 1) {
-            SetError(ctx, "ocr requires single channel gray image");
+            SetErrorEx(ctx, VA_ERR_CHANNEL, "字符识别", "图像通道数", "彩色图", "单通道灰度",
+                        "字符识别：只接受单通道灰度图（上游请先接「预处理」转灰度）");
             return VA_ERR_TYPE;
         }
 
@@ -545,7 +604,13 @@ int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
 
                 std::string label;
                 double      score = 0.0;
-                MatchAgainstTemplates(norm, ctx->ocr, label, score);
+                if (!MatchAgainstTemplates(norm, ctx->ocr, label, score)) {
+                    // 超时打断：不能把"没比完的字"当识别结果往下传（会变成一串问号，
+                    // 看上去像模板坏了）。明确报超时，让现场去调超时/缩区域。
+                    return SetErrorEx(ctx, VA_ERR_ALGO_TIMEOUT, "字符识别", "TimeoutMs",
+                                      "超时", "在超时前完成比对",
+                                      "字符数 × 模板数 太多，超时前没比完；请缩小 ROI / 减少字符，或调大「超时(ms)」");
+                }
 
                 // score <= 0 一律不采纳（0 分不是「低置信度」，是「完全不像」）
                 bool accepted = !ctx->ocr.templates.empty() && score > 0.0 && score >= accept;
@@ -603,8 +668,12 @@ int OcrRecognizeEx(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
 int OcrRecognize(Context* ctx, const VA_Image* gray, const VA_OcrParam* param,
                  char* outText, int textCap, double* outMeanScore)
 {
-    if (gray == 0 || outText == 0) { SetError(ctx, "null argument"); return VA_ERR_ARG; }
-    if (textCap <= 0) { SetError(ctx, "invalid text capacity"); return VA_ERR_ARG; }
+    if (gray == 0 || outText == 0)
+        return SetErrorEx(ctx, VA_ERR_ARG, "字符识别", "gray / out_text", "存在空指针", "全部必填",
+                          "字符识别：图像或文本缓冲区为空");
+    if (textCap <= 0)
+        return SetErrorEx(ctx, VA_ERR_PARAM_RANGE, "字符识别", "text_cap", "<= 0", "> 0",
+                          "字符识别：文本缓冲区容量 <= 0");
 
     int charCount = 0;
     return OcrRecognizeEx(ctx, gray, param, 0, 0, &charCount,

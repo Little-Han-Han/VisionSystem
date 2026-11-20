@@ -168,7 +168,9 @@ namespace VisionPlatform.UI
             string dir = _dir;
             int token = ++_scanToken;
 
-            Task.Run(() => OcrCharStore.Scan(dir)).ContinueWith(t =>
+            // 路径以 .ocrtpl 结尾 → 单文件字符库；否则仍是"目录 = 库"的老口径
+            bool isLib = dir.EndsWith(OcrCharLibraryFile.Extension, StringComparison.OrdinalIgnoreCase);
+            Task.Run(() => isLib ? OcrCharStore.ScanLibrary(dir) : OcrCharStore.Scan(dir)).ContinueWith(t =>
             {
                 if (IsDisposed) return;
                 try
@@ -203,8 +205,13 @@ namespace VisionPlatform.UI
             // ★ 全失败时严禁出现"为空"或"0 个"—— 那是"读不出来"被说成"没有"，会让人去查错方向。
             if (lib.IsEmpty)
             {
+                // 文案按"库还是目录"区分：v1.0.7.2 起界面只支持单文件库，
+                // 对着 .ocrtpl 说"模板目录为空"会让人去找一个不存在的目录。
+                bool isLibrary = lib.Dir != null
+                    && lib.Dir.EndsWith(OcrCharLibraryFile.Extension, StringComparison.OrdinalIgnoreCase);
+
                 SetState("未配置", UiTheme.ColorWarn,
-                    "模板目录为空（0 个）",
+                    isLibrary ? "字符库为空（0 个）" : "模板目录为空（0 个）",
                     lib.Dir,
                     null);
                 return;
