@@ -579,7 +579,12 @@ namespace VisionPlatform.Flow
                 FlowId = FlowId,
                 FlowName = FlowName,
                 Product = Product,
-                CycleId = _publishCycleId
+                CycleId = _publishCycleId,
+
+                // 【3D 点云必须随结果带出】点云流程（只读点云 / 无位图）的结果全靠这个通道：
+                // 漏传的话主界面只能显示"尚未载入图像"，看起来就是"流程跑了但没画面"。
+                // 引用移交，无释放手续（与 FlowRunner.Run 的发布口径保持一致）。
+                Cloud = session != null ? session.CurrentCloud : null
             };
 
             if (session != null) session.Current = null;   // 已交出，会话不再释放
