@@ -515,6 +515,8 @@ namespace VisionPlatform.Communication
         private static void ExecuteActions(CommJobConfig job, Dictionary<string, string> context,
                                            FlowResultSnapshot result)
         {
+            string firstFailure = null;   // 本次执行第一个失败的动作（形如 "SetPoint：xxxx"）
+
             foreach (CommActionConfig action in job.Actions)
             {
                 if (action == null) continue;
@@ -573,17 +575,35 @@ namespace VisionPlatform.Communication
 
                 if (!r.Success)
                 {
-                    JobRuntime rt;
-                    lock (Sync) { Runtimes.TryGetValue(job.Name, out rt); }
-                    if (rt != null) rt.LastError = r.Message;
-
-                    // 【必须落日志】动作失败以前只在界面的「最近错误」列体现，现场翻不到原因；
-                    // 结果回写失败（点位写不进 / 映射串写错）必须能在日志里看到。
-                    Logger.Warn("[comm-job] 任务「" + job.Name + "」动作「" + kind + "」失败："
-                                + (r.Message ?? "未知原因"));
-
-                    if (!action.ContinueOnError) return;
+                    if (firstFailure == null) firstFailure = kind + "：" + (r.Message ?? "未知原因");
+                    if (!action.ContinueOnError) break;
                 }
+            }
+
+            // 【按整条任务收尾，不要逐动作收尾】心跳任务是「SetPoint 成功 + SendMessage 失败」：
+            // 若逐个动作判成败，SetPoint 成功就会清掉告警标记，SendMessage 下一秒又告警一次 ——
+            // 实测每秒一条、刷了 390 条把日志界面淹掉。这里只在"整条任务全成功"时才算恢复。
+            JobRuntime rt;
+            lock (Sync) { Runtimes.TryGetValue(job.Name, out rt); }
+            if (rt == null) return;
+
+            if (firstFailure != null)
+            {
+                rt.LastError = firstFailure;
+
+                // 同一条错误只告警一次（链路没连上时每秒重试都是同一句），恢复时补一条 Info。
+                if (!string.Equals(rt.LastWarnedError, firstFailure, StringComparison.Ordinal))
+                {
+                    rt.LastWarnedError = firstFailure;
+                    Logger.Warn("[comm-job] 任务「" + job.Name + "」失败：" + firstFailure
+                                + "（相同错误不再重复记录，恢复后自动提示）");
+                }
+            }
+            else if (rt.LastWarnedError.Length > 0)
+            {
+                rt.LastWarnedError = "";
+                rt.LastError = "";
+                Logger.Info("[comm-job] 任务「" + job.Name + "」已恢复正常");
             }
         }
 
@@ -925,6 +945,8 @@ namespace VisionPlatform.Communication
             public long RunCount;
             public DateTime LastRun;
             public string LastError = "";
+            /// <summary>已经写进日志的错误文本：同一条错误只记一次，避免每秒刷屏。</summary>
+            public string LastWarnedError = "";
             public DateTime LastTrigger = DateTime.MinValue;
             public DateTime NextDue = DateTime.MinValue;
         }

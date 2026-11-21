@@ -190,6 +190,7 @@ namespace VisionPlatform.UI
             public bool Passed;
             public string Summary = "";
             public string CameraName = "";
+            public string FlowName = "";         // 产生该结果的流程（视图标题必须显示它，而不是当前下拉选中项）
             public int Posted;                   // 0=无待处理；1=已投递一次 BeginInvoke
             public int LastRenderTick;           // 上次真正渲染该视图的时刻（Environment.TickCount）
         }
@@ -513,6 +514,47 @@ namespace VisionPlatform.UI
 
             tableViews.ResumeLayout(true);
             UpdateStatus();
+            WarnViewBindingMismatch();
+        }
+
+        private string _viewBindingWarnKey = "";
+
+        /// <summary>
+        /// 校验「流程绑定的视图号」是否超出当前视图数（启动 / 换布局时各查一次）。
+        /// <para>
+        /// 现场高频配错：布局选 1×2（2 个视图），第 3 条流程却绑了「视图 3」—— 结果到达时
+        /// 只在日志里留一行 WARN 就被跳过，用户在界面上看到的是"这条流程没有画面"。
+        /// 这里在构建视图时一次性点名，配合状态栏提示定位配置问题。
+        /// </para>
+        /// </summary>
+        private void WarnViewBindingMismatch()
+        {
+            try
+            {
+                string key = _rows + "x" + _cols;
+                if (string.Equals(_viewBindingWarnKey, key, StringComparison.Ordinal)) return;
+                _viewBindingWarnKey = key;
+
+                List<FlowDefinition> flows = ConfigStore.Current.Flows.Flows;
+                var bad = new List<string>();
+                foreach (FlowDefinition f in flows)
+                {
+                    if (f == null || !f.Enabled) continue;
+                    if (f.ViewIndex < 1 || f.ViewIndex > _views.Count)
+                        bad.Add((string.IsNullOrEmpty(f.Name) ? f.Id : f.Name) + "→视图" + f.ViewIndex);
+                }
+
+                if (bad.Count == 0) return;
+
+                Logger.Warn("布局 " + _rows + "×" + _cols + "（" + _views.Count + " 个视图）与流程绑定不符："
+                            + string.Join("、", bad.ToArray())
+                            + "；这些流程的结果不会显示，请在「流程编排」里把绑定视图改到 1~"
+                            + _views.Count + "。");
+            }
+            catch (Exception)
+            {
+                // 配置不可读时不影响界面构建
+            }
         }
 
         private void OnLayoutChanged(object sender, EventArgs e)
@@ -2710,6 +2752,7 @@ namespace VisionPlatform.UI
                 slot.Passed = e.Passed;
                 slot.Summary = e.Summary ?? "";
                 slot.CameraName = e.CameraName ?? "";
+                slot.FlowName = e.FlowName ?? "";
                 e.Frame = null;                  // 所有权已转移，防止重复释放
             }
 
@@ -2728,6 +2771,7 @@ namespace VisionPlatform.UI
                     bool passed;
                     string summary;
                     string cameraName;
+                    string flowName;
                     // 所有权标记：交给视图的那一份不能在 finally 里再释放（否则显示中的位图被销毁）
                     bool frameHanded = false;
                     bool displayFrameHanded = false;
@@ -2745,6 +2789,7 @@ namespace VisionPlatform.UI
                         passed = s.Passed;
                         summary = s.Summary;
                         cameraName = s.CameraName;
+                        flowName = s.FlowName;
                         s.Frame = null;   // 取出，下方交由视图或释放处理
                         s.DisplayFrame = null;
                         s.Shapes = null;
@@ -2796,8 +2841,12 @@ namespace VisionPlatform.UI
                         // 标题条文案：只在真的变化时赋值（Label.Text 每次都写会触发一次重绘）
                         if (idx < _captions.Count && _captions[idx] != null)
                         {
+                            // 【必须用结果来源流程】以前这里写 ActiveFlowName（主界面下拉当前选中项）：
+                            // 多流程触发式运行时，视图 1 显示的是「精定位检测线」的结果，标题却写着
+                            // 「流程 1」，现场据此判断"没显示对应流程的画面"—— 属于文案误导，不是没显示。
+                            string flowLabel = string.IsNullOrEmpty(flowName) ? ActiveFlowName : flowName;
                             string caption = "  " + (string.IsNullOrEmpty(cameraName) ? "流程结果" : cameraName)
-                                             + " · " + ActiveFlowName;
+                                             + " · " + flowLabel;
                             if (_captions[idx].Text != caption) _captions[idx].Text = caption;
                         }
 
