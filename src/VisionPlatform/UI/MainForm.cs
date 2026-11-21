@@ -2280,6 +2280,79 @@ namespace VisionPlatform.UI
                     combo.ComboBox.FlatStyle = FlatStyle.Flat;
                 }
             }
+
+            ApplyToolbarIcons();
+        }
+
+        /// <summary>
+        /// 导航与工具条图标：**左图标 + 右文字**（<see cref="TextImageRelation.ImageBeforeText"/>）。
+        /// <para>图标名与 <c>docs/设计/界面图标清单.md</c> 一一对应，源文件在
+        /// <c>assets/icons/ui/png/</c>（以嵌入资源打进 UI.Controls，部署不需要 assets 目录）。
+        /// 取不到图标时静默降级为纯文字，不影响功能。</para>
+        /// <para>幂等：ApplyTheme 每次重套主题都会调用，重复设置同一个 Image 无副作用。</para>
+        /// </summary>
+        private void ApplyToolbarIcons()
+        {
+            SetToolbarIcon("tsBtnRefresh", "ui-common-refresh", 16);
+            SetToolbarIcon("tsBtnGrabOnce", "ui-run-step", 16);
+            SetToolbarIcon("tsBtnLive", "ui-run-loop", 16);
+            SetToolbarIcon("tsBtnSyncGrab", "ui-run-sync", 16);
+            SetToolbarIcon("tsBtnRightPanel", "ui-common-collapse", 16);
+            SetToolbarIcon("tsBtnCameraMgr", "ui-nav-camera", 16);
+            SetToolbarIcon("tsBtnAlgo", "ui-nav-algo", 16);
+            SetToolbarIcon("tsBtnFlow", "ui-nav-flow", 16);
+            SetToolbarIcon("tsBtnCalib", "ui-nav-calib", 16);
+            SetToolbarIcon("tsBtnComm", "ui-nav-comm", 16);
+            SetToolbarIcon("tsBtnRecipe", "ui-nav-recipe", 16);
+            SetToolbarIcon("tsBtnSettings", "ui-nav-settings", 16);
+            SetToolbarIcon("tsBtnLog", "ui-nav-log", 16);
+            SetToolbarIcon("tsBtnLogin", "ui-common-user", 16);
+
+            // 运行控制按钮（自绘 UiButton）：图标 + 文字，24px 档与按钮高度匹配
+            btnLoop.Image = UiIcons.Get("ui-run-start", 24);
+            btnPause.Image = UiIcons.Get("ui-run-pause", 24);
+            btnStop.Image = UiIcons.Get("ui-run-stop", 24);
+            btnGrabOnce.Image = UiIcons.Get("ui-run-step", 24);
+            btnResetStats.Image = UiIcons.Get("ui-common-refresh", 24);
+
+            // 【必须】动态挂 Image 后 ToolStrip 不会自动重算 AutoSize 宽度，
+            // 不 PerformLayout 的话按钮仍是"纯文字"宽度，图标把文字区挤成省略号。
+            toolStrip.PerformLayout();
+            toolStrip.Invalidate(true);
+        }
+
+        /// <summary>给工具条某一项挂图标（按 Name 查找，找不到就跳过）。</summary>
+        private void SetToolbarIcon(string itemName, string iconName, int size)
+        {
+            if (toolStrip == null) return;
+
+            ToolStripItem target = null;
+            foreach (ToolStripItem item in toolStrip.Items)
+            {
+                if (string.Equals(item.Name, itemName, StringComparison.Ordinal))
+                {
+                    target = item;
+                    break;
+                }
+            }
+            if (target == null) return;
+
+            Image icon = UiIcons.Get(iconName, size);
+            if (icon == null) return;
+
+            target.Image = icon;
+            target.ImageAlign = ContentAlignment.MiddleCenter;
+            target.TextImageRelation = TextImageRelation.ImageBeforeText;
+            target.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+
+            // 【为什么手工算宽度】运行时给 AutoSize 的 ToolStripItem 挂 Image 后，
+            // ToolStrip 不会重算缓存的首选尺寸（PerformLayout 也无效，实测截图文字仍被
+            // 图标挤成"刷…"）。这里直接按"图标 + 间距 + 文字 + 内边距"定死宽度，
+            // 行为可预测，不依赖布局缓存何时失效。
+            Size textSize = TextRenderer.MeasureText(target.Text, UiTheme.FontToolbar);
+            target.AutoSize = false;
+            target.Width = textSize.Width + icon.Width + 6 + target.Padding.Horizontal + 4;
+            if (target.Height < 24) target.Height = 28;
         }
 
         /// <summary>

@@ -1184,6 +1184,10 @@ namespace VisionPlatform.Core
         {
             AppConfig cfg = null;
 
+            // 配置在 <程序目录>\Config\ 下：先建目录并做旧位置迁移，
+            // 保证第一次读就能拿到老配置（否则会静默用默认值，用户以为配置丢了）。
+            AppPaths.Ensure();
+
             try
             {
                 cfg = Json.LoadFromFile<AppConfig>(AppPaths.ConfigFile);
@@ -1313,6 +1317,8 @@ namespace VisionPlatform.Core
 
             try
             {
+                // 配置目录可能还没建（Ensure 未跑到 / 用户手工删过）—— 保存前兜底
+                if (!Directory.Exists(AppPaths.ConfigDir)) Directory.CreateDirectory(AppPaths.ConfigDir);
                 Json.SaveToFile(AppPaths.ConfigFile, config);
             }
             catch (Exception ex)

@@ -56,6 +56,7 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="UiTheme.cs" />
+    <Compile Include="UiIcons.cs" />
     <Compile Include="UiTitleBar.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -69,4 +70,11 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- 界面图标：assets\icons\ui\png\*.png 以嵌入资源打包（逻辑名 uiicons.<文件名>）。
+       这样部署不需要 assets 目录，也不会在 bin 下产生副本；改图标重编译即可。 -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\icons\ui\png\*.png">
+      <LogicalName>uiicons.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

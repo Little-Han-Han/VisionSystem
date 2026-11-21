@@ -105,9 +105,54 @@ namespace VisionPlatform.UI
             else if (isNeutral) textColor = UiTheme.ColorTextPrimary;
             else textColor = Color.White;
 
-            TextRenderer.DrawText(g, Text, Font, rect, textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
-                | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            // Image 来自基类 Button（ButtonBase.Image）；设置了图标就画成"左图标 + 右文字"，
+            // 整体水平居中。图标用原尺寸不缩放（16/24/32 三档按按钮高度挑），保证像素清晰。
+            Image glyph = Image;
+            if (glyph != null && glyph.Width > 0 && glyph.Height > 0)
+            {
+                const int gap = 6;
+                // NoPadding：MeasureText 默认带额外内边距，会让"图标 + 间距 + 文字"整体偏宽、
+                // 图标离文字看起来有空档；去掉 padding 后组合宽度与实际绘制一致。
+                Size textSize = string.IsNullOrEmpty(Text)
+                    ? Size.Empty
+                    : TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue),
+                                               TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                int total = glyph.Width + (textSize.IsEmpty ? 0 : gap + textSize.Width);
+                int ix = rect.Left + (rect.Width - total) / 2;
+                int iy = rect.Top + (rect.Height - glyph.Height) / 2;
+                Rectangle imgRect = new Rectangle(ix, iy, glyph.Width, glyph.Height);
+
+                if (Enabled)
+                {
+                    g.DrawImage(glyph, imgRect);
+                }
+                else
+                {
+                    // 禁用态：图标一起压暗，避免亮色图标在灰按钮上显得"还能点"
+                    using (var attrs = new System.Drawing.Imaging.ImageAttributes())
+                    {
+                        var cm = new System.Drawing.Imaging.ColorMatrix { Matrix44 = 0.35f };
+                        attrs.SetColorMatrix(cm);
+                        g.DrawImage(glyph, imgRect, 0, 0, glyph.Width, glyph.Height,
+                            GraphicsUnit.Pixel, attrs);
+                    }
+                }
+
+                if (!textSize.IsEmpty)
+                {
+                    var textRect = new Rectangle(ix + glyph.Width + gap, rect.Top,
+                                                 textSize.Width + 2, rect.Height);
+                    TextRenderer.DrawText(g, Text, Font, textRect, textColor,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter
+                        | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+                }
+            }
+            else
+            {
+                TextRenderer.DrawText(g, Text, Font, rect, textColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+                    | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            }
 
             // 键盘聚焦虚框（保留可达性）
             if (Focused && ShowFocusCues)

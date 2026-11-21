@@ -1,0 +1,790 @@
+{
+  "运行控制": {
+    "ui-run-start": {
+      "svg": "src/ui-run-start.svg",
+      "png": {
+        "16": "png/ui-run-start-16.png",
+        "24": "png/ui-run-start-24.png",
+        "32": "png/ui-run-start-32.png"
+      }
+    },
+    "ui-run-pause": {
+      "svg": "src/ui-run-pause.svg",
+      "png": {
+        "16": "png/ui-run-pause-16.png",
+        "24": "png/ui-run-pause-24.png",
+        "32": "png/ui-run-pause-32.png"
+      }
+    },
+    "ui-run-stop": {
+      "svg": "src/ui-run-stop.svg",
+      "png": {
+        "16": "png/ui-run-stop-16.png",
+        "24": "png/ui-run-stop-24.png",
+        "32": "png/ui-run-stop-32.png"
+      }
+    },
+    "ui-run-step": {
+      "svg": "src/ui-run-step.svg",
+      "png": {
+        "16": "png/ui-run-step-16.png",
+        "24": "png/ui-run-step-24.png",
+        "32": "png/ui-run-step-32.png"
+      }
+    },
+    "ui-run-sync": {
+      "svg": "src/ui-run-sync.svg",
+      "png": {
+        "16": "png/ui-run-sync-16.png",
+        "24": "png/ui-run-sync-24.png",
+        "32": "png/ui-run-sync-32.png"
+      }
+    },
+    "ui-run-loop": {
+      "svg": "src/ui-run-loop.svg",
+      "png": {
+        "16": "png/ui-run-loop-16.png",
+        "24": "png/ui-run-loop-24.png",
+        "32": "png/ui-run-loop-32.png"
+      }
+    }
+  },
+  "主界面导航": {
+    "ui-nav-flow": {
+      "svg": "src/ui-nav-flow.svg",
+      "png": {
+        "16": "png/ui-nav-flow-16.png",
+        "24": "png/ui-nav-flow-24.png",
+        "32": "png/ui-nav-flow-32.png"
+      }
+    },
+    "ui-nav-camera": {
+      "svg": "src/ui-nav-camera.svg",
+      "png": {
+        "16": "png/ui-nav-camera-16.png",
+        "24": "png/ui-nav-camera-24.png",
+        "32": "png/ui-nav-camera-32.png"
+      }
+    },
+    "ui-nav-calib": {
+      "svg": "src/ui-nav-calib.svg",
+      "png": {
+        "16": "png/ui-nav-calib-16.png",
+        "24": "png/ui-nav-calib-24.png",
+        "32": "png/ui-nav-calib-32.png"
+      }
+    },
+    "ui-nav-comm": {
+      "svg": "src/ui-nav-comm.svg",
+      "png": {
+        "16": "png/ui-nav-comm-16.png",
+        "24": "png/ui-nav-comm-24.png",
+        "32": "png/ui-nav-comm-32.png"
+      }
+    },
+    "ui-nav-recipe": {
+      "svg": "src/ui-nav-recipe.svg",
+      "png": {
+        "16": "png/ui-nav-recipe-16.png",
+        "24": "png/ui-nav-recipe-24.png",
+        "32": "png/ui-nav-recipe-32.png"
+      }
+    },
+    "ui-nav-log": {
+      "svg": "src/ui-nav-log.svg",
+      "png": {
+        "16": "png/ui-nav-log-16.png",
+        "24": "png/ui-nav-log-24.png",
+        "32": "png/ui-nav-log-32.png"
+      }
+    },
+    "ui-nav-settings": {
+      "svg": "src/ui-nav-settings.svg",
+      "png": {
+        "16": "png/ui-nav-settings-16.png",
+        "24": "png/ui-nav-settings-24.png",
+        "32": "png/ui-nav-settings-32.png"
+      }
+    },
+    "ui-nav-stats": {
+      "svg": "src/ui-nav-stats.svg",
+      "png": {
+        "16": "png/ui-nav-stats-16.png",
+        "24": "png/ui-nav-stats-24.png",
+        "32": "png/ui-nav-stats-32.png"
+      }
+    },
+    "ui-nav-result": {
+      "svg": "src/ui-nav-result.svg",
+      "png": {
+        "16": "png/ui-nav-result-16.png",
+        "24": "png/ui-nav-result-24.png",
+        "32": "png/ui-nav-result-32.png"
+      }
+    },
+    "ui-nav-algo": {
+      "svg": "src/ui-nav-algo.svg",
+      "png": {
+        "16": "png/ui-nav-algo-16.png",
+        "24": "png/ui-nav-algo-24.png",
+        "32": "png/ui-nav-algo-32.png"
+      }
+    }
+  },
+  "流程编辑器": {
+    "ui-flow-new": {
+      "svg": "src/ui-flow-new.svg",
+      "png": {
+        "16": "png/ui-flow-new-16.png",
+        "24": "png/ui-flow-new-24.png",
+        "32": "png/ui-flow-new-32.png"
+      }
+    },
+    "ui-flow-delete": {
+      "svg": "src/ui-flow-delete.svg",
+      "png": {
+        "16": "png/ui-flow-delete-16.png",
+        "24": "png/ui-flow-delete-24.png",
+        "32": "png/ui-flow-delete-32.png"
+      }
+    },
+    "ui-flow-up": {
+      "svg": "src/ui-flow-up.svg",
+      "png": {
+        "16": "png/ui-flow-up-16.png",
+        "24": "png/ui-flow-up-24.png",
+        "32": "png/ui-flow-up-32.png"
+      }
+    },
+    "ui-flow-down": {
+      "svg": "src/ui-flow-down.svg",
+      "png": {
+        "16": "png/ui-flow-down-16.png",
+        "24": "png/ui-flow-down-24.png",
+        "32": "png/ui-flow-down-32.png"
+      }
+    },
+    "ui-common-save": {
+      "svg": "src/ui-common-save.svg",
+      "png": {
+        "16": "png/ui-common-save-16.png",
+        "24": "png/ui-common-save-24.png",
+        "32": "png/ui-common-save-32.png"
+      }
+    },
+    "ui-flow-undo": {
+      "svg": "src/ui-flow-undo.svg",
+      "png": {
+        "16": "png/ui-flow-undo-16.png",
+        "24": "png/ui-flow-undo-24.png",
+        "32": "png/ui-flow-undo-32.png"
+      }
+    },
+    "ui-flow-redo": {
+      "svg": "src/ui-flow-redo.svg",
+      "png": {
+        "16": "png/ui-flow-redo-16.png",
+        "24": "png/ui-flow-redo-24.png",
+        "32": "png/ui-flow-redo-32.png"
+      }
+    },
+    "ui-flow-copy": {
+      "svg": "src/ui-flow-copy.svg",
+      "png": {
+        "16": "png/ui-flow-copy-16.png",
+        "24": "png/ui-flow-copy-24.png",
+        "32": "png/ui-flow-copy-32.png"
+      }
+    },
+    "ui-flow-paste": {
+      "svg": "src/ui-flow-paste.svg",
+      "png": {
+        "16": "png/ui-flow-paste-16.png",
+        "24": "png/ui-flow-paste-24.png",
+        "32": "png/ui-flow-paste-32.png"
+      }
+    },
+    "ui-flow-node-delete": {
+      "svg": "src/ui-flow-node-delete.svg",
+      "png": {
+        "16": "png/ui-flow-node-delete-16.png",
+        "24": "png/ui-flow-node-delete-24.png",
+        "32": "png/ui-flow-node-delete-32.png"
+      }
+    },
+    "ui-flow-link": {
+      "svg": "src/ui-flow-link.svg",
+      "png": {
+        "16": "png/ui-flow-link-16.png",
+        "24": "png/ui-flow-link-24.png",
+        "32": "png/ui-flow-link-32.png"
+      }
+    },
+    "ui-flow-select": {
+      "svg": "src/ui-flow-select.svg",
+      "png": {
+        "16": "png/ui-flow-select-16.png",
+        "24": "png/ui-flow-select-24.png",
+        "32": "png/ui-flow-select-32.png"
+      }
+    },
+    "ui-flow-zoom-in": {
+      "svg": "src/ui-flow-zoom-in.svg",
+      "png": {
+        "16": "png/ui-flow-zoom-in-16.png",
+        "24": "png/ui-flow-zoom-in-24.png",
+        "32": "png/ui-flow-zoom-in-32.png"
+      }
+    },
+    "ui-flow-zoom-out": {
+      "svg": "src/ui-flow-zoom-out.svg",
+      "png": {
+        "16": "png/ui-flow-zoom-out-16.png",
+        "24": "png/ui-flow-zoom-out-24.png",
+        "32": "png/ui-flow-zoom-out-32.png"
+      }
+    },
+    "ui-flow-fit": {
+      "svg": "src/ui-flow-fit.svg",
+      "png": {
+        "16": "png/ui-flow-fit-16.png",
+        "24": "png/ui-flow-fit-24.png",
+        "32": "png/ui-flow-fit-32.png"
+      }
+    },
+    "ui-flow-grid": {
+      "svg": "src/ui-flow-grid.svg",
+      "png": {
+        "16": "png/ui-flow-grid-16.png",
+        "24": "png/ui-flow-grid-24.png",
+        "32": "png/ui-flow-grid-32.png"
+      }
+    },
+    "ui-flow-validate": {
+      "svg": "src/ui-flow-validate.svg",
+      "png": {
+        "16": "png/ui-flow-validate-16.png",
+        "24": "png/ui-flow-validate-24.png",
+        "32": "png/ui-flow-validate-32.png"
+      }
+    },
+    "ui-flow-log": {
+      "svg": "src/ui-flow-log.svg",
+      "png": {
+        "16": "png/ui-flow-log-16.png",
+        "24": "png/ui-flow-log-24.png",
+        "32": "png/ui-flow-log-32.png"
+      }
+    },
+    "ui-flow-params": {
+      "svg": "src/ui-flow-params.svg",
+      "png": {
+        "16": "png/ui-flow-params-16.png",
+        "24": "png/ui-flow-params-24.png",
+        "32": "png/ui-flow-params-32.png"
+      }
+    }
+  },
+  "节点分类": {
+    "ui-cat-acquire": {
+      "svg": "src/ui-cat-acquire.svg",
+      "png": {
+        "16": "png/ui-cat-acquire-16.png",
+        "24": "png/ui-cat-acquire-24.png",
+        "32": "png/ui-cat-acquire-32.png"
+      }
+    },
+    "ui-cat-process": {
+      "svg": "src/ui-cat-process.svg",
+      "png": {
+        "16": "png/ui-cat-process-16.png",
+        "24": "png/ui-cat-process-24.png",
+        "32": "png/ui-cat-process-32.png"
+      }
+    },
+    "ui-cat-locate": {
+      "svg": "src/ui-cat-locate.svg",
+      "png": {
+        "16": "png/ui-cat-locate-16.png",
+        "24": "png/ui-cat-locate-24.png",
+        "32": "png/ui-cat-locate-32.png"
+      }
+    },
+    "ui-cat-measure": {
+      "svg": "src/ui-cat-measure.svg",
+      "png": {
+        "16": "png/ui-cat-measure-16.png",
+        "24": "png/ui-cat-measure-24.png",
+        "32": "png/ui-cat-measure-32.png"
+      }
+    },
+    "ui-cat-blob": {
+      "svg": "src/ui-cat-blob.svg",
+      "png": {
+        "16": "png/ui-cat-blob-16.png",
+        "24": "png/ui-cat-blob-24.png",
+        "32": "png/ui-cat-blob-32.png"
+      }
+    },
+    "ui-cat-ocr": {
+      "svg": "src/ui-cat-ocr.svg",
+      "png": {
+        "16": "png/ui-cat-ocr-16.png",
+        "24": "png/ui-cat-ocr-24.png",
+        "32": "png/ui-cat-ocr-32.png"
+      }
+    },
+    "ui-cat-dl": {
+      "svg": "src/ui-cat-dl.svg",
+      "png": {
+        "16": "png/ui-cat-dl-16.png",
+        "24": "png/ui-cat-dl-24.png",
+        "32": "png/ui-cat-dl-32.png"
+      }
+    },
+    "ui-cat-3d": {
+      "svg": "src/ui-cat-3d.svg",
+      "png": {
+        "16": "png/ui-cat-3d-16.png",
+        "24": "png/ui-cat-3d-24.png",
+        "32": "png/ui-cat-3d-32.png"
+      }
+    },
+    "ui-cat-output": {
+      "svg": "src/ui-cat-output.svg",
+      "png": {
+        "16": "png/ui-cat-output-16.png",
+        "24": "png/ui-cat-output-24.png",
+        "32": "png/ui-cat-output-32.png"
+      }
+    }
+  },
+  "状态与判定": {
+    "ui-status-ok": {
+      "svg": "src/ui-status-ok.svg",
+      "png": {
+        "16": "png/ui-status-ok-16.png",
+        "24": "png/ui-status-ok-24.png",
+        "32": "png/ui-status-ok-32.png"
+      }
+    },
+    "ui-status-ng": {
+      "svg": "src/ui-status-ng.svg",
+      "png": {
+        "16": "png/ui-status-ng-16.png",
+        "24": "png/ui-status-ng-24.png",
+        "32": "png/ui-status-ng-32.png"
+      }
+    },
+    "ui-status-warn": {
+      "svg": "src/ui-status-warn.svg",
+      "png": {
+        "16": "png/ui-status-warn-16.png",
+        "24": "png/ui-status-warn-24.png",
+        "32": "png/ui-status-warn-32.png"
+      }
+    },
+    "ui-status-running": {
+      "svg": "src/ui-status-running.svg",
+      "png": {
+        "16": "png/ui-status-running-16.png",
+        "24": "png/ui-status-running-24.png",
+        "32": "png/ui-status-running-32.png"
+      }
+    },
+    "ui-status-waiting": {
+      "svg": "src/ui-status-waiting.svg",
+      "png": {
+        "16": "png/ui-status-waiting-16.png",
+        "24": "png/ui-status-waiting-24.png",
+        "32": "png/ui-status-waiting-32.png"
+      }
+    },
+    "ui-status-paused": {
+      "svg": "src/ui-status-paused.svg",
+      "png": {
+        "16": "png/ui-status-paused-16.png",
+        "24": "png/ui-status-paused-24.png",
+        "32": "png/ui-status-paused-32.png"
+      }
+    },
+    "ui-status-stopped": {
+      "svg": "src/ui-status-stopped.svg",
+      "png": {
+        "16": "png/ui-status-stopped-16.png",
+        "24": "png/ui-status-stopped-24.png",
+        "32": "png/ui-status-stopped-32.png"
+      }
+    },
+    "ui-status-aborted": {
+      "svg": "src/ui-status-aborted.svg",
+      "png": {
+        "16": "png/ui-status-aborted-16.png",
+        "24": "png/ui-status-aborted-24.png",
+        "32": "png/ui-status-aborted-32.png"
+      }
+    },
+    "ui-status-error": {
+      "svg": "src/ui-status-error.svg",
+      "png": {
+        "16": "png/ui-status-error-16.png",
+        "24": "png/ui-status-error-24.png",
+        "32": "png/ui-status-error-32.png"
+      }
+    }
+  },
+  "设备与链路": {
+    "ui-dev-camera-on": {
+      "svg": "src/ui-dev-camera-on.svg",
+      "png": {
+        "16": "png/ui-dev-camera-on-16.png",
+        "24": "png/ui-dev-camera-on-24.png",
+        "32": "png/ui-dev-camera-on-32.png"
+      }
+    },
+    "ui-dev-camera-off": {
+      "svg": "src/ui-dev-camera-off.svg",
+      "png": {
+        "16": "png/ui-dev-camera-off-16.png",
+        "24": "png/ui-dev-camera-off-24.png",
+        "32": "png/ui-dev-camera-off-32.png"
+      }
+    },
+    "ui-dev-camera-usb": {
+      "svg": "src/ui-dev-camera-usb.svg",
+      "png": {
+        "16": "png/ui-dev-camera-usb-16.png",
+        "24": "png/ui-dev-camera-usb-24.png",
+        "32": "png/ui-dev-camera-usb-32.png"
+      }
+    },
+    "ui-comm-connect": {
+      "svg": "src/ui-comm-connect.svg",
+      "png": {
+        "16": "png/ui-comm-connect-16.png",
+        "24": "png/ui-comm-connect-24.png",
+        "32": "png/ui-comm-connect-32.png"
+      }
+    },
+    "ui-comm-disconnect": {
+      "svg": "src/ui-comm-disconnect.svg",
+      "png": {
+        "16": "png/ui-comm-disconnect-16.png",
+        "24": "png/ui-comm-disconnect-24.png",
+        "32": "png/ui-comm-disconnect-32.png"
+      }
+    },
+    "ui-comm-tcp": {
+      "svg": "src/ui-comm-tcp.svg",
+      "png": {
+        "16": "png/ui-comm-tcp-16.png",
+        "24": "png/ui-comm-tcp-24.png",
+        "32": "png/ui-comm-tcp-32.png"
+      }
+    },
+    "ui-comm-modbus": {
+      "svg": "src/ui-comm-modbus.svg",
+      "png": {
+        "16": "png/ui-comm-modbus-16.png",
+        "24": "png/ui-comm-modbus-24.png",
+        "32": "png/ui-comm-modbus-32.png"
+      }
+    },
+    "ui-comm-heartbeat": {
+      "svg": "src/ui-comm-heartbeat.svg",
+      "png": {
+        "16": "png/ui-comm-heartbeat-16.png",
+        "24": "png/ui-comm-heartbeat-24.png",
+        "32": "png/ui-comm-heartbeat-32.png"
+      }
+    },
+    "ui-comm-point": {
+      "svg": "src/ui-comm-point.svg",
+      "png": {
+        "16": "png/ui-comm-point-16.png",
+        "24": "png/ui-comm-point-24.png",
+        "32": "png/ui-comm-point-32.png"
+      }
+    },
+    "ui-comm-message": {
+      "svg": "src/ui-comm-message.svg",
+      "png": {
+        "16": "png/ui-comm-message-16.png",
+        "24": "png/ui-comm-message-24.png",
+        "32": "png/ui-comm-message-32.png"
+      }
+    },
+    "ui-comm-trigger": {
+      "svg": "src/ui-comm-trigger.svg",
+      "png": {
+        "16": "png/ui-comm-trigger-16.png",
+        "24": "png/ui-comm-trigger-24.png",
+        "32": "png/ui-comm-trigger-32.png"
+      }
+    },
+    "ui-comm-send": {
+      "svg": "src/ui-comm-send.svg",
+      "png": {
+        "16": "png/ui-comm-send-16.png",
+        "24": "png/ui-comm-send-24.png",
+        "32": "png/ui-comm-send-32.png"
+      }
+    },
+    "ui-comm-recv": {
+      "svg": "src/ui-comm-recv.svg",
+      "png": {
+        "16": "png/ui-comm-recv-16.png",
+        "24": "png/ui-comm-recv-24.png",
+        "32": "png/ui-comm-recv-32.png"
+      }
+    }
+  },
+  "3D 视图": {
+    "ui-3d-rotate": {
+      "svg": "src/ui-3d-rotate.svg",
+      "png": {
+        "16": "png/ui-3d-rotate-16.png",
+        "24": "png/ui-3d-rotate-24.png",
+        "32": "png/ui-3d-rotate-32.png"
+      }
+    },
+    "ui-3d-reset": {
+      "svg": "src/ui-3d-reset.svg",
+      "png": {
+        "16": "png/ui-3d-reset-16.png",
+        "24": "png/ui-3d-reset-24.png",
+        "32": "png/ui-3d-reset-32.png"
+      }
+    },
+    "ui-3d-axis": {
+      "svg": "src/ui-3d-axis.svg",
+      "png": {
+        "16": "png/ui-3d-axis-16.png",
+        "24": "png/ui-3d-axis-24.png",
+        "32": "png/ui-3d-axis-32.png"
+      }
+    },
+    "ui-3d-point-size": {
+      "svg": "src/ui-3d-point-size.svg",
+      "png": {
+        "16": "png/ui-3d-point-size-16.png",
+        "24": "png/ui-3d-point-size-24.png",
+        "32": "png/ui-3d-point-size-32.png"
+      }
+    },
+    "ui-3d-shading": {
+      "svg": "src/ui-3d-shading.svg",
+      "png": {
+        "16": "png/ui-3d-shading-16.png",
+        "24": "png/ui-3d-shading-24.png",
+        "32": "png/ui-3d-shading-32.png"
+      }
+    },
+    "ui-3d-snapshot": {
+      "svg": "src/ui-3d-snapshot.svg",
+      "png": {
+        "16": "png/ui-3d-snapshot-16.png",
+        "24": "png/ui-3d-snapshot-24.png",
+        "32": "png/ui-3d-snapshot-32.png"
+      }
+    }
+  },
+  "数据集与训练": {
+    "ui-train-capture": {
+      "svg": "src/ui-train-capture.svg",
+      "png": {
+        "16": "png/ui-train-capture-16.png",
+        "24": "png/ui-train-capture-24.png",
+        "32": "png/ui-train-capture-32.png"
+      }
+    },
+    "ui-train-start": {
+      "svg": "src/ui-train-start.svg",
+      "png": {
+        "16": "png/ui-train-start-16.png",
+        "24": "png/ui-train-start-24.png",
+        "32": "png/ui-train-start-32.png"
+      }
+    },
+    "ui-train-library": {
+      "svg": "src/ui-train-library.svg",
+      "png": {
+        "16": "png/ui-train-library-16.png",
+        "24": "png/ui-train-library-24.png",
+        "32": "png/ui-train-library-32.png"
+      }
+    },
+    "ui-train-delete": {
+      "svg": "src/ui-train-delete.svg",
+      "png": {
+        "16": "png/ui-train-delete-16.png",
+        "24": "png/ui-train-delete-24.png",
+        "32": "png/ui-train-delete-32.png"
+      }
+    },
+    "ui-train-model": {
+      "svg": "src/ui-train-model.svg",
+      "png": {
+        "16": "png/ui-train-model-16.png",
+        "24": "png/ui-train-model-24.png",
+        "32": "png/ui-train-model-32.png"
+      }
+    }
+  },
+  "配方与工程包": {
+    "ui-recipe": {
+      "svg": "src/ui-recipe.svg",
+      "png": {
+        "16": "png/ui-recipe-16.png",
+        "24": "png/ui-recipe-24.png",
+        "32": "png/ui-recipe-32.png"
+      }
+    },
+    "ui-recipe-saveas": {
+      "svg": "src/ui-recipe-saveas.svg",
+      "png": {
+        "16": "png/ui-recipe-saveas-16.png",
+        "24": "png/ui-recipe-saveas-24.png",
+        "32": "png/ui-recipe-saveas-32.png"
+      }
+    },
+    "ui-bundle-import": {
+      "svg": "src/ui-bundle-import.svg",
+      "png": {
+        "16": "png/ui-bundle-import-16.png",
+        "24": "png/ui-bundle-import-24.png",
+        "32": "png/ui-bundle-import-32.png"
+      }
+    },
+    "ui-bundle-export": {
+      "svg": "src/ui-bundle-export.svg",
+      "png": {
+        "16": "png/ui-bundle-export-16.png",
+        "24": "png/ui-bundle-export-24.png",
+        "32": "png/ui-bundle-export-32.png"
+      }
+    },
+    "ui-bundle-backup": {
+      "svg": "src/ui-bundle-backup.svg",
+      "png": {
+        "16": "png/ui-bundle-backup-16.png",
+        "24": "png/ui-bundle-backup-24.png",
+        "32": "png/ui-bundle-backup-32.png"
+      }
+    },
+    "ui-bundle-sample": {
+      "svg": "src/ui-bundle-sample.svg",
+      "png": {
+        "16": "png/ui-bundle-sample-16.png",
+        "24": "png/ui-bundle-sample-24.png",
+        "32": "png/ui-bundle-sample-32.png"
+      }
+    }
+  },
+  "通用动作": {
+    "ui-common-add": {
+      "svg": "src/ui-common-add.svg",
+      "png": {
+        "16": "png/ui-common-add-16.png",
+        "24": "png/ui-common-add-24.png",
+        "32": "png/ui-common-add-32.png"
+      }
+    },
+    "ui-common-delete": {
+      "svg": "src/ui-common-delete.svg",
+      "png": {
+        "16": "png/ui-common-delete-16.png",
+        "24": "png/ui-common-delete-24.png",
+        "32": "png/ui-common-delete-32.png"
+      }
+    },
+    "ui-common-edit": {
+      "svg": "src/ui-common-edit.svg",
+      "png": {
+        "16": "png/ui-common-edit-16.png",
+        "24": "png/ui-common-edit-24.png",
+        "32": "png/ui-common-edit-32.png"
+      }
+    },
+    "ui-common-refresh": {
+      "svg": "src/ui-common-refresh.svg",
+      "png": {
+        "16": "png/ui-common-refresh-16.png",
+        "24": "png/ui-common-refresh-24.png",
+        "32": "png/ui-common-refresh-32.png"
+      }
+    },
+    "ui-common-search": {
+      "svg": "src/ui-common-search.svg",
+      "png": {
+        "16": "png/ui-common-search-16.png",
+        "24": "png/ui-common-search-24.png",
+        "32": "png/ui-common-search-32.png"
+      }
+    },
+    "ui-common-filter": {
+      "svg": "src/ui-common-filter.svg",
+      "png": {
+        "16": "png/ui-common-filter-16.png",
+        "24": "png/ui-common-filter-24.png",
+        "32": "png/ui-common-filter-32.png"
+      }
+    },
+    "ui-common-collapse": {
+      "svg": "src/ui-common-collapse.svg",
+      "png": {
+        "16": "png/ui-common-collapse-16.png",
+        "24": "png/ui-common-collapse-24.png",
+        "32": "png/ui-common-collapse-32.png"
+      }
+    },
+    "ui-common-expand": {
+      "svg": "src/ui-common-expand.svg",
+      "png": {
+        "16": "png/ui-common-expand-16.png",
+        "24": "png/ui-common-expand-24.png",
+        "32": "png/ui-common-expand-32.png"
+      }
+    },
+    "ui-common-close": {
+      "svg": "src/ui-common-close.svg",
+      "png": {
+        "16": "png/ui-common-close-16.png",
+        "24": "png/ui-common-close-24.png",
+        "32": "png/ui-common-close-32.png"
+      }
+    },
+    "ui-common-info": {
+      "svg": "src/ui-common-info.svg",
+      "png": {
+        "16": "png/ui-common-info-16.png",
+        "24": "png/ui-common-info-24.png",
+        "32": "png/ui-common-info-32.png"
+      }
+    },
+    "ui-common-exit": {
+      "svg": "src/ui-common-exit.svg",
+      "png": {
+        "16": "png/ui-common-exit-16.png",
+        "24": "png/ui-common-exit-24.png",
+        "32": "png/ui-common-exit-32.png"
+      }
+    },
+    "ui-common-user": {
+      "svg": "src/ui-common-user.svg",
+      "png": {
+        "16": "png/ui-common-user-16.png",
+        "24": "png/ui-common-user-24.png",
+        "32": "png/ui-common-user-32.png"
+      }
+    },
+    "ui-common-lock": {
+      "svg": "src/ui-common-lock.svg",
+      "png": {
+        "16": "png/ui-common-lock-16.png",
+        "24": "png/ui-common-lock-24.png",
+        "32": "png/ui-common-lock-32.png"
+      }
+    }
+  }
+}

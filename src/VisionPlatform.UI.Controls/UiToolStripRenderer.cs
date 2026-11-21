@@ -135,6 +135,25 @@ namespace VisionPlatform.UI
 
         // ---------------------- 文本：加粗大字号 ----------------------
 
+        /// <summary>是否是"图标 + 文字"按钮（这类整组由 <see cref="OnRenderItemText"/> 自己排版）。</summary>
+        private static bool IsImageTextItem(ToolStripItem item)
+        {
+            return item != null
+                && item.Image != null
+                && item.DisplayStyle == ToolStripItemDisplayStyle.ImageAndText
+                && item.TextImageRelation == TextImageRelation.ImageBeforeText;
+        }
+
+        /// <summary>
+        /// 图标按钮的图片不交给默认绘制：WinForms 在 OwnerDraw + ImageAndText 下给出的
+        /// 图片/文字矩形会互相挤压（实测文字被截成"刷…"），这里整组一起画，位置完全可控。
+        /// </summary>
+        protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+        {
+            if (IsImageTextItem(e.Item)) return;
+            base.OnRenderItemImage(e);
+        }
+
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             Color color;
@@ -145,12 +164,54 @@ namespace VisionPlatform.UI
             else
                 color = e.TextColor;
 
+            // ---- 图标 + 文字：在 item 全宽内整组居中（左图标、右文字）----
+            if (IsImageTextItem(e.Item) && !string.IsNullOrEmpty(e.Text))
+            {
+                DrawIconAndText(e, color);
+                return;
+            }
+
             Rectangle rect = e.TextRectangle;
             if (rect.Width <= 0 || rect.Height <= 0) rect = new Rectangle(Point.Empty, e.Item.Size);
 
             TextRenderer.DrawText(e.Graphics, e.Text, UiTheme.FontToolbar, rect, color,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
                 | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+        }
+
+        /// <summary>图标 + 文字整组居中绘制（图标在左、文字在右，间距 6px）。</summary>
+        private static void DrawIconAndText(ToolStripItemTextRenderEventArgs e, Color color)
+        {
+            const int gap = 6;
+            Image icon = e.Item.Image;
+            Size textSize = TextRenderer.MeasureText(e.Text, UiTheme.FontToolbar,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+
+            int total = icon.Width + gap + textSize.Width;
+            int left = Math.Max(2, (e.Item.Width - total) / 2);
+            int iconY = Math.Max(0, (e.Item.Height - icon.Height) / 2);
+
+            if (e.Item.Enabled)
+            {
+                e.Graphics.DrawImage(icon, new Rectangle(left, iconY, icon.Width, icon.Height));
+            }
+            else
+            {
+                // 禁用态压暗，和 UiButton 的行为一致
+                using (var attrs = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    var cm = new System.Drawing.Imaging.ColorMatrix { Matrix44 = 0.35f };
+                    attrs.SetColorMatrix(cm);
+                    e.Graphics.DrawImage(icon, new Rectangle(left, iconY, icon.Width, icon.Height),
+                        0, 0, icon.Width, icon.Height, GraphicsUnit.Pixel, attrs);
+                }
+            }
+
+            var textRect = new Rectangle(left + icon.Width + gap, 0, textSize.Width + 2, e.Item.Height);
+            TextRenderer.DrawText(e.Graphics, e.Text, UiTheme.FontToolbar, textRect, color,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter
+                | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
 
         // ---------------------- 标签：不画底，纯文字（与按钮形成对比）----------------------

@@ -10,7 +10,7 @@ REM    publish.bat D:\Pkg --with-models   (also copy models\, ~137 MB)
 REM
 REM  What goes in:  exe + own DLLs + thirdparty\ (opencv / openvino /
 REM  sqlite / vcruntime) + empty data folders.
-REM  What stays out: *.pdb *.exp *.lib, appconfig*.json, Logs\*,
+REM  What stays out: *.pdb *.exp *.lib, Config\ (appconfig.json), Logs\*,
 REM  Images\* (dev data), Recipes\* (dev recipes), thresholds_new.pnm,
 REM  detect_diag.txt, models\ (unless --with-models).
 REM ==============================================================
@@ -57,7 +57,7 @@ for %%F in (msvcp140.dll vcruntime140.dll vcruntime140_1.dll vcomp140.dll concrt
 )
 
 REM ---- 4. data folders (created empty on first run; keep existing content) ----
-for %%D in (Recipes Templates Images Logs Calibrations OCRModel) do (
+for %%D in (Config Recipes Templates Images Logs Calibrations OCRModel) do (
     if not exist "%DST%\%%D" mkdir "%DST%\%%D"
 )
 
@@ -81,7 +81,7 @@ REM ---- 6. deployment notes ----
     echo   - VC++ runtime is bundled under thirdparty\vcruntime - no install needed
     echo.
     echo First start:
-    echo   - appconfig.json is generated automatically
+    echo   - Config\appconfig.json is generated automatically
     echo   - Recipes / Templates / Images are empty: import a project bundle
     echo     or create a recipe in the UI
     echo   - Cameras are NOT configured: bind them in Camera management

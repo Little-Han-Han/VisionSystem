@@ -94,7 +94,8 @@
   且带**质量闸门** —— 无显卡驱动时自动降级内置逐点光栅渲染（HUD 标「软件渲染」），无 GPU 也能正常出图
 - **配方**：`Recipe` + `RecipeStore`，JSON 存取、当前配方切换自动同步参数
 - **系统设置**：图片保存路径 / 格式（PNG/JPEG/BMP/TIFF）/ 保留天数（自动清理）/ 检测后自动保存与仅存 NG / 循环运行前是否要求通讯已连接
-- **配置持久化**：系统 / 算法 / 界面 / 流程 四类参数落到本地 JSON（`<程序目录>/appconfig.json`（如 `bin\x64\Release\appconfig.json`）），重启自动加载
+- **配置持久化**：系统 / 算法 / 界面 / 流程 四类参数落到 `<程序目录>\Config\appconfig.json`（如 `bin\x64\Release\Config\appconfig.json`），重启自动加载；
+  老版本放在程序根目录的 `appconfig.json` 首次启动会自动迁移进来（升级只换二进制、保留 `Config\` 即可保住配置）
 - **图像显示控件库 `VisionSystem.Controls`**：双缓冲、大图流畅缩放平移、几何图形（圆/矩形/旋转矩形/圆环）编辑、HUD 坐标与像素值、与 OpenCV `Mat` 零拷贝互通
 
 ---
@@ -348,7 +349,8 @@ VC++ 2015–2022 运行库（`msvcp140` / `vcruntime140` / `vcruntime140_1` / `v
 已按 app-local 方式放在 `thirdparty\vcruntime\`，**目标机无需安装 Redist**。
 
 目标机要求：**Windows 10 x64 及以上**（.NET Framework 4.8 已内置）、目录**可写**（别放 Program Files）。
-首次启动自动生成 `appconfig.json` 与日志库；相机绑定与配方需在目标机重新配置 / 导入工程包。
+首次启动自动生成 `Config\appconfig.json` 与日志库；相机绑定与配方需在目标机重新配置 / 导入工程包。
+升级已有现场：只替换 `exe + DLL + thirdparty\`，保留 `Config\` / `Recipes\` / `Templates\` 即可。
 
 ### 5. 打开解决方案
 双击 `VisionSystem.sln`（**唯一解决方案**）即可在 VS2022 中开发全部七个项目。
@@ -356,7 +358,7 @@ VC++ 2015–2022 运行库（`msvcp140` / `vcruntime140` / `vcruntime140_1` / `v
 ### 6. 性能与帧率
 
 - 循环运行**默认不限制帧率**（旧版写死 30fps 已解除）；需要控制 CPU / 日志量时，
-  在 `<程序目录>\appconfig.json`（如 `bin\x64\Release\appconfig.json`）的 `Ui.MaxFlowFps` 填 `30` / `60`（`0` = 不限）。
+  在 `<程序目录>\Config\appconfig.json`（如 `bin\x64\Release\Config\appconfig.json`）的 `Ui.MaxFlowFps` 填 `30` / `60`（`0` = 不限）。
 - 日志改为后台批量写文件，每帧不再有 6~7ms 的同步磁盘开销。
 - 并行生产运行不再为每个节点克隆整幅画面；只有流程预览才保留原图/节点帧。
 - 详细的实测数据、瓶颈定位方法与后续优化清单见 [性能优化](docs/架构/性能优化.md)。

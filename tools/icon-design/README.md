@@ -8,15 +8,24 @@
 |---|---|
 | `generate-icons.ps1` | `assets/icons/app.ico`（9 档）、`png/app-{16,24,32,48,64,128,256}.png`、`png/splash-mark.png` |
 | `make-svg.py` | `assets/icons/app-icon.svg`（磁贴版）、`app-mark.svg`（透明标记） |
+| `make-ui-icons.py` | `assets/icons/ui/` 下 96 个界面图标：`src/*.svg` + `png/*-{16,24,32}.png` + `manifest.json` |
 
 ## 运行
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\icon-design\generate-icons.ps1
 python tools\icon-design\make-svg.py
+python tools\icon-design\make-ui-icons.py
 ```
 
-两者都按自身位置回推仓库根，不需要传参。
+三者都按自身位置回推仓库根，不需要传参。`make-ui-icons.py` 依赖 Pillow（`pip install pillow`），其余脚本零依赖。
+
+## UI 图标约定
+
+- 图形定义（24×24 网格、1.7px 圆头描边、线性 + 少量强调色）全部写在 `make-ui-icons.py` 末尾的 `ICONS` 表里，**改图标只改这里**，SVG 与 PNG 同源生成，不会互相漂移。
+- 清单来自 `docs/设计/界面图标清单.md`；文档里重复出现的 `ui-common-save` 只生成一份，文档小节数量与去重后数量略有出入（96 个），以 `manifest.json` 为准。
+- `SVG` 主色是 `currentColor`，强调色是 `var(--ui-icon-accent, #0E9BD8)`；状态类 OK/NG/WARN/ERROR 用固定语义色。
+- `PNG` 是浅色主题用的深色描边版本，深色主题由代码侧反色；不要手工改 PNG。
 
 ## 注意
 

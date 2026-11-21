@@ -23,6 +23,23 @@ namespace VisionPlatform.Core
             get { return AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
         }
 
+        /// <summary>
+        /// 配置目录 = <c>&lt;程序目录&gt;\Config</c>。
+        /// <para>
+        /// 【为什么把 appconfig.json 从程序根目录挪进来】它是<b>会被频繁改写的运行配置</b>
+        /// （系统/算法/界面/流程四类参数），放在根目录会和 exe / DLL 混在一起：
+        /// 现场升级只换二进制时容易连配置一起覆盖，清理目录时也容易误删。
+        /// 独立成 Config\ 后，"升级保留 Config\"是一条明确的部署规则。
+        /// </para>
+        /// </summary>
+        public static string ConfigDir { get { return Path.Combine(Root, "Config"); } }
+
+        /// <summary>全局配置文件：<c>&lt;程序目录&gt;\Config\appconfig.json</c>。</summary>
+        public static string ConfigFile { get { return Path.Combine(ConfigDir, "appconfig.json"); } }
+
+        /// <summary>旧位置（1.0.9.x 及之前）：<c>&lt;程序目录&gt;\appconfig.json</c>，仅用于一次性迁移。</summary>
+        public static string LegacyConfigFile { get { return Path.Combine(Root, "appconfig.json"); } }
+
         /// <summary>用户配置的旧位置（仅日志与兼容迁移用）：<c>%AppData%\VisionPlatform</c>。</summary>
         public static string LegacyRoot
         {
@@ -88,9 +105,6 @@ namespace VisionPlatform.Core
             get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel"); }
         }
 
-        /// <summary>全局配置文件。</summary>
-        public static string ConfigFile { get { return Path.Combine(Root, "appconfig.json"); } }
-
         /// <summary>确保目录存在。</summary>
         public static void Ensure()
         {
@@ -100,6 +114,20 @@ namespace VisionPlatform.Core
                 if (!Directory.Exists(RecipeDir)) Directory.CreateDirectory(RecipeDir);
                 if (!Directory.Exists(LogDir)) Directory.CreateDirectory(LogDir);
                 if (!Directory.Exists(TemplateDir)) Directory.CreateDirectory(TemplateDir);
+                if (!Directory.Exists(ConfigDir)) Directory.CreateDirectory(ConfigDir);
+
+                // 一次性迁移：老版本的 appconfig.json 在程序根目录，静默搬到 Config\。
+                // 只在"新位置还没有文件"时搬，避免覆盖用户已经在用的新配置。
+                if (!File.Exists(ConfigFile) && File.Exists(LegacyConfigFile))
+                {
+                    try { File.Move(LegacyConfigFile, ConfigFile); }
+                    catch (Exception)
+                    {
+                        // 移动失败（占用 / 权限）就复制一份，旧文件留着不影响使用
+                        try { File.Copy(LegacyConfigFile, ConfigFile, false); }
+                        catch (Exception) { }
+                    }
+                }
             }
             catch (Exception)
             {

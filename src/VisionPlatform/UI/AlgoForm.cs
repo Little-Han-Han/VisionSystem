@@ -54,6 +54,26 @@ namespace VisionPlatform.UI
             btnGrab.Kind = UiButtonKind.Grab;
             btnMatch.Kind = UiButtonKind.Start;
             btnClearModel.Kind = UiButtonKind.Stop;
+
+            ApplyButtonIcons();
+        }
+
+        /// <summary>
+        /// 算法调试界面的按钮图标（左图标 + 右文字，由 <see cref="UiButton"/> 自绘）。
+        /// 图标名见 <c>docs/设计/界面图标清单.md</c>；缺失时保持纯文字，不影响功能。
+        /// </summary>
+        private void ApplyButtonIcons()
+        {
+            btnOpenImage.Image = UiIcons.Get("ui-nav-algo", 16);      // 载入图像（工作台入口语义）
+            btnGrab.Image = UiIcons.Get("ui-dev-camera-on", 16);      // 从相机取帧
+            btnPickTemplate.Image = UiIcons.Get("ui-common-edit", 16); // 框选模板
+            btnTemplateFull.Image = UiIcons.Get("ui-common-expand", 16);
+            btnTrain.Image = UiIcons.Get("ui-train-start", 16);
+            btnPickSearch.Image = UiIcons.Get("ui-common-search", 16);
+            btnSearchFull.Image = UiIcons.Get("ui-common-expand", 16);
+            btnMatch.Image = UiIcons.Get("ui-run-start", 16);
+            btnClearModel.Image = UiIcons.Get("ui-common-delete", 16);
+            btnFit.Image = UiIcons.Get("ui-flow-fit", 16);
         }
 
         /// <summary>
