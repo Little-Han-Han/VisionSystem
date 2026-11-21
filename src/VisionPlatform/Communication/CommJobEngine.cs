@@ -595,8 +595,14 @@ namespace VisionPlatform.Communication
                 if (!string.Equals(rt.LastWarnedError, firstFailure, StringComparison.Ordinal))
                 {
                     rt.LastWarnedError = firstFailure;
-                    Logger.Warn("[comm-job] 任务「" + job.Name + "」失败：" + firstFailure
-                                + "（相同错误不再重复记录，恢复后自动提示）");
+
+                    // 「没有客户端连接」是 TCP 服务端在等对端接入，属预期等待态、不是故障：
+                    // 记 Info 即可（现场看到黄色 WARN 会误以为通讯坏了）。其余失败仍记 WARN。
+                    bool waitingPeer = firstFailure.IndexOf("没有客户端连接", StringComparison.Ordinal) >= 0;
+                    string text = "[comm-job] 任务「" + job.Name + "」"
+                                  + (waitingPeer ? "暂不可发：" : "失败：") + firstFailure
+                                  + "（相同信息不再重复记录，恢复后自动提示）";
+                    if (waitingPeer) Logger.Info(text); else Logger.Warn(text);
                 }
             }
             else if (rt.LastWarnedError.Length > 0)
