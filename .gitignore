@@ -445,3 +445,6 @@ detect_diag.txt
 
 # zxing-cpp 静态库产物：由 ThirdParty/ZXing/ZXing.vcxproj 现场构建，不入库
 ThirdParty/ZXing/lib/
+
+# 便携发布包（publish.bat 产物）
+/dist/

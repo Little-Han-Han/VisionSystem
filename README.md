@@ -331,6 +331,25 @@ src\SmokeUi\bin\Debug\SmokeUi.exe        :: 全量回归；--create-sample 生�
 ### 4. 运行
 直接运行 `bin\x64\Debug\VisionPlatform.exe`（模块包 `VisionPlatform.Modules.dll` 与 exe 同目录，外部 DLL 在 `thirdparty\` 下），或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
 
+### 4.1 发布到现场电脑（便携包）
+
+**不要**把 `bin\x64\Release` 整个拷给现场 —— 里面混着开发机的 `appconfig.json`、日志、配方与 `*.pdb/exp/lib`，
+而且缺 VC++ 运行库。用发布脚本产出一个干净的便携目录：
+
+```bat
+publish.bat                          :: 输出 dist\VisionPlatform
+publish.bat D:\Pkg                   :: 指定目标目录
+publish.bat D:\Pkg --with-models     :: 连深度学习模型（models\，约 137 MB）一起带上
+```
+
+发布包内容：`exe + 自家 DLL + thirdparty\{opencv,openvino,sqlite,vcruntime}` + 空数据目录
+（`Recipes` / `Templates` / `Images` / `Logs` / `Calibrations` / `OCRModel`）+ `DEPLOY.txt` 部署说明。
+VC++ 2015–2022 运行库（`msvcp140` / `vcruntime140` / `vcruntime140_1` / `vcomp140` / `concrt140`）
+已按 app-local 方式放在 `thirdparty\vcruntime\`，**目标机无需安装 Redist**。
+
+目标机要求：**Windows 10 x64 及以上**（.NET Framework 4.8 已内置）、目录**可写**（别放 Program Files）。
+首次启动自动生成 `appconfig.json` 与日志库；相机绑定与配方需在目标机重新配置 / 导入工程包。
+
 ### 5. 打开解决方案
 双击 `VisionSystem.sln`（**唯一解决方案**）即可在 VS2022 中开发全部七个项目。
 
