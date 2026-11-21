@@ -84,6 +84,7 @@
     <Compile Include="Communication\TcpServerSession.cs" />
     <Compile Include="Core\AppPaths.cs" />
     <Compile Include="Core\AssetPaths.cs" />
+    <Compile Include="Core\NativeDllPath.cs" />
     <Compile Include="Core\AppSettings.cs" />
     <Compile Include="Core\ImageStore.cs" />
     <Compile Include="Core\Json.cs" />
@@ -280,8 +281,10 @@
   <PropertyGroup>
     <!-- 把 C++ 算法库及其 OpenCV 运行时复制到主程序输出目录 -->
     <PostBuildEvent>xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\VisionAlgo.Native.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
-xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\opencv_world455*.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
-xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
+if not exist "$(TargetDir)thirdparty\opencv" mkdir "$(TargetDir)thirdparty\opencv"
+if /i "$(ConfigurationName)"=="Debug" (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455d.dll" "$(TargetDir)thirdparty\opencv\" &gt;nul 2&gt;&amp;1) else (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455.dll" "$(TargetDir)thirdparty\opencv\" &gt;nul 2&gt;&amp;1)
+if not exist "$(TargetDir)thirdparty\sqlite" mkdir "$(TargetDir)thirdparty\sqlite"
+xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)thirdparty\sqlite\" &gt;nul 2&gt;&amp;1
 if exist "$(ProjectDir)..\..\ThirdParty\Communication" if not exist "$(TargetDir)Communication" mkdir "$(TargetDir)Communication"
 if exist "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" "$(TargetDir)Communication\" &gt;nul 2&gt;&amp;1
 exit /b 0</PostBuildEvent>

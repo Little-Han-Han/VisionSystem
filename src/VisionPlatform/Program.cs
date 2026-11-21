@@ -36,6 +36,10 @@ namespace VisionPlatform
         [STAThread]
         private static void Main()
         {
+            // 第一行：把 thirdparty\* 各子目录加进本进程 DLL 搜索路径。
+            // 必须早于任何 P/Invoke（VisionAlgo.Native / sqlite3 都是首次调用时加载）。
+            Core.NativeDllPath.Register();
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             
@@ -75,7 +79,8 @@ namespace VisionPlatform
             // 平时完全不启动线程、不产生日志。
             Core.PerfProbe.Start();
 
-            // 模块包（算法模块的声明：端子 / 参数表 / 界面提示）按需从 Modules 目录动态加载。
+            // 模块包（算法模块的声明：端子 / 参数表 / 界面提示）按需从程序目录动态加载
+            //（缺失时回退 Modules 子目录，见 FlowModuleRegistry.EnsureLoaded）。
             // 宿主不编译期引用模块包：少一个可选模块不会让软件起不来，日志里能看到原因。
             // 通讯：协议插件 + 点位/任务引擎（心跳、Ready/Busy、跨流程结果汇总）
             Communication.CommHub.Initialize();
@@ -86,7 +91,7 @@ namespace VisionPlatform
             Logger.Info(string.Format("模块包：已注册 {0} 个模块，加载失败 {1} 项（目录 {2}）",
                 Framework.Modules.FlowModuleRegistry.Count,
                 Framework.Modules.FlowModuleRegistry.LoadErrors,
-                Framework.Modules.FlowModuleRegistry.ModuleDirectory));
+                Framework.Modules.FlowModuleRegistry.LoadedFrom));
 
             // 恢复算法参数：优先加载上次使用的配方；无命名配方时直接用保存的检测参数快照
             RestoreAlgorithmConfig();

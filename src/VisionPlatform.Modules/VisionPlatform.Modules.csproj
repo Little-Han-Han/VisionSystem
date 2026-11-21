@@ -14,8 +14,10 @@
     <Deterministic>true</Deterministic>
     <LangVersion>latest</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
-    <!-- 模块包单独输出到 Modules 子目录：宿主按需反射加载，不参与编译期引用 -->
-    <OutputPath>..\..\bin\x64\$(Configuration)\Modules\</OutputPath>
+    <!-- 模块包与宿主同目录输出（不再单独建 Modules 子目录）：
+         宿主按需反射加载，不参与编译期引用。部署 = 一个目录，省掉"漏拷 Modules"这类现场问题。
+         FlowModuleRegistry 先找 Modules 子目录、找不到回退程序目录（老部署仍兼容）。 -->
+    <OutputPath>..\..\bin\x64\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">

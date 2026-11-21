@@ -73,13 +73,14 @@
     <PostBuildEvent>
       <Command>set OV=$(OpenVinoRoot)\bin\intel64\Debug
 set TBB=$(OpenVinoRoot)\3rdparty\tbb\bin
-if exist "%OV%\openvinod.dll" xcopy /Y /D "%OV%\openvinod.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_intel_cpu_plugind.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugind.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_ir_frontendd.dll" xcopy /Y /D "%OV%\openvino_ir_frontendd.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_onnx_frontendd.dll" xcopy /Y /D "%OV%\openvino_onnx_frontendd.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbb12_debug.dll" xcopy /Y /D "%TBB%\tbb12_debug.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbbmalloc_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_debug.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_debug.dll" "$(OutDir)" || exit /b 0</Command>
+if not exist "$(OutDir)thirdparty\openvino" mkdir "$(OutDir)thirdparty\openvino"
+if exist "%OV%\openvinod.dll" xcopy /Y /D "%OV%\openvinod.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_intel_cpu_plugind.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugind.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_ir_frontendd.dll" xcopy /Y /D "%OV%\openvino_ir_frontendd.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_onnx_frontendd.dll" xcopy /Y /D "%OV%\openvino_onnx_frontendd.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbb12_debug.dll" xcopy /Y /D "%TBB%\tbb12_debug.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbbmalloc_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_debug.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_debug.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0</Command>
       <Message>Copy OpenCV + OpenVINO (Debug) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -113,13 +114,14 @@ if exist "%TBB%\tbbmalloc_proxy_debug.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy_de
     <PostBuildEvent>
       <Command>set OV=$(OpenVinoRoot)\bin\intel64\Release
 set TBB=$(OpenVinoRoot)\3rdparty\tbb\bin
-if exist "%OV%\openvino.dll" xcopy /Y /D "%OV%\openvino.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_intel_cpu_plugin.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugin.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_ir_frontend.dll" xcopy /Y /D "%OV%\openvino_ir_frontend.dll" "$(OutDir)" || exit /b 0
-if exist "%OV%\openvino_onnx_frontend.dll" xcopy /Y /D "%OV%\openvino_onnx_frontend.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbb12.dll" xcopy /Y /D "%TBB%\tbb12.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbbmalloc.dll" xcopy /Y /D "%TBB%\tbbmalloc.dll" "$(OutDir)" || exit /b 0
-if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(OutDir)" || exit /b 0</Command>
+if not exist "$(OutDir)thirdparty\openvino" mkdir "$(OutDir)thirdparty\openvino"
+if exist "%OV%\openvino.dll" xcopy /Y /D "%OV%\openvino.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_intel_cpu_plugin.dll" xcopy /Y /D "%OV%\openvino_intel_cpu_plugin.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_ir_frontend.dll" xcopy /Y /D "%OV%\openvino_ir_frontend.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%OV%\openvino_onnx_frontend.dll" xcopy /Y /D "%OV%\openvino_onnx_frontend.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbb12.dll" xcopy /Y /D "%TBB%\tbb12.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbbmalloc.dll" xcopy /Y /D "%TBB%\tbbmalloc.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0
+if exist "%TBB%\tbbmalloc_proxy.dll" xcopy /Y /D "%TBB%\tbbmalloc_proxy.dll" "$(OutDir)thirdparty\openvino\" || exit /b 0</Command>
       <Message>Copy OpenCV + OpenVINO (Release) runtime</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>

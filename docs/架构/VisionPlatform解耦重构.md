@@ -400,7 +400,7 @@ VisionSystem.sln                        VisionSystem.sln
 
 ### 6.3 部署检查清单
 
-1. `Modules\VisionPlatform.Modules.dll` 必须随程序发布；缺失时软件仍能启动，但工具箱为空，日志有明确记录；
+1. `VisionPlatform.Modules.dll` 必须随程序发布（现在与 exe 同目录；`Modules\` 子目录为兼容老部署的备选路径）；缺失时软件仍能启动，但工具箱为空，日志有明确记录；
 2. 若现场替换模块 DLL，需**重启软件**（本期不做热重载）；
 3. 新增第三方模块包时，目标框架必须是 .NET Framework 4.8，且只引用 `VisionPlatform.Framework.dll`；
 4. 不要把 `VisionPlatform.Framework.dll` 复制进 `Modules\`（见 §6.2）。

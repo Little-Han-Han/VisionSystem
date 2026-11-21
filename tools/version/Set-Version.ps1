@@ -5,7 +5,8 @@
 
 $ErrorActionPreference = 'Stop'
 
-$root   = Split-Path -Parent $PSScriptRoot
+# 脚本位于 tools\version\，仓库根是上两级
+$root   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $shared = Join-Path $root 'src\SharedVersion.cs'
 $readme = Join-Path $root 'README.md'
 

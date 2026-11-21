@@ -495,7 +495,7 @@ namespace VisionPlatform.Recipe
             sb.AppendLine("| `从站返回异常：功能码 0x03，异常码 0x02（非法数据地址…）` | **已经连上**，但寄存器地址超出 PLC 映射范围 | 按 PLC 地址表改 `HR:n`（PLC 侧有的从 0 计、有的从 40001 计，差 1 或差 40001 都可能）|");
             sb.AppendLine("| 节点摘要里的 `未连接 / 正在连接中 / 冷却中` | 运行态下链路暂时未就绪 | 不判 NG，等自动重连（`ReconnectMs` 3000）|");
             sb.AppendLine();
-            sb.AppendLine("**没有 PLC 也能先把链路跑通**：仓库 `tools/modbus_slave_sim.py` 是零依赖的本机 Modbus 从站模拟器");
+            sb.AppendLine("**没有 PLC 也能先把链路跑通**：仓库 `tools/comm/modbus_slave_sim.py` 是零依赖的本机 Modbus 从站模拟器");
             sb.AppendLine("（支持 0x01/0x03/0x05/0x06/0x10，全 ASCII 输出，不需要装任何库）：");
             sb.AppendLine();
             sb.AppendLine("```");

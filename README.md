@@ -54,7 +54,7 @@
 | 算法层 | `VisionAlgo.Native` | C++ / OpenCV：预处理、Blob、清晰度、圆/直线拟合、模板/形状匹配、目标检测、OCR、条码、本机相机采集 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs`、`Native/NativeCamera.cs` | 唯一接触 C++ 处；结构体映射、零拷贝传入、相机帧经 `VA_Image`（BGR，`stride` 如实传递） |
 | 契约层 | `VisionPlatform.Framework` | `IFlowNodeModule` / `IFlowModulePackage`、`FlowModuleRegistry`、`ModuleLoader`、公共数据类型（`FlowNodeType` / `ParamItem` / 参数表 / 端子） |
-| 模块层 | `VisionPlatform.Modules` | 30 个流程模块的清单、默认参数、参数表、端子、界面提示；输出到 `Modules\`，由宿主反射加载 |
+| 模块层 | `VisionPlatform.Modules` | 30 个流程模块的清单、默认参数、参数表、端子、界面提示；**与宿主同目录输出**，由宿主反射加载（`Modules\` 子目录为兼容老部署的备选路径） |
 | 业务层 | `VisionPlatform/Core` | Logger（SQLite 日志库）/ AppPaths / Json / OpResult / AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore / PerfProbe |
 |  | `VisionPlatform/Camera` | 相机接口与**本机摄像头 `LocalCamera`** / 模拟 `SimCamera` / 海康 `HikCamera`（占位）/ CameraManager |
 |  | `VisionPlatform/Flow` | 流程模型、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`（触发式 `Trigger` / 连续双模式）、结果通道 `FlowOutputChannel`、节点复制粘贴 `FlowPasteService`、图片/点云文件夹游标 |
@@ -210,8 +210,9 @@ VisionSystem/                              唯一解决方案根目录
 │   ├── ZXing/                             zxing-cpp 源码（lib/ 为现场构建产物，不入库）
 │   ├── Communication/                     通讯协议第三方依赖占位（OPC UA SDK 放这里）
 │   └── HikVision/                         海康 MVS SDK（当前为空）
-├── bin/x64/{Debug,Release}/               算法 DLL 与 OpenCV 运行时（构建产物）
-├── tools/                                 版本号脚本 / Modbus 从站模拟器 / 配置合并等工具
+├── bin/x64/{Debug,Release}/               构建产物：自家 DLL（含模块包）平铺 + thirdparty\ 子目录
+│   └── thirdparty/{opencv,openvino,sqlite}/  外部原生 DLL（启动时自动加入 DLL 搜索路径）
+├── tools/                                 开发工具，按类别分目录（version / comm / barcode / model / research …，见 tools/README.md）
 ├── docs/                                  文档（入口：docs/README.md 知识图谱）
 │   ├── README.md                          知识图谱：概念图 / 唯一权威出处 / 文档地图
 │   ├── 平台架构.md                        架构、分层、模块职责（改造前快照）
@@ -291,6 +292,7 @@ VisionSystem/                              唯一解决方案根目录
 set OPENCV=D:\Users\admin\Downloads\opencv\build
 xcopy /Y "%OPENCV%\x64\vc15\bin\opencv_world455.dll"   ThirdParty\OpenCV\bin\x64\
 xcopy /Y "%OPENCV%\x64\vc15\bin\opencv_world455d.dll"  ThirdParty\OpenCV\bin\x64\
+:: 构建时按配置只复制对应版本（Debug→455d / Release→455）到 bin\x64\<配置>\thirdparty\opencv\
 ```
 
 （只跑 Release 时只需 `opencv_world455.dll`；调试需要 `455d.dll`。）
@@ -310,20 +312,24 @@ build.bat Release    :: 编译 Release | x64
 ```
 
 构建成功后产物位于：
-- `bin\x64\{配置}\VisionAlgo.Native.dll` + `opencv_world455*.dll`
-- `bin\x64\{配置}\VisionPlatform.exe`（与算法 DLL、OpenCV 运行时、`Modules\` 同目录）
+- `bin\x64\{配置}\VisionPlatform.exe` + `VisionAlgo.Native.dll` + 自家托管 DLL（**模块包 `VisionPlatform.Modules.dll` 与宿主同目录**）
+- `bin\x64\{配置}\thirdparty\{opencv,openvino,sqlite}\` —— 外部原生 DLL（OpenCV / OpenVINO+TBB / SQLite）
+
+> 外部 DLL 只在 `thirdparty\` 子目录里放，根目录保持干净；程序启动第一行把各子目录加入进程 DLL 搜索路径
+> （`Core/NativeDllPath.cs`，改进程 PATH 而非 `AddDllDirectory`，兼容 Win7 工控机）。
+> 老部署（第三方 DLL 与 exe 平铺、模块在 `Modules\` 子目录）仍然可运行，无需回滚。
 
 回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1162 项 UI / 软件层用例）：
 
 ```bat
 _build_smoke.bat Debug     :: 或 Release；先构建 SmokeUi
 :: 必须先把根产物拷进 SmokeUi 输出目录，否则会报"找不到 va_ocr_recognize_ex 入口点"（假失败）
-cp -f bin/x64/Debug/*.dll src/SmokeUi/bin/Debug/
+:: _build_smoke.bat 已自动把 bin\x64\<配置>\*.dll 与 thirdparty\ 复制到 SmokeUi/SmokeAlgo 输出目录
 src\SmokeUi\bin\Debug\SmokeUi.exe        :: 全量回归；--create-sample 生成示例方案
 ```
 
 ### 4. 运行
-直接运行 `bin\x64\Debug\VisionPlatform.exe`（需同目录有 `Modules\VisionPlatform.Modules.dll`），或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
+直接运行 `bin\x64\Debug\VisionPlatform.exe`（模块包 `VisionPlatform.Modules.dll` 与 exe 同目录，外部 DLL 在 `thirdparty\` 下），或在 VS2022 中将 `VisionPlatform` 设为启动项目后按 F5。无相机硬件时可用模拟相机 `SIM-0` 跑通完整流程。
 
 ### 5. 打开解决方案
 双击 `VisionSystem.sln`（**唯一解决方案**）即可在 VS2022 中开发全部七个项目。

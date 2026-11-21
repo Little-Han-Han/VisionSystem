@@ -32,7 +32,11 @@ namespace VisionPlatform.Framework.Modules
         /// <summary>诊断日志出口（宿主可接到 Logger）。默认丢弃。</summary>
         public static Action<string> Log = delegate { };
 
-        /// <summary>模块目录（默认 <c>&lt;程序目录&gt;\Modules</c>）。</summary>
+        /// <summary>
+        /// 模块目录。默认 <c>&lt;程序目录&gt;\Modules</c>（老部署形态）；
+        /// 现在模块包与宿主同目录输出，该目录不存在时 <see cref="EnsureLoaded"/>
+        /// 自动回退扫描程序目录 —— 两种部署都能跑。
+        /// </summary>
         public static string ModuleDirectory
         {
             get
@@ -46,8 +50,17 @@ namespace VisionPlatform.Framework.Modules
         /// <summary>已注册模块数（会触发按需加载）。</summary>
         public static int Count { get { EnsureLoaded(); lock (_gate) return _modules.Count; } }
 
-        /// <summary>加载失败的 DLL / 包数量（诊断用）。</summary>
+        /// <summary>加载失败的 DLL / 包数量（诊断用）。只统计真错误，不含"已加载包"成功日志。</summary>
         public static int LoadErrors { get { EnsureLoaded(); return _loadErrors; } }
+
+        private static string _loadedFrom;
+
+        /// <summary>
+        /// 实际加载到模块的目录（诊断用）。默认是 <see cref="ModuleDirectory"/>，
+        /// 但 Modules 子目录不存在时会回退到程序目录 —— 汇总日志必须报真实来源，
+        /// 否则现场看到"目录 …\Modules"会误以为模块还部署在子目录里。
+        /// </summary>
+        public static string LoadedFrom { get { EnsureLoaded(); return _loadedFrom ?? ModuleDirectory; } }
 
         /// <summary>全部模块，按 <see cref="IFlowNodeModule.Order"/> 稳定排序（只读快照）。</summary>
         public static IList<IFlowNodeModule> Modules
@@ -134,9 +147,12 @@ namespace VisionPlatform.Framework.Modules
             int before = Count;
             int modules = ModuleLoader.LoadDirectory(directory, delegate(string msg)
             {
-                _loadErrors++;
+                // 【只统计真错误】ModuleLoader 的日志回调里也包含"已加载包：xxx"这类成功消息，
+                // 一律计入会让汇总行永远显示"加载失败 N 项"（N = 成功包数）—— 历史误报的根源。
+                if (msg.IndexOf("已加载包", StringComparison.Ordinal) < 0) _loadErrors++;
                 Log(msg);
             });
+            if (modules > 0) _loadedFrom = directory;
             Log("[modules] 从 " + directory + " 加载 " + modules + " 个模块（当前共 " + (Count) + " 个，新增 " + (Count - before) + "）");
             return modules;
         }
@@ -163,9 +179,13 @@ namespace VisionPlatform.Framework.Modules
                 if (_autoLoadDone) return;
                 _autoLoadDone = true;
             }
-            LoadFromDirectory(ModuleDirectory);
+            // 老部署形态：模块在 Modules\ 子目录里。目录不存在属正常（当前默认平铺部署），
+            // 直接跳过 —— 否则“目录不存在”会被计成一条加载错误，现场日志永远有个 1。
+            string moduleDir = ModuleDirectory;
+            if (Directory.Exists(moduleDir)) LoadFromDirectory(moduleDir);
 
-            // 若 Modules 子目录不存在，退一步尝试程序目录（单文件部署 / 冒烟测试）。
+            // 程序目录回退：模块包现在与宿主同目录输出（不再有 Modules 子目录）；
+            // 老部署（模块在 Modules\ 里）已在上一行处理，两种形态都支持。
             if (Count == 0)
             {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -178,7 +198,7 @@ namespace VisionPlatform.Framework.Modules
             }
 
             if (Count == 0)
-                Log("[modules] 未发现任何模块包：请确认 Modules\\VisionPlatform.Modules.dll 已部署");
+                Log("[modules] 未发现任何模块包：请确认 VisionPlatform.Modules.dll 已部署在程序目录（或 Modules 子目录）");
         }
     }
 }
