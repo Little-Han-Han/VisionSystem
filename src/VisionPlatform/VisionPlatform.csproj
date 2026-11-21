@@ -16,6 +16,10 @@
     <!-- 调用的算法库是 x64，主程序必须同为 x64 -->
     <PlatformTarget>x64</PlatformTarget>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- 软件 exe 图标（资源管理器 / 任务栏 / 快捷方式）：
+         真源在仓库根 assets\icons\app.ico（源资源不进 bin —— 那是构建产物目录，
+         会被清理重建；构建时下面第 2 组 Content 把 assets 整体复制到输出目录） -->
+    <ApplicationIcon>..\..\assets\icons\app.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -282,4 +286,13 @@ if exist "$(ProjectDir)..\..\ThirdParty\Communication" if not exist "$(TargetDir
 if exist "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" "$(TargetDir)Communication\" &gt;nul 2&gt;&amp;1
 exit /b 0</PostBuildEvent>
   </PropertyGroup>
+  <!-- 软件资源（仓库根 assets\）：整体复制到输出目录 assets\，保持相对结构。
+       运行时按 <程序目录>\assets\... 取用（启动画面标记图等）；
+       svg 为设计源文件，跟着入库但 WinForms 不消费。 -->
+  <ItemGroup>
+    <Content Include="..\..\assets\icons\**\*.*" Exclude="..\..\assets\icons\**\*.pdb">
+      <Link>assets\icons\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

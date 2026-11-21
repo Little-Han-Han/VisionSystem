@@ -200,6 +200,8 @@ VisionSystem/                              唯一解决方案根目录
 ├── VisionSystem.sln                       单一解决方案（7 个项目 + Solution Items）
 ├── build.bat                              一键构建（含代理变量清理）
 ├── version.bat                            版本号工具（真源：src/SharedVersion.cs）
+├── assets/                                软件资源（不入 bin —— 构建时复制到输出目录 assets\）
+│   └── icons/                             app.ico（exe 图标真源）/ SVG 设计源 / PNG 各尺寸
 ├── README.md                              本文件
 ├── ThirdParty/                            所有外部依赖，按用途分次级目录
 │   ├── OpenCV/                            OpenCV 4.5.5（include / lib/x64 已入库，bin/x64 需自备）

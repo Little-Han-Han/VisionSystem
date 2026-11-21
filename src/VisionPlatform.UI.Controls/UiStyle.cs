@@ -33,6 +33,22 @@ namespace VisionPlatform.UI
         /// </summary>
         public static bool ForceOverride { get; set; }
 
+        private static Icon _appIcon;
+
+        /// <summary>
+        /// 软件图标（标题栏 / 任务栏 / Alt-Tab）：从 exe 里提取（宿主 csproj 的
+        /// &lt;ApplicationIcon&gt; 已把 assets\icons\app.ico 嵌入 exe）。
+        /// <para>【为什么不直接读 assets 文件】UI.Controls 不该依赖仓库根的文件路径，
+        /// exe 自身就带着同一份图标，任何机器部署后都取得到。缓存一份复用。</para>
+        /// </summary>
+        public static Icon AppIcon()
+        {
+            if (_appIcon != null) return _appIcon;
+            try { _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch (Exception) { _appIcon = null; }
+            return _appIcon;
+        }
+
         /// <summary>套用整窗体（含所有子控件）。应在构造函数末尾调用一次。</summary>
         public static void ApplyForm(Form form)
         {
@@ -40,6 +56,15 @@ namespace VisionPlatform.UI
 
             form.BackColor = UiTheme.ColorAppBg;
             form.ForeColor = UiTheme.ColorTextPrimary;
+
+            // 统一标题栏/任务栏图标：全部窗体一张脸（取不到就保持系统默认，不弹错）
+            try
+            {
+                Icon icon = AppIcon();
+                if (icon != null && !form.Icon.Equals(icon)) form.Icon = icon;
+            }
+            catch (Exception) { }
+
             // 刻意不改 form.Font：Designer 多为 AutoScaleMode.Font，运行时改字体会
             // 触发整窗重新缩放，把设计好的布局撑变形。子控件字体逐个覆盖即可。
 

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
 using VisionPlatform.Core;
@@ -12,6 +13,14 @@ namespace VisionPlatform.UI
         public SplashForm()
         {
             InitializeComponent();
+
+            // 闪屏不走 UiStyle.ApplyForm（浅色加载页），但标题栏/任务栏图标要和其它窗体一致
+            try
+            {
+                Icon icon = VisionPlatform.UI.UiStyle.AppIcon();
+                if (icon != null) Icon = icon;
+            }
+            catch (Exception) { }
 
             // 版本号来自 src/SharedVersion.cs（AssemblyInformationalVersion），
             // 与 README / 文件属性同源，避免界面写死一份。
