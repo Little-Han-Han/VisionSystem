@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -115,7 +115,7 @@ namespace VisionPlatform.UI
                      | ControlStyles.Selectable, true);
             TabStop = true;
             AllowDrop = true;
-            BackColor = UiTheme.ColorViewBg;
+            BackColor = UiTheme.ColorCanvasBg;   // 画布上有节点卡片与文字，底色随主题
 
             // 画布临时提示的自动消失计时器
             _toastTimer = new Timer { Interval = 2800 };
@@ -143,10 +143,10 @@ namespace VisionPlatform.UI
             };
         }
 
-        /// <summary>切换深浅色板时由 <see cref="UiThemeManager"/> 调用：重取图像区底色并重绘。</summary>
+        /// <summary>切换深浅色板时由 <see cref="UiThemeManager"/> 调用：重取画布底色并重绘。</summary>
         public void ApplyTheme()
         {
-            BackColor = UiTheme.ColorViewBg;
+            BackColor = UiTheme.ColorCanvasBg;
             Invalidate();
         }
 

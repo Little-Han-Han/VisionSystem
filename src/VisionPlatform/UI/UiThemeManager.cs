@@ -32,7 +32,19 @@ namespace VisionPlatform.UI
 
             WriteToConfig(mode);
 
-            ReapplyOpenForms();
+            // 【关键】重套期间无条件覆盖：浅色阶段被强制翻成浅色的控件，其颜色已不是
+            // "系统色"，切回深色时 ForceOverride=false 会让它们全部被跳过 → 留下浅色块
+            // （实测：流程编辑器的流程管理/绑定区、主界面统计区白底白字）。
+            // 语义色由各窗体的 ReapplyTheme 在 ApplyTree 之后补回，不受影响。
+            UiStyle.ForceAll = true;
+            try
+            {
+                ReapplyOpenForms();
+            }
+            finally
+            {
+                UiStyle.ForceAll = false;
+            }
         }
 
         /// <summary>

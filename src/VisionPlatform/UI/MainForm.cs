@@ -1696,6 +1696,39 @@ namespace VisionPlatform.UI
             }
         }
 
+        /// <summary>
+        /// 流程统计区重套主题：分组底 + 滚动容器 + 动态行标签的语义色。
+        /// <para>行标签是运行时按行创建的，不在 Designer / 静态树里，主题切换必须点名重刷；
+        /// 否则它们的 ForeColor 会停留在建行时的旧色板（浅色是深灰、深色是浅灰，反了就看不见）。</para>
+        /// </summary>
+        private void ApplyFlowStatsTheme()
+        {
+            if (groupFlowStats != null)
+            {
+                UiTheme.StyleGroupBox(groupFlowStats);
+                groupFlowStats.ForeColor = UiTheme.ColorAccent;
+            }
+            if (flowScroll != null) flowScroll.BackColor = UiTheme.ColorPanelBg;
+            if (tableFlowStats != null) tableFlowStats.BackColor = UiTheme.ColorPanelBg;
+
+            foreach (FlowRowCtl ctl in _flowRowLabels.Values)
+            {
+                if (ctl == null) continue;
+                StyleFlowCell(ctl.Name, UiTheme.ColorTextPrimary);
+                StyleFlowCell(ctl.Ok, UiTheme.ColorOk);
+                StyleFlowCell(ctl.Ng, UiTheme.ColorNg);
+                StyleFlowCell(ctl.Rate, UiTheme.ColorTextSecondary);
+                StyleFlowCell(ctl.Status, UiTheme.ColorTextSecondary);
+            }
+        }
+
+        private static void StyleFlowCell(Label cell, Color fore)
+        {
+            if (cell == null) return;
+            cell.ForeColor = fore;
+            cell.BackColor = Color.Transparent;   // 底色交给容器，深浅切换自动跟随
+        }
+
         /// <summary>构造一个固定高度、随单元格填满的表格单元格标签。</summary>
         private static Label MakeFlowCell(ContentAlignment align, Color color)
         {
@@ -2179,7 +2212,7 @@ namespace VisionPlatform.UI
                         Dock = DockStyle.Fill,
                         Font = UiTheme.FontMono,
                         Text = text.Replace("\r\n", " ").Replace('\n', ' '),
-                        BackColor = UiTheme.ColorViewBg,
+                        BackColor = UiTheme.ColorCanvasBg,   // 文本查看框：随主题
                         ForeColor = UiTheme.ColorTextPrimary,
                         BorderStyle = BorderStyle.FixedSingle
                     };
@@ -2315,6 +2348,20 @@ namespace VisionPlatform.UI
             btnGrabOnce.Image = UiIcons.Get("ui-run-step", 24);
             btnResetStats.Image = UiIcons.Get("ui-common-refresh", 24);
 
+            // 统一文字槽宽：右栏 5 个按钮宽度相同，文字长短不一（"暂停" vs "启动运行"）时
+            // 图标会左右跳动。取最长文字宽度作槽宽 → 图标严格对齐、文字在槽内居中。
+            UiButton[] runButtons = { btnLoop, btnPause, btnStop, btnGrabOnce, btnResetStats };
+            int slot = 0;
+            foreach (UiButton b in runButtons)
+            {
+                if (b == null || string.IsNullOrEmpty(b.Text)) continue;
+                int w = TextRenderer.MeasureText(b.Text, b.Font, new Size(int.MaxValue, int.MaxValue),
+                                                 TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+                if (w > slot) slot = w;
+            }
+            foreach (UiButton b in runButtons)
+                if (b != null) b.TextSlotWidth = slot;
+
             // 【必须】动态挂 Image 后 ToolStrip 不会自动重算 AutoSize 宽度，
             // 不 PerformLayout 的话按钮仍是"纯文字"宽度，图标把文字区挤成省略号。
             toolStrip.PerformLayout();
@@ -2447,8 +2494,13 @@ namespace VisionPlatform.UI
             lblConsecutiveNg.BackColor = UiTheme.ColorWarn;
             lblConsecutiveNg.ForeColor = UiTheme.ColorTextOnFill;
 
+            // ---- 流程统计（动态创建的行不在 Designer 里，必须单独重套）----
+            // 行标签的 ForeColor 是建行时取的主题色快照、分组/滚动容器底色在浅色时被强制刷过，
+            // 不重套就会出现"浅色切回深色后流程统计仍是浅底 / 语义色丢失"。
+            ApplyFlowStatsTheme();
+
             // ---- 日志区 ----
-            listLog.BackColor = UiTheme.ColorViewBg;
+            listLog.BackColor = UiTheme.ColorCanvasBg;   // 日志列表：随主题
             listLog.ForeColor = UiTheme.ColorTextSecondary;
             listLog.Font = UiTheme.FontMono;
             panelBottom.Height = _logCollapsed ? LogFoldedHeight : UiTheme.LogHeight;

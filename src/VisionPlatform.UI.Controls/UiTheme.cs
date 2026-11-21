@@ -145,6 +145,8 @@ namespace VisionPlatform.UI
             ColorCardBg        = FromHex(0x34, 0x34, 0x3E);   // #34343E
             ColorHeaderBg      = FromHex(0x1E, 0x1E, 0x26);   // #1E1E26
             ColorViewBg        = FromHex(0x18, 0x18, 0x20);   // #181820
+            ColorCanvasBg      = FromHex(0x18, 0x18, 0x20);   // #181820 画布 / 代码区 / 树 = 与图像区同底
+            ColorTreeBg        = FromHex(0x18, 0x18, 0x20);   // #181820
             ColorDivider       = FromHex(0x46, 0x46, 0x4E);   // #46464E
             ColorTextPrimary   = FromHex(0xDC, 0xE0, 0xE8);   // #DCE0E8
             ColorTextSecondary = FromHex(0xA0, 0xA6, 0xB2);   // #A0A6B2
@@ -172,6 +174,11 @@ namespace VisionPlatform.UI
             ColorCardBg        = FromHex(0xEA, 0xEC, 0xF0);   // #EAECF0 卡片 / 输入区
             ColorHeaderBg      = FromHex(0xE3, 0xE6, 0xEB);   // #E3E6EB 标题栏 / 工具栏
             ColorViewBg        = FromHex(0x18, 0x18, 0x20);   // #181820 图像区（恒深色）
+            // 【文本类视图随主题】画布 / 代码区 / 树不是图像，里面是节点卡片与文字 ——
+            // 沿用图像区的恒深底会出现"深底 + 深字"（浅色模式的 ColorTextPrimary 是深灰），
+            // 实物表现就是"流程编辑器工具箱字符看不清"。这两项必须跟主题一起变浅。
+            ColorCanvasBg      = FromHex(0xED, 0xEE, 0xF1);   // #EDEEF1 画布 / 代码区
+            ColorTreeBg        = FromHex(0xFF, 0xFF, 0xFF);   // #FFFFFF 树
             ColorDivider       = FromHex(0xC7, 0xCC, 0xD4);   // #C7CCD4
             ColorTextPrimary   = FromHex(0x1B, 0x1F, 0x26);   // #1B1F26
             ColorTextSecondary = FromHex(0x5A, 0x62, 0x70);   // #5A6270
@@ -201,6 +208,16 @@ namespace VisionPlatform.UI
 
         /// <summary>图像区底色。深浅两板恒为 #181820（图像要在暗背景下才看得清 ROI 描边）。</summary>
         public static Color ColorViewBg { get; private set; }
+
+        /// <summary>
+        /// 文本类视图底色（流程画布 / 代码区 / 日志列表）：<strong>随主题</strong>。
+        /// 深色 #181820、浅色 #EDEEF1 —— 不能复用 <see cref="ColorViewBg"/>
+        /// （后者浅色下仍恒深，配浅色模式的深色文字会看不清）。
+        /// </summary>
+        public static Color ColorCanvasBg { get; private set; }
+
+        /// <summary>树底色：深色 #181820、浅色 #FFFFFF（同样随主题，理由见 <see cref="ColorCanvasBg"/>）。</summary>
+        public static Color ColorTreeBg { get; private set; }
 
         /// <summary>分隔线 / 区块边框。深色 #46464E / 浅色 #C7CCD4。</summary>
         public static Color ColorDivider { get; private set; }

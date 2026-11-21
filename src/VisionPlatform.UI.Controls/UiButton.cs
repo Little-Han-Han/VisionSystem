@@ -39,11 +39,33 @@ namespace VisionPlatform.UI
             UseVisualStyleBackColor = false;
         }
 
+        private int _textSlotWidth;
+
+        /// <summary>
+        /// 文字槽的统一宽度（像素，0 = 不启用）。
+        /// <para>
+        /// 【为什么需要】「图标 + 文字」整组居中时，文字长短不同会让图标左右跳动
+        /// （"启动运行" 与 "暂停" 的图标对不齐）。给一组按钮设同一个槽宽（取最长文字），
+        /// 排布就变成"图标严格对齐、文字在槽内居中"，效果等价于在短文字里补空格，
+        /// 但不需要改 <see cref="Control.Text"/>，取值/无障碍读取都不受影响。
+        /// </para>
+        /// </summary>
+        [DefaultValue(0)]
+        public int TextSlotWidth
+        {
+            get { return _textSlotWidth; }
+            set
+            {
+                if (_textSlotWidth == value) return;
+                _textSlotWidth = Math.Max(0, value);
+                Invalidate();
+            }
+        }
+
         /// <summary>语义色；变更后立即重绘。</summary>
         [DefaultValue(UiButtonKind.Neutral)]
         public UiButtonKind Kind
-        {
-            get { return _kind; }
+        {            get { return _kind; }
             set
             {
                 if (_kind == value) return;
@@ -117,7 +139,10 @@ namespace VisionPlatform.UI
                     ? Size.Empty
                     : TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue),
                                                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                int total = glyph.Width + (textSize.IsEmpty ? 0 : gap + textSize.Width);
+
+                // 文本槽宽：0 = 按实际文字宽；>0 = 统一槽宽（同组按钮的图标因此严格对齐）
+                int slotWidth = Math.Max(textSize.Width, _textSlotWidth);
+                int total = glyph.Width + (slotWidth <= 0 ? 0 : gap + slotWidth);
                 int ix = rect.Left + (rect.Width - total) / 2;
                 int iy = rect.Top + (rect.Height - glyph.Height) / 2;
                 Rectangle imgRect = new Rectangle(ix, iy, glyph.Width, glyph.Height);
@@ -140,8 +165,9 @@ namespace VisionPlatform.UI
 
                 if (!textSize.IsEmpty)
                 {
-                    var textRect = new Rectangle(ix + glyph.Width + gap, rect.Top,
-                                                 textSize.Width + 2, rect.Height);
+                    // 文字在槽内居中：短文字（暂停）与长文字（启动运行）的图标因此严格对齐
+                    int textX = ix + glyph.Width + gap + Math.Max(0, (slotWidth - textSize.Width) / 2);
+                    var textRect = new Rectangle(textX, rect.Top, textSize.Width + 2, rect.Height);
                     TextRenderer.DrawText(g, Text, Font, textRect, textColor,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter
                         | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);

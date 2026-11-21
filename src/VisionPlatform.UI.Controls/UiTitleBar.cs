@@ -210,8 +210,20 @@ namespace VisionPlatform.UI
             int textRight = LeftMostButtonX() - UiTheme.ControlGap;
             if (!string.IsNullOrEmpty(title) && textRight > rect.Left)
             {
-                Rectangle textRect = new Rectangle(rect.Left + UiTheme.Margin, rect.Top,
-                    textRight - rect.Left - UiTheme.Margin, rect.Height - 1);
+                // 左侧先画 16×16 应用图标（取自 exe 嵌入的 app.ico），文字整体右移
+                const int iconSize = 16;
+                const int iconGap = 6;
+                int textLeft = rect.Left + UiTheme.Margin;
+                Image logo = TitleLogo();
+                if (logo != null)
+                {
+                    int iconY = rect.Top + (rect.Height - 1 - logo.Height) / 2;
+                    g.DrawImage(logo, new Rectangle(textLeft, iconY, logo.Width, logo.Height));
+                    textLeft += logo.Width + iconGap;
+                }
+
+                Rectangle textRect = new Rectangle(textLeft, rect.Top,
+                    Math.Max(0, textRight - textLeft), rect.Height - 1);
                 TextRenderer.DrawText(g, title, UiTheme.FontToolbar, textRect,
                     UiTheme.ColorTextPrimary,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter
@@ -221,6 +233,34 @@ namespace VisionPlatform.UI
             DrawButton(g, BarButton.Minimize);
             DrawButton(g, BarButton.Maximize);
             DrawButton(g, BarButton.Close);
+        }
+
+        private static Bitmap _titleLogo;
+
+        /// <summary>
+        /// 标题栏左侧的 16×16 应用图标：从 exe 嵌入的 app.ico 提取（<see cref="UiStyle.AppIcon"/>），
+        /// 首次绘制时缩放到标题栏高度并缓存 —— 不要每帧 ToBitmap，那会持续分配 GDI 对象。
+        /// </summary>
+        private static Image TitleLogo()
+        {
+            if (_titleLogo != null) return _titleLogo;
+
+            try
+            {
+                Icon app = UiStyle.AppIcon();
+                if (app == null) return null;
+
+                using (Bitmap source = app.ToBitmap())
+                {
+                    // 图标是多尺寸 ICO，ExtractAssociatedIcon 取到 32×32；标题栏用 16×16
+                    _titleLogo = new Bitmap(source, new Size(16, 16));
+                }
+                return _titleLogo;
+            }
+            catch (Exception)
+            {
+                return null;   // 取不到图标就只显示文字
+            }
         }
 
         /// <summary>绘制单个按钮（默认态不画底色，与标题栏融为一体）。</summary>

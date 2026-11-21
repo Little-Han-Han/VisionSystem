@@ -180,6 +180,12 @@ namespace VisionPlatform.UI
             UiStyle.ApplyForm(this);
             lblRunStatus.Font = UiTheme.FontMono;
 
+            // 画布 / 预览是自绘控件（UiStyle 跳过），Designer 里给 canvas 写死了深色底
+            // （FromArgb(24,24,32)）—— 浅色模式下会盖住构造函数里设的 ColorCanvasBg。
+            // 必须在这里按当前主题重取一次底色，否则浅色模式的画布是深底 + 深字。
+            canvas.ApplyTheme();
+            flowPreview.ApplyTheme();
+
             // 输出结果面板 + 右栏结构重整：见 BuildRightColumn 的注释
             // （放在 UiStyle.ApplyForm 之后：本面板自建配色是唯一来源，
             //   不希望再被通用遍历覆盖掉语义色）
@@ -486,10 +492,16 @@ namespace VisionPlatform.UI
         /// </summary>
         private void InitModules()
         {
+            // 主题切换会重建这棵树（见 RefreshTheme）：先记住哪些分类是展开的，重建后恢复，
+            // 否则用户手动折叠的分类会在切主题后又弹开。
+            var expandedCategories = new HashSet<string>(StringComparer.Ordinal);
+            foreach (TreeNode old in treeModules.Nodes)
+                if (old.IsExpanded) expandedCategories.Add(old.Text);
+
             treeModules.BeginUpdate();
             treeModules.Nodes.Clear();
-            Font font = new Font("Microsoft YaHei UI", 9F);
-            Font leaffont = new Font("Microsoft YaHei UI", 9F);
+            // 节点字体统一缓存：每次重建都 new Font 会持续泄漏 GDI 对象
+            Font nodeFont = ToolboxNodeFont;
             int maxWidth;
             foreach (FlowModuleCategory cat in FlowModule.GroupByCategory())
             {
@@ -502,18 +514,28 @@ namespace VisionPlatform.UI
                     var leaf = new TreeNode(m.DisplayName);
                     leaf.Tag = m;
                     leaf.ForeColor = UiTheme.ColorTextPrimary;
-                    leaf.NodeFont = leaffont;
+                    leaf.NodeFont = nodeFont;
                     root.Nodes.Add(leaf);
                    
                 }
-                root.NodeFont = font;
+                root.NodeFont = nodeFont;
                 treeModules.Nodes.Add(root);
                 
 
-                root.Expand();                         // 12 项不多，默认全展开
+                // 12 项不多，默认全展开；重建时按用户之前的折叠状态恢复
+                if (expandedCategories.Count == 0 || expandedCategories.Contains(cat.DisplayName))
+                    root.Expand();
             }
             
             treeModules.EndUpdate();
+        }
+
+        private static Font _toolboxNodeFont;
+
+        /// <summary>工具箱节点字体（9pt）：比树默认字体小一号，12 项分类才放得下；全局复用避免泄漏。</summary>
+        private static Font ToolboxNodeFont
+        {
+            get { return _toolboxNodeFont ?? (_toolboxNodeFont = new Font("Microsoft YaHei UI", 9F)); }
         }
 
         private void OnModuleItemDrag(object sender, ItemDragEventArgs e)
@@ -3150,6 +3172,12 @@ namespace VisionPlatform.UI
             flowPreview.ApplyTheme();
             nodeParamPanel.ApplyTheme();
             if (resultPanel != null) resultPanel.ApplyTheme();
+
+            // 【必须重建工具箱树】InitModules 建树时把每个节点的 ForeColor 固化成当时的
+            // 主题色快照（分类=次色 / 模块=主色），而 UiTree 自绘优先用 node.ForeColor ——
+            // 只重套控件不改节点的话，浅色主题下文字仍是深色主题的浅灰，浅底浅字看不清。
+            // 重建是幂等的（只依赖 FlowModule 注册表），拖拽事件挂在树控件上，不受影响。
+            InitModules();
 
             // 语义色按钮：Kind 决定自绘填充色，重设一次即取到新色板
             btnRun.Kind = UiButtonKind.Start;

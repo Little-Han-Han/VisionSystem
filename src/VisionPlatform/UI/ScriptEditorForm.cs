@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -54,10 +54,10 @@ namespace VisionPlatform.UI
 
             // 主题会把所有 TextBox 统一成 9pt 雅黑；代码区必须等宽，否则缩进一塌糊涂
             txtBody.Font = new Font("Consolas", 10f);
-            txtBody.BackColor = UiTheme.ColorViewBg;
+            txtBody.BackColor = UiTheme.ColorCanvasBg;
             txtBody.ForeColor = UiTheme.ColorTextPrimary;
             txtResult.Font = new Font("Consolas", 9.5f);
-            txtResult.BackColor = UiTheme.ColorViewBg;
+            txtResult.BackColor = UiTheme.ColorCanvasBg;
             txtResult.ForeColor = UiTheme.ColorTextPrimary;
         }
 

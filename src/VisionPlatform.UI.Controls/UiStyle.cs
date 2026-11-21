@@ -33,6 +33,20 @@ namespace VisionPlatform.UI
         /// </summary>
         public static bool ForceOverride { get; set; }
 
+        /// <summary>
+        /// 主题切换期间<b>无条件重套</b>所有控件的底色（仅由 <see cref="UiThemeManager"/> 在
+        /// 重套期间临时置 true，结束后立即复位）。
+        /// <para>
+        /// 【为什么必须有它】浅色模式用 <see cref="ForceOverride"/> 把 Designer 写死的深色
+        /// 强制翻成浅色后，这些颜色已经<b>不是系统色</b>；切回深色时 ForceOverride=false、
+        /// <see cref="NeedOverride"/> 判定"用户显式设过色"→ 全部跳过，界面上就留下大片
+        /// 浅色块（白底白字）。切主题本质上就是"全部重来一遍"，因此重套期间无视原值。
+        /// </para>
+        /// <para>语义色（OK/NG 徽标、统计数值、分组标题）由各窗体在自己的 ReapplyTheme
+        /// 里补回，顺序在 ApplyTree 之后，不会被打乱。</para>
+        /// </summary>
+        public static bool ForceAll { get; set; }
+
         private static Icon _appIcon;
 
         /// <summary>
@@ -165,9 +179,13 @@ namespace VisionPlatform.UI
             {
                 label.ForeColor = UiTheme.ColorTextPrimary;
                 label.Font = UiTheme.FontBody;
-                // 只把「未显式设色」的标签底色统一；已设色（徽标 / 分组标题）保持不动
+                // 【为什么是 Transparent 而不是 ColorPanelBg】浅色模式（ForceOverride）会把标签
+                // 底色刷成实色浅底；切回深色时这块实色既不是系统色也不再透明，NeedOverride
+                // 判定"已显式设色"→ 不再回改，深色界面上就留一片浅色块（数据统计 / 流程统计
+                // 切不回深色的根因）。保持透明 = 底色永远由父容器决定，深浅切换自动跟随。
+                // 徽标 / 分组标题这类确实需要实底的标签由各自 Style 方法显式设色，不受影响。
                 if (NeedOverride(label.BackColor) || label.BackColor == Color.Transparent)
-                    label.BackColor = UiTheme.ColorPanelBg;
+                    label.BackColor = Color.Transparent;
                 return;
             }
 
@@ -242,7 +260,7 @@ namespace VisionPlatform.UI
             ListBox list = c as ListBox;
             if (list != null)
             {
-                if (NeedOverride(list.BackColor)) list.BackColor = UiTheme.ColorViewBg;
+                if (NeedOverride(list.BackColor)) list.BackColor = UiTheme.ColorCanvasBg;   // 文本列表随主题
                 list.ForeColor = UiTheme.ColorTextPrimary;
                 list.Font = UiTheme.FontBody;
                 list.BorderStyle = BorderStyle.FixedSingle;
@@ -304,7 +322,7 @@ namespace VisionPlatform.UI
         /// </summary>
         private static bool NeedOverride(Color c)
         {
-            return ForceOverride || IsSystemColor(c);
+            return ForceAll || ForceOverride || IsSystemColor(c);
         }
 
         /// <summary>

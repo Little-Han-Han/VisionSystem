@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -46,7 +46,7 @@ namespace VisionPlatform.UI
         {
             if (tree == null) return;
 
-            tree.BackColor = UiTheme.ColorViewBg;        // #181820，与图像区同底
+            tree.BackColor = UiTheme.ColorTreeBg;        // 随主题：深色 #181820 / 浅色 #FFF（不能用恒深的图像区底色）
             tree.ForeColor = UiTheme.ColorTextPrimary;   // #DCE0E8
             tree.LineColor = UiTheme.ColorDivider;       // #46464E，层级连线
             tree.BorderStyle = BorderStyle.None;         // 边框交给外层容器，避免双线
@@ -86,7 +86,7 @@ namespace VisionPlatform.UI
             if (e.Node == null) return;
 
             TreeView tree = sender as TreeView;
-            Color back = (tree != null) ? tree.BackColor : UiTheme.ColorViewBg;
+            Color back = (tree != null) ? tree.BackColor : UiTheme.ColorTreeBg;
 
             bool selected = (e.Node.IsSelected);
             bool focused = (tree != null) && tree.Focused;
