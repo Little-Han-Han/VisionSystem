@@ -229,10 +229,34 @@ namespace VisionPlatform.Communication
         public static CommPointConfig PointConfig(string name)
         {
             EnsureInitialized();
+            CommPointConfig p = ResolvePoint(name);
+            return p != null ? p.Clone() : null;
+        }
+
+        /// <summary>
+        /// 解析点位名：<b>支持「端点.点位」写法</b>。
+        /// <para>
+        /// 【为什么需要】任务动作 / 脚本里长期按 <c>PLC.Heartbeat</c> 这种"端点.点位"写，
+        /// 而点位表以裸名（<c>Heartbeat</c>）为键 —— 以前只按全名精确查，整条动作静默失败
+        /// （失败只写界面的"最近错误"列、不落日志），现场表现就是"心跳/结果一直没动"。
+        /// 现在先按全名查，查不到再拆前缀；前缀必须与点位的 Endpoint 一致，避免张冠李戴。
+        /// </para>
+        /// </summary>
+        private static CommPointConfig ResolvePoint(string name)
+        {
+            string key = name ?? "";
             lock (Sync)
             {
                 CommPointConfig p;
-                return Points.TryGetValue(name ?? "", out p) ? p.Clone() : null;
+                if (Points.TryGetValue(key, out p)) return p;
+
+                int dot = key.IndexOf('.');
+                if (dot <= 0 || dot >= key.Length - 1) return null;
+
+                string endpoint = key.Substring(0, dot);
+                string shortName = key.Substring(dot + 1);
+                if (!Points.TryGetValue(shortName, out p)) return null;
+                return string.Equals(p.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase) ? p : null;
             }
         }
 
@@ -240,8 +264,7 @@ namespace VisionPlatform.Communication
         {
             EnsureInitialized();
 
-            CommPointConfig pc;
-            lock (Sync) { Points.TryGetValue(pointName ?? "", out pc); }
+            CommPointConfig pc = ResolvePoint(pointName);
             if (pc == null) return OpResult<CommValue>.Fail("没有名为「" + (pointName ?? "") + "」的点位");
 
             return ReadPointCore(pc);
@@ -258,8 +281,7 @@ namespace VisionPlatform.Communication
         {
             EnsureInitialized();
 
-            CommPointConfig pc;
-            lock (Sync) { Points.TryGetValue(pointName ?? "", out pc); }
+            CommPointConfig pc = ResolvePoint(pointName);
             if (pc == null) return OpResult<CommValue>.Fail("没有名为「" + (pointName ?? "") + "」的点位");
 
             if (addressOffset == 0) return ReadPointCore(pc);
@@ -322,8 +344,7 @@ namespace VisionPlatform.Communication
         {
             EnsureInitialized();
 
-            CommPointConfig pc;
-            lock (Sync) { Points.TryGetValue(pointName ?? "", out pc); }
+            CommPointConfig pc = ResolvePoint(pointName);
             if (pc == null) return OpResult.Fail("没有名为「{0}」的点位", pointName ?? "");
             if (CommPointConfig.NormalizeDirection(pc.Direction) == "Read")
                 return OpResult.Fail("点位「{0}」是只读点位", pc.Name);

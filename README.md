@@ -376,6 +376,22 @@ VC++ 2015–2022 运行库（`msvcp140` / `vcruntime140` / `vcruntime140_1` / `v
 
 任务动作格式：`SetPoint:Line1.Busy=true;SendMessage:ResultLine1;WaitPoint:Line1.Ack=true@500;Sleep:1000;StartFlow:F1`。
 
+#### 仅检测流程的结果回传（`WriteResult` 动作）
+
+流程里**不放**「发送数据」节点也能把结论回 PLC：给该流程配一条 **结果推送（ResultGroup）** 任务，
+动作用 `WriteResult`：
+
+| 字段 | 值 | 说明 |
+|---|---|---|
+| 目标（Target） | `PLC` | 通讯名（Modbus 端点） |
+| 值（Value） | `OkNg:20:UInt16; OkCount:22:Int32; NgCount:24:Int32; PosX:30:Int32; PosY:32:Int32; PosA:34:Float32` | 「名:地址:类型」映射，与「发送数据」的 MbMap 同构 |
+
+- 有真值的名字只有：`OkNg`/`Passed`（= 本轮判定）、`OkCount`、`NgCount`、`Total`、`ElapsedMs`、`Fps`；
+- **其余名字一律写 0** —— 流程没有角度/位置输出时不会让 PLC 残留上一轮的旧坐标；
+- 类型支持 `Int16 / UInt16 / Int32 / UInt32 / Float32 / Float64`（32/64 位按 ABCD 字序占 2/4 个寄存器）。
+
+> 点位名支持 `端点.点位`（如 `PLC.Heartbeat`）与裸名（`Heartbeat`）两种写法，动作失败会写 WARN 日志。
+
 ### 8. 版本管理
 
 版本号的**唯一真源**是 `src/SharedVersion.cs`：它通过

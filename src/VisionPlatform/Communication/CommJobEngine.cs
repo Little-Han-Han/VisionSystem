@@ -258,7 +258,7 @@ namespace VisionPlatform.Communication
                 if (!ready) continue;
 
                 rt.LastTrigger = DateTime.Now;
-                RunJob(job, BuildContext(job));
+                RunJob(job, BuildContext(job), current);
             }
         }
 
@@ -476,7 +476,8 @@ namespace VisionPlatform.Communication
             }
         }
 
-        private static void RunJob(CommJobConfig job, Dictionary<string, string> context)
+        private static void RunJob(CommJobConfig job, Dictionary<string, string> context,
+                                   FlowResultSnapshot result = null)
         {
             // 闸门兜底：暂停瞬间已经在队列里的任务不再执行（避免暂停后还写一次点位）
             if (!CommRuntime.IsActive) return;
@@ -490,7 +491,7 @@ namespace VisionPlatform.Communication
             {
                 try
                 {
-                    ExecuteActions(job, context);
+                    ExecuteActions(job, context, result);
                     rt.LastError = "";
                 }
                 catch (Exception ex)
@@ -511,7 +512,8 @@ namespace VisionPlatform.Communication
         //  动作
         // =====================================================================
 
-        private static void ExecuteActions(CommJobConfig job, Dictionary<string, string> context)
+        private static void ExecuteActions(CommJobConfig job, Dictionary<string, string> context,
+                                           FlowResultSnapshot result)
         {
             foreach (CommActionConfig action in job.Actions)
             {
@@ -554,6 +556,16 @@ namespace VisionPlatform.Communication
                         r = OpResult.Ok();
                         break;
 
+                    case "WriteResult":
+                        // 把本轮流程结果按「名:地址:类型」批量写进 PLC 寄存器。
+                        // Target = 通讯名（如 PLC），Value = 映射串：
+                        //   OkNg:20:UInt16; PosX:30:Int32; PosY:32:Int32; PosA:34:Float32
+                        // 只有 OkNg / Passed / OkCount / NgCount / ElapsedMs / Fps 有真值，
+                        // 其余名字一律写 0 —— 这正是"仅检测流程"要的：结论回传、坐标清零，
+                        // 不让 PLC 里残留上一轮的旧坐标。
+                        r = WriteResultAction(target, value, result);
+                        break;
+
                     default:
                         r = OpResult.Fail("未知动作：" + kind);
                         break;
@@ -565,9 +577,113 @@ namespace VisionPlatform.Communication
                     lock (Sync) { Runtimes.TryGetValue(job.Name, out rt); }
                     if (rt != null) rt.LastError = r.Message;
 
+                    // 【必须落日志】动作失败以前只在界面的「最近错误」列体现，现场翻不到原因；
+                    // 结果回写失败（点位写不进 / 映射串写错）必须能在日志里看到。
+                    Logger.Warn("[comm-job] 任务「" + job.Name + "」动作「" + kind + "」失败："
+                                + (r.Message ?? "未知原因"));
+
                     if (!action.ContinueOnError) return;
                 }
             }
+        }
+
+        /// <summary>
+        /// 把流程结果按「名:地址:类型」批量写进 PLC 寄存器 —— 流程里<b>不需要</b>放「发送数据」节点。
+        /// <para>
+        /// 场景：流程只做检测（无脚本、无输出节点）。结论仍要回 PLC，位置/角度没有就写 0，
+        /// 避免 PLC 里残留上一轮的旧坐标。因此：<c>OkNg</c>/<c>Passed</c>/<c>OkCount</c>/
+        /// <c>NgCount</c>/<c>ElapsedMs</c>/<c>Fps</c> 取真值，<b>其余名字一律写 0</b>。
+        /// </para>
+        /// <para>Target = 通讯名（如 PLC）；Value = 映射串，与「发送数据」的 MbMap 同构：
+        /// <c>OkNg:20:UInt16; PosX:30:Int32; PosY:32:Int32; PosA:34:Float32</c>。</para>
+        /// </summary>
+        private static OpResult WriteResultAction(string commName, string map, FlowResultSnapshot result)
+        {
+            if (string.IsNullOrWhiteSpace(commName))
+                return OpResult.Fail("WriteResult：Target 要填通讯名（如 PLC）");
+            if (string.IsNullOrWhiteSpace(map))
+                return OpResult.Fail("WriteResult：Value 要填映射「名:地址:类型」，"
+                                   + "例如 OkNg:20:UInt16;PosX:30:Int32");
+            if (result == null)
+                return OpResult.Fail("WriteResult：本次任务没有流程结果（它只能挂在「结果推送」任务上）");
+
+            var done = new List<string>();
+            foreach (string raw in map.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] cols = raw.Split(':');
+                if (cols.Length < 2)
+                    return OpResult.Fail("WriteResult：解析不了「" + raw.Trim() + "」（应为 名:地址:类型）");
+
+                string name = cols[0].Trim();
+                int addr;
+                if (!int.TryParse(cols[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out addr)
+                    || addr < 0 || addr > 65535)
+                {
+                    return OpResult.Fail("WriteResult：「" + name + "」地址需为 0~65535，当前："
+                                       + cols[1].Trim());
+                }
+
+                string type = cols.Length > 2 && cols[2].Trim().Length > 0 ? cols[2].Trim() : "UInt16";
+                ModbusDataType mdt;
+                if (!TryParseResultType(type, out mdt))
+                {
+                    return OpResult.Fail("WriteResult：「" + name + "」类型「" + type
+                        + "」不认识（可用 Int16/UInt16/Int32/UInt32/Float32/Float64）");
+                }
+
+                double value = ValueOfResult(result, name);
+                string text = FormatResultValue(mdt, value);
+
+                OpResult wr = CommRegistry.ModbusWriteAs(commName, mdt, (ushort)addr, text,
+                                                         ModbusWordOrder.ABCD);
+                if (!wr.Success)
+                    return OpResult.Fail("WriteResult：" + name + "@" + addr + " 写入失败：" + wr.Message);
+
+                done.Add(name + "@" + addr + "=" + text);
+            }
+
+            if (done.Count == 0) return OpResult.Fail("WriteResult：映射里没有任何有效项");
+
+            Logger.Info("[comm-job] 结果回写 " + commName + " ← " + string.Join("、", done.ToArray()));
+            return OpResult.Ok();
+        }
+
+        /// <summary>结果快照里可取的名字；未提供的一律 0（"坐标清零"语义，覆盖 PLC 里的旧值）。</summary>
+        private static double ValueOfResult(FlowResultSnapshot r, string name)
+        {
+            if (string.Equals(name, "OkNg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "Passed", StringComparison.OrdinalIgnoreCase))
+                return r.Passed ? 1 : 0;
+            if (string.Equals(name, "OkCount", StringComparison.OrdinalIgnoreCase)) return r.OkCount;
+            if (string.Equals(name, "NgCount", StringComparison.OrdinalIgnoreCase)) return r.NgCount;
+            if (string.Equals(name, "Total", StringComparison.OrdinalIgnoreCase)) return r.OkCount + r.NgCount;
+            if (string.Equals(name, "ElapsedMs", StringComparison.OrdinalIgnoreCase)) return r.ElapsedMs;
+            if (string.Equals(name, "Fps", StringComparison.OrdinalIgnoreCase)) return Math.Round(r.Fps, 1);
+            return 0;
+        }
+
+        private static bool TryParseResultType(string text, out ModbusDataType type)
+        {
+            type = ModbusDataType.UInt16;
+            switch ((text ?? "").Trim().ToUpperInvariant())
+            {
+                case "": case "UINT16": type = ModbusDataType.UInt16; return true;
+                case "INT16": type = ModbusDataType.Int16; return true;
+                case "INT32": type = ModbusDataType.Int32; return true;
+                case "UINT32": type = ModbusDataType.UInt32; return true;
+                case "FLOAT32": case "FLOAT": type = ModbusDataType.Float32; return true;
+                case "FLOAT64": case "DOUBLE": type = ModbusDataType.Float64; return true;
+                default: return false;
+            }
+        }
+
+        private static string FormatResultValue(ModbusDataType type, double value)
+        {
+            if (type == ModbusDataType.Float32 || type == ModbusDataType.Float64)
+                return value.ToString("0.######", CultureInfo.InvariantCulture);
+
+            double rounded = Math.Round(value, MidpointRounding.AwayFromZero);
+            return ((long)rounded).ToString(CultureInfo.InvariantCulture);
         }
 
         private static OpResult SetPointAction(CommJobConfig job, string target, string value)

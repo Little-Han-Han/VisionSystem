@@ -77,7 +77,7 @@ namespace VisionPlatform.UI
             kind.HeaderText = "动作";
             kind.Width = 130;
             kind.FlatStyle = FlatStyle.Flat;
-            foreach (string k in new[] { "SetPoint", "SendMessage", "WaitPoint", "Sleep", "StartFlow", "Log" })
+            foreach (string k in new[] { "SetPoint", "WriteResult", "SendMessage", "WaitPoint", "Sleep", "StartFlow", "Log" })
                 kind.Items.Add(k);
             _grid.Columns.Add(kind);
 
@@ -290,6 +290,25 @@ namespace VisionPlatform.UI
                     {
                         MessageBox.Show(this, "动作「StartFlow」需要选择一条流程。", "动作不完整",
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return false;
+                    }
+                }
+                else if (string.Equals(kind, "WriteResult", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Target = 通讯名（如 PLC），Value = 名:地址:类型 映射串
+                    if (a.Target.Length == 0)
+                    {
+                        MessageBox.Show(this, "动作「WriteResult」的「目标」要填通讯名（如 PLC）。", "动作不完整",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return false;
+                    }
+                    if (a.Value.IndexOf(':') < 0)
+                    {
+                        MessageBox.Show(this,
+                            "动作「WriteResult」的「值」要填映射串，例如：\r\n" +
+                            "OkNg:20:UInt16;PosX:30:Int32;PosY:32:Int32;PosA:34:Float32\r\n\r\n" +
+                            "只有 OkNg/Passed/OkCount/NgCount/ElapsedMs/Fps 取真值，其余名字写 0。",
+                            "动作不完整", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return false;
                     }
                 }
