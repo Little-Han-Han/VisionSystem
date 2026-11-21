@@ -115,6 +115,20 @@ namespace VisionPlatform.UI
             // 这里改画到"从文本起点到客户区右缘"，只有真的放不下才出省略号。
             TreeView tv = sender as TreeView;
             int textLeft = e.Bounds.Left + 2;
+
+            // 节点图标：约定 <see cref="TreeNode.ImageKey"/> 存 <c>ui-xxx</c> 图标名
+            // （不设 ImageList —— 那是系统绘制路径，与 OwnerDrawText 混用会双倍缩进）。
+            // 工具箱的分类节点就靠这个显示小图标。
+            if (!string.IsNullOrEmpty(e.Node.ImageKey))
+            {
+                Image icon = UiIcons.Get(e.Node.ImageKey, 16);
+                if (icon != null)
+                {
+                    int iconY = e.Bounds.Top + (e.Bounds.Height - icon.Height) / 2;
+                    e.Graphics.DrawImage(icon, new Rectangle(textLeft, iconY, icon.Width, icon.Height));
+                    textLeft += icon.Width + 4;
+                }
+            }
             int availWidth = (tv != null)
                 ? tv.ClientSize.Width - textLeft - 2
                 : Math.Max(0, e.Bounds.Width - 4);

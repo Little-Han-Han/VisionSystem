@@ -3,6 +3,61 @@
 > 版本号规则见 [README「版本管理」](README.md#8-版本管理)。
 > 每次发布前用 `version.bat <版本>` 同步程序集版本与本文件顶部版本块。
 
+## 1.0.10.0 — 2026-11-21
+
+**工程结构整理 + 全界面图标体系 + 主题（浅色）修复 + 通讯结果回传补齐。**
+
+### 部署与目录结构
+
+- **配置独立成目录**：`appconfig.json` → `<程序目录>\Config\appconfig.json`。老版本放在根目录的
+  配置首次启动自动迁移（升级只换二进制、保留 `Config\` 即保住配置）。
+- **模块包与宿主同目录**：取消 `Modules\` 子目录；加载器保留子目录回退，老部署仍可运行。
+  顺带修正日志口径：`LoadErrors` 不再把"已加载包"成功日志算成失败，汇总报真实加载目录。
+- **外部 DLL 统一收纳**：`bin/x64/<配置>/thirdparty/{opencv,openvino,sqlite}/`，根目录只留自家 DLL。
+  新增 `Core/NativeDllPath` 在启动第一行把子目录加入进程 PATH（兼容 Win7，无需 `AddDllDirectory`）。
+  OpenCV 按配置精确复制（Debug→455d / Release→455）。
+- **assets 只留仓库一份**：不再复制到输出目录（图标改为嵌入资源），根目录不产生第二份副本。
+- **tools 分类**：`version/ comm/ barcode/ model/ research/ calib_sample/ icon-design/`，删掉 dump 等产物。
+- **新增 `publish.bat`**：一键生成便携发布包（含 VC++ 运行库 app-local、空数据目录、DEPLOY.txt），
+  现场拷贝即用，不必再整目录拷 `bin\x64\Release`。
+
+### 界面图标（新增体系）
+
+- 图标资源 `assets/icons/ui/`（96 个 × 16/24/32）以**嵌入资源**打进 `UI.Controls`，
+  `UiIcons.Get("ui-xxx", 尺寸)` 取用，部署不需要 assets 目录。
+- `UiButton` 支持**左图标 + 右文字**（`TextSlotWidth` 统一文字槽宽，同组按钮图标严格对齐；
+  禁用态图标压暗）。标题栏左侧显示 exe 图标。
+- 已接入：主界面工具条 14 项、运行控制 5 个按钮、算法调试 10 个按钮、流程编辑器 14 个按钮、
+  工具箱 9 个分类图标。图标清单见 `docs/设计/界面图标清单.md`。
+
+### 主题（浅色模式）
+
+- **浅色下看不清**：`ColorViewBg` 是"图像区恒深色"，此前被树/画布/代码区/日志列表复用 →
+  深底 + 浅色主题的深字。新增 `ColorCanvasBg`（画布/代码区/表格/日志列表，随主题）与
+  `ColorTreeBg`（树，随主题）；图像区仍恒深。
+- **切回深色残留浅色块**：浅色用 `ForceOverride` 把控件刷成非系统色后，深色下 `NeedOverride`
+  判定"已显式设色"全部跳过。新增 `UiStyle.ForceAll`（主题切换期间无条件重套）；
+  `Label` 底色改 `Transparent`；流程统计动态行标签点名重刷。
+- **表格**（DatagridView）：默认行底色改用 `ColorCanvasBg`、交替行 `ColorPanelBg`、网格线随主题 ——
+  修掉"一行白一行黑、字全黑看不见"。
+- 修 `UiToolStripRenderer`：OwnerDraw + ImageAndText 下文字被图标挤成"刷…"，改为渲染器整组排版。
+
+### 通讯与结果回传
+
+- **新增任务动作 `WriteResult`**：流程里不放「发送数据」节点也能把结论回写 PLC。
+  `OkNg/Passed/OkCount/NgCount/Total/ElapsedMs/Fps` 取真值，**其余名字写 0**（无角度/位置输出时清零，
+  不残留上一轮旧坐标）。Target=通讯名，Value=`名:地址:类型` 映射（与 SendData 的 MbMap 同构）。
+- **点位名支持 `端点.点位`**（`PLC.Heartbeat`）：此前只按裸名精确查，这类动作全部静默失败。
+- **任务错误日志去重**：按整条任务收尾、同错只记一次；"没有客户端连接"属等待态，降级为 INFO。
+- 任务动作失败补 WARN 日志（此前只在界面「最近错误」列体现）。
+
+### 流程显示
+
+- **触发式运行的点云结果丢失**：`FlowRunSlot.Publish` 漏传 `Cloud` → 点云流程（无位图帧）
+  主界面只显示"尚未载入图像"。已随结果带出。
+- **视图标题**改为显示**结果来源流程名**（此前显示主界面下拉当前项，容易误判"没显示对应流程"）。
+- 启动/换布局时校验流程绑定视图号，越界一次性 WARN 并点名。
+
 ## 1.0.9.1 — 2026-11-20
 
 **1.0.9.0 收尾：点云显示报错修复 + 坐标轴 + 脚本编辑器变量区显示不全（真根因）。**

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -474,7 +474,7 @@ namespace VisionPlatform.UI
                 ColumnHeadersHeight = 30
             };
 
-            gridRecords.DefaultCellStyle.BackColor = UiTheme.ColorViewBg;
+            gridRecords.DefaultCellStyle.BackColor = UiTheme.ColorCanvasBg;   // 表格随主题，别用恒深的图像区底色
             gridRecords.DefaultCellStyle.ForeColor = UiTheme.ColorTextPrimary;
             gridRecords.DefaultCellStyle.SelectionBackColor = UiTheme.ColorHeaderBg;
             gridRecords.DefaultCellStyle.SelectionForeColor = UiTheme.ColorTextPrimary;

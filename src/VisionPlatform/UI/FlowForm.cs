@@ -203,6 +203,8 @@ namespace VisionPlatform.UI
             btnStop.Kind = UiButtonKind.Stop;
             btnDeleteFlow.Kind = UiButtonKind.Stop;
 
+            ApplyButtonIcons();
+
             // 「画 ROI」按钮在预览区顶条（FlowPreviewPanel 内，与「载入图片」并排在其左侧）：
             // 它作用于预览图，放在预览区语义更贴切，也避免挤在「绑定与运行」分组里。
             // 画几何（矩形 ROI / 直线 / 圆环）统一走 ShapePicked；RoiPickRequested / RoiPickCancelled 保留兼容
@@ -508,6 +510,7 @@ namespace VisionPlatform.UI
                 var root = new TreeNode(cat.DisplayName);
                 root.Tag = null;                       // 分类节点：不参与拖拽
                 root.ForeColor = UiTheme.ColorTextSecondary;
+                root.ImageKey = CategoryIcon(cat.Key); // 自绘树按 ImageKey 画 16px 分类图标
 
                 foreach (FlowModuleInfo m in cat.Modules)
                 {
@@ -528,6 +531,54 @@ namespace VisionPlatform.UI
             }
             
             treeModules.EndUpdate();
+        }
+
+        /// <summary>
+        /// 流程编辑器按钮图标（左图标 + 右文字，由 <see cref="UiButton"/> 自绘）。
+        /// 图标名与 <c>docs/设计/界面图标清单.md</c> 对应，缺失时自动降级为纯文字。
+        /// </summary>
+        private void ApplyButtonIcons()
+        {
+            SetIcon(btnRun, "ui-run-start");
+            SetIcon(btnRunLoop, "ui-run-loop");
+            SetIcon(btnStep, "ui-run-step");
+            SetIcon(btnRunNode, "ui-run-step");
+            SetIcon(btnStop, "ui-run-stop");
+            SetIcon(btnValidate, "ui-flow-validate");
+            SetIcon(btnAutoLayout, "ui-flow-fit");
+            SetIcon(btnNewFlow, "ui-flow-new");
+            SetIcon(btnCopyFlow, "ui-flow-copy");
+            SetIcon(btnRenameFlow, "ui-common-edit");
+            SetIcon(btnDeleteFlow, "ui-flow-delete");
+            SetIcon(btnFlowUp, "ui-flow-up");
+            SetIcon(btnFlowDown, "ui-flow-down");
+            SetIcon(btnRefreshBinding, "ui-common-refresh");
+        }
+
+        private static void SetIcon(UiButton button, string iconName)
+        {
+            if (button == null) return;
+            button.Image = UiIcons.Get(iconName, 16);
+        }
+
+        /// <summary>
+        /// 分类 Key → 图标名（<c>ui-cat-*</c>）。图标缺失时返回空串，树按纯文字显示。
+        /// </summary>
+        private static string CategoryIcon(string categoryKey)
+        {
+            switch (categoryKey)
+            {
+                case "Acquisition":     return "ui-cat-acquire";
+                case "ImageProcessing": return "ui-cat-process";
+                case "Location":        return "ui-cat-locate";
+                case "Caliper":         return "ui-cat-measure";
+                case "Segmentation":    return "ui-cat-blob";
+                case "Recognition":     return "ui-cat-ocr";
+                case "DeepLearning":    return "ui-cat-dl";
+                case "ThreeD":          return "ui-cat-3d";
+                case "Output":          return "ui-cat-output";
+                default:                return "";
+            }
         }
 
         private static Font _toolboxNodeFont;
@@ -3186,6 +3237,7 @@ namespace VisionPlatform.UI
             btnRunNode.Kind = UiButtonKind.Grab;
             btnStop.Kind = UiButtonKind.Stop;
             btnDeleteFlow.Kind = UiButtonKind.Stop;
+            ApplyButtonIcons();          // 图标不随主题变，但重设一次保证幂等（自绘按钮需要 Invalidate）
 
             Invalidate(true);
         }
