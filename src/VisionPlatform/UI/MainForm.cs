@@ -134,6 +134,9 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>流程标识 → 该行标签集合的缓存，避免每帧重建控件（连续运行卡死的根因）。</summary>
+        /// <summary>流程统计行悬停提示：列宽有限，流程名会被截断，这里给全名。</summary>
+        private readonly ToolTip _flowCellTip = new ToolTip();
+
         private readonly Dictionary<string, FlowRowCtl> _flowRowLabels =
             new Dictionary<string, FlowRowCtl>(StringComparer.Ordinal);
 
@@ -730,6 +733,7 @@ namespace VisionPlatform.UI
                         tsComboCameras.SelectedIndex = select;
 
                     tsComboCameras.EndUpdate();
+                    FitToolbarComboWidth(tsComboCameras, 70, 340);   // "[USB] 本机摄像头 0 (640x480)" 也能完整显示
 
                     RefreshBindCombos();
 
@@ -1710,8 +1714,9 @@ namespace VisionPlatform.UI
                 FlowOkNg v = kv.Value;
                 string name = string.IsNullOrEmpty(v.Name) ? kv.Key : v.Name;
                 int total = v.Total;
-                string rate = total > 0 ? (v.Ok * 100.0 / total).ToString("F1") + " %" : "--";
-                SetFlowText(ctl.Name, TrimFlowName(name, 16));
+                string rate = total > 0 ? (v.Ok * 100.0 / total).ToString("F1") + "%" : "--";
+                SetFlowText(ctl.Name, TrimFlowName(name, 11));   // 列宽有限：超长流程名以"…"收尾
+                if (ctl.Name != null) _flowCellTip.SetToolTip(ctl.Name, name);   // 悬停看全名
                 SetFlowText(ctl.Ok, v.Ok.ToString());
                 SetFlowText(ctl.Ng, v.Ng.ToString());
                 SetFlowText(ctl.Rate, rate);
@@ -1745,6 +1750,19 @@ namespace VisionPlatform.UI
         /// </summary>
         private void ApplyFlowStatsTheme()
         {
+            // 【列宽必须按内容定，不能一律百分比】面板宽约 300px，5 列均分时成率列只剩 ~36px，
+            // "100.0 %"被裁成"10"、表头"成率"被裁成"成"（现场截图）。这里把数值列定死宽度、
+            // 流程名列吃掉剩余空间，任何面板宽度下数值都完整。
+            if (tableFlowStats != null && tableFlowStats.ColumnStyles.Count == 5)
+            {
+                tableFlowStats.ColumnStyles.Clear();
+                tableFlowStats.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));   // 流程名（填充剩余）
+                tableFlowStats.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40f));   // OK
+                tableFlowStats.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40f));   // NG
+                tableFlowStats.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68f));   // 成率（"100.0%"）
+                tableFlowStats.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62f));   // 状态（"运行中"）
+            }
+
             if (groupFlowStats != null)
             {
                 UiTheme.StyleGroupBox(groupFlowStats);
@@ -2339,7 +2357,8 @@ namespace VisionPlatform.UI
                 if (item is ToolStripSeparator) continue;
 
                 item.ForeColor = UiTheme.ColorTextPrimary;
-                item.Padding = new Padding(10, 4, 10, 4);
+                // 项多时 10px 内边距会把相机 / 布局下拉挤到显示不全，收窄到 6px
+                item.Padding = new Padding(6, 3, 6, 3);
 
                 // 语义色：只给"一看就要点"的动作上色，其余保持中性卡片底
                 // （启动 / 暂停已从工具栏移除，运行控制统一在右栏）
@@ -2408,6 +2427,36 @@ namespace VisionPlatform.UI
             // 不 PerformLayout 的话按钮仍是"纯文字"宽度，图标把文字区挤成省略号。
             toolStrip.PerformLayout();
             toolStrip.Invalidate(true);
+        }
+
+        /// <summary>
+        /// 按当前项目文本把工具条下拉调整到能完整显示的宽度（含下拉箭头）。
+        /// <para>相机名是现场可配的（"本机摄像头 0"、"USB-0"、"SIM-0"…），Designer 里定死 150
+        /// 会把长名字截成 "USE"；这里按最长项算，超出上限时再截断。</para>
+        /// </summary>
+        private void FitToolbarComboWidth(ToolStripComboBox combo, int min, int max)
+        {
+            if (combo == null) return;
+
+            int widest = 0;
+            foreach (object item in combo.Items)
+            {
+                string text = item != null ? item.ToString() : "";
+                if (text.Length == 0) continue;
+                int w = TextRenderer.MeasureText(text, combo.Font, new Size(int.MaxValue, int.MaxValue),
+                                                 TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
+                if (w > widest) widest = w;
+            }
+
+            if (widest <= 0) return;
+            int target = widest + 34;          // 下拉箭头 + 左右内边距
+            if (target < min) target = min;
+            if (target > max) target = max;
+
+            // 【必须关 AutoSize】ToolStripItem 默认 AutoSize=true 时 Width 会被布局改回去
+            //（实测设了 204 仍按最短内容渲染，相机名照样截成"[USB] 本机摄像…"）。
+            combo.AutoSize = false;
+            if (combo.Width != target) combo.Width = target;
         }
 
         /// <summary>给工具条某一项挂图标（按 Name 查找，找不到就跳过）。</summary>

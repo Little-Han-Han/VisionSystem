@@ -44,6 +44,7 @@ namespace VisionPlatform.UI
 
         /// <summary>流程级「NG 处理方式」下拉（运行时加到 grpBind，见 <see cref="BuildNgModeSelector"/>）。</summary>
         private ComboBox cmbNgMode;
+        private readonly ToolTip _bindTip = new ToolTip();
 
         /// <summary>流程级「整帧超时(ms)」（0 = 不限）。</summary>
         private NumericUpDown numFrameTimeout;
@@ -185,6 +186,13 @@ namespace VisionPlatform.UI
             // 必须在这里按当前主题重取一次底色，否则浅色模式的画布是深底 + 深字。
             canvas.ApplyTheme();
             flowPreview.ApplyTheme();
+
+            // 【底部区域内容宽度固定，窗口变窄时不要硬裁】「绑定与运行」组是按绝对坐标排的
+            // （相机 / 视图 / 校验 / 单步 / 运行本节点 / 自动布局 / NG 处理 / 整帧超时），
+            // 面板被拖窄后右侧控件会被裁掉、看不见也点不到。开 AutoScroll 后出现滚动条，
+            // 内容始终可达；同时把相机下拉加宽到能完整显示"[Sim] 模拟相机 (1280x1024)"。
+            panelBottom.AutoScroll = true;
+            if (cmbCamera != null) cmbCamera.Width = 262;
 
             // 输出结果面板 + 右栏结构重整：见 BuildRightColumn 的注释
             // （放在 UiStyle.ApplyForm 之后：本面板自建配色是唯一来源，
@@ -792,12 +800,17 @@ namespace VisionPlatform.UI
                 BackColor = Color.FromArgb(30, 30, 38),
                 ForeColor = Color.Gainsboro,
                 Location = new Point(70, 62),
-                Width = 150
+                // 文案收短后 130px 足够：原来的"NG 继续跑，末节点判定"需要 ~170px，
+                // 会把右边的「整帧超时」挤出面板（现场截图：只显示到"末节点判"）。
+                Width = 130
             };
-            cmbNgMode.Items.Add("遇 NG 立即停止");
-            cmbNgMode.Items.Add("NG 继续跑，末节点判定");
+            cmbNgMode.Items.Add("NG 即停");
+            cmbNgMode.Items.Add("NG 继续跑");
             cmbNgMode.SelectedIndex = 0;
             cmbNgMode.SelectedIndexChanged += OnNgModeChanged;
+            _bindTip.SetToolTip(cmbNgMode,
+                "NG 即停：遇 NG 立即停止，后续节点不再执行\r\n"
+                + "NG 继续跑：NG 不中断，流程判定取最后一个节点的返回值");
 
             var lblFrame = new Label
             {

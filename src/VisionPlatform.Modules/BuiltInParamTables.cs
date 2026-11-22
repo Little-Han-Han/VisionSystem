@@ -246,7 +246,7 @@ namespace VisionPlatform.Modules
                 "关闭：位置只在本次软件运行内递增（重启回到第一张）；开启：退出后仍从上次的位置继续"));
             t.Fields.Add(Int("TimeoutMs", "抓帧超时(ms)", 100, 60000, "3000"));
 
-            t.Fields.Add(Group("相机采集（预留：仅保存，暂不下发）"));
+            t.Fields.Add(Group("相机采集（预留）"));
             t.Fields.Add(Dbl("Exposure", "曝光 (µs)", 1m, 10000000m, 1, 100m, "10000",
                 "相机曝光时间，单位微秒。当前版本仅写入流程配置，不下发到相机"));
             t.Fields.Add(Dbl("Gain", "增益 (dB)", 0m, 48m, 2, 0.1m, "0",
@@ -465,7 +465,7 @@ namespace VisionPlatform.Modules
         {
             var t = new NodeParamTable { Type = FlowNodeType.TemplateMatch, Title = "模板匹配(NCC)" };
 
-            t.Fields.Add(Group("训练 ROI（宽或高为 0 = 整图）"));
+            t.Fields.Add(Group("训练 ROI（0 = 整图）"));
             t.Fields.Add(Int("TemplateX", "X", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateY", "Y", 0, 100000, "0"));
             t.Fields.Add(Int("TemplateW", "宽", 0, 100000, "0"));
@@ -871,7 +871,7 @@ namespace VisionPlatform.Modules
                 Hint = "只列「旋转中心」记录；下拉项末尾带该记录的圆心/半径/RMS，选中即用"
             });
 
-            t.Fields.Add(Group("输入（未接端子时用这里的定点）"));
+            t.Fields.Add(Group("输入（未接端子）"));
             NodeParamField sx = Dbl("SourceX", "坐标 X (px)", -100000m, 100000m, 3, 1m, "0",
                 "要转换的像素点；接了「坐标」端子时以端子为准，本项置灰");
             sx.LiveSource = "coordX";
@@ -881,7 +881,7 @@ namespace VisionPlatform.Modules
             sy.LiveSource = "coordY";
             t.Fields.Add(sy);
 
-            t.Fields.Add(Group("距离换算（像素 → mm）"));
+            t.Fields.Add(Group("距离换算（px → mm）"));
             t.Fields.Add(Enum("ScaleSource", "比例来源", "Calib",
                 new[] { "由标定推导", "手填 mm/px" }, new[] { "Calib", "Manual" },
                 "由标定推导 = 取 N 点标定尺度项（√|det A|）；手填 = 用下面的数值"));

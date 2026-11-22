@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -311,13 +311,20 @@ namespace VisionPlatform.UI
         private TableLayoutPanel AddGroupRow(TableLayoutPanel grid, string text)
         {
             var header = new Label();
-            header.AutoSize = true;
+            // 【不要 AutoSize】分组标题里有"（预留：仅保存，暂不下发）"这类长说明，
+            // AutoSize 的 Label 在 TableLayoutPanel 跨列单元格里会被父宽约束后**硬裁**
+            //（截图现场：显示成"相机采集（预"）。改成填满单元格 + 末尾省略号，
+            //  完整标题放 tooltip，行高不变。
+            header.AutoSize = false;
+            header.Dock = DockStyle.Fill;
+            header.AutoEllipsis = true;
+            header.Height = 24;
             header.Text = GroupHeaderText(text, true);
             header.Cursor = Cursors.Hand;
             UiTheme.StyleGroupTitle(header);
             header.Margin = new Padding(2, UiTheme.BlockGap + 2, 2, 2);
             header.Click += OnGroupHeaderClick;
-            _toolTip.SetToolTip(header, "点击折叠 / 展开本组（默认展开，折叠状态不写入配置）");
+            _toolTip.SetToolTip(header, text + "\r\n（点击折叠 / 展开本组）");
 
             grid.Controls.Add(header, 0, grid.RowCount);
             grid.SetColumnSpan(header, 2);

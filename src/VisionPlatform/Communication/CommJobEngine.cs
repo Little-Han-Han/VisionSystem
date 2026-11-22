@@ -592,9 +592,13 @@ namespace VisionPlatform.Communication
                 rt.LastError = firstFailure;
 
                 // 同一条错误只告警一次（链路没连上时每秒重试都是同一句），恢复时补一条 Info。
-                if (!string.Equals(rt.LastWarnedError, firstFailure, StringComparison.Ordinal))
+                // 【去重必须归一化】错误文本里带可变数字（"4954ms 后重试"、"重试 3/5"），
+                // 直接比字符串每次都不同 → 每秒照样刷屏（现场日志实拍：同一句刷满一屏）。
+                // 把数字统一替换成 # 后再比较，才算"同一条错误"。
+                string dedupKey = NormalizeForDedup(firstFailure);
+                if (!string.Equals(rt.LastWarnedError, dedupKey, StringComparison.Ordinal))
                 {
-                    rt.LastWarnedError = firstFailure;
+                    rt.LastWarnedError = dedupKey;
 
                     // 「没有客户端连接」是 TCP 服务端在等对端接入，属预期等待态、不是故障：
                     // 记 Info 即可（现场看到黄色 WARN 会误以为通讯坏了）。其余失败仍记 WARN。
@@ -710,6 +714,31 @@ namespace VisionPlatform.Communication
 
             double rounded = Math.Round(value, MidpointRounding.AwayFromZero);
             return ((long)rounded).ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 错误文本归一化（去重键）：把连续数字替换成 <c>#</c>。
+        /// <para>"自动连接冷却中（4954ms 后重试）" 与 "（3952ms 后重试）" 是同一条错误，
+        /// 不归一化就会被当成新错误，每秒各写一条日志。</para>
+        /// </summary>
+        private static string NormalizeForDedup(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            var sb = new System.Text.StringBuilder(text.Length);
+            bool inNumber = false;
+            foreach (char c in text)
+            {
+                if (c >= '0' && c <= '9')
+                {
+                    if (!inNumber) { sb.Append('#'); inNumber = true; }
+                }
+                else
+                {
+                    sb.Append(c);
+                    inNumber = false;
+                }
+            }
+            return sb.ToString();
         }
 
         private static OpResult SetPointAction(CommJobConfig job, string target, string value)
