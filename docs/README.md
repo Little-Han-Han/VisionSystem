@@ -90,6 +90,7 @@ flowchart LR
 | 通讯架构（点位 / 消息 / 任务）/ 多协议扩展 | [通讯架构重构方案](架构/通讯架构重构方案.md) | `CommRegistry` / `CommForm` / `CommSettings` |
 | 通讯配置怎么用（双流程完整案例） | [通讯配置完整案例](案例/通讯配置完整案例.md) | 示例 JSON / TCP 模拟器 |
 | 视觉算法性能与精度优化记录（含跳过项理由） | [算法更新记录](算法/算法更新记录.md) | `algo_shape.cpp` / `algo_ocr.cpp` / `algo_detect.cpp`；耗时口径见[性能优化](架构/性能优化.md) |
+| 怎么打包成 exe 安装包交给客户（Inno Setup 方案 + 脚本模板） | [安装包制作指南](部署/安装包制作指南.md) | `publish.bat` / `version.bat` / `DEPLOY.txt` |
 
 | 分层架构、模块职责、P/Invoke 规范（**改造前快照**） | [平台架构](平台架构.md)（待更新） | 改造后结构见 [解耦重构 §2](架构/VisionPlatform解耦重构.md)；公共约定见 [架构 §7](架构/增量架构设计.md#arch-common) |
 | 已知问题、占位实现、TODO | [遗留问题](遗留问题.md)（待更新） | 各增量章节的「落地红线」 |
