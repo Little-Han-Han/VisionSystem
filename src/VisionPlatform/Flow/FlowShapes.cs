@@ -384,6 +384,21 @@ namespace VisionPlatform.Flow
         /// <param name="angle">角度（度，顺时针为正）。</param>
         /// <param name="primary">是否为第 1 目标。</param>
         /// <param name="label">框标签；空 = 不画。</param>
+        /// <summary>
+        /// NCC 结果的旋转框尺寸 = 训练模板尺寸 × 匹配缩放。
+        /// <para>
+        /// <strong>不能</strong>直接拿 <c>VA_MatchResult.Width/Height</c>：原生层那两个字段是旋转后的
+        /// <em>轴对齐外接框</em>（见 va_types.h 的契约），45° 时比模板大 1.41 倍、90° 时横竖互换。
+        /// 画旋转矩形必须用未旋转的模板尺寸 × scale，与形状匹配的口径一致。
+        /// </para>
+        /// </summary>
+        public static SizeF NccRotatedBoxSize(double templateWidth, double templateHeight, double scale)
+        {
+            double s = (scale > 1e-9) ? scale : 1.0;
+            return new SizeF((float)Math.Max(1.0, templateWidth * s),
+                             (float)Math.Max(1.0, templateHeight * s));
+        }
+
         public static RotatedRectShape NccMatchBox(double cx, double cy, double width, double height,
                                                    double angle, bool primary, string label = null)
         {

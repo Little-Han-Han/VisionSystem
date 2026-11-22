@@ -4284,8 +4284,16 @@ namespace VisionPlatform.Flow
                 for (int i = 0; i < drawCount; i++)
                 {
                     MatchResult m = hits[i];
+                    // 原生 Width/Height 是旋转后的轴对齐外接框，不能直接当旋转矩形宽高，
+                    // 否则大角度下框会被放大（45° ≈1.41×）、90° 时横竖互换 —— 看起来像
+                    // "scale=1 还在搜缩放"。旋转框应使用训练模板原尺寸 × 匹配缩放。
+                    double tplW = (cache.Template != null && cache.Template.Width > 0)
+                        ? cache.Template.Width : m.Width;
+                    double tplH = (cache.Template != null && cache.Template.Height > 0)
+                        ? cache.Template.Height : m.Height;
+                    SizeF box = FlowShapes.NccRotatedBoxSize(tplW, tplH, m.Scale);
                     p.Shapes.Add(FlowShapes.NccMatchBox(
-                        m.Cx + offX, m.Cy + offY, m.Width, m.Height, m.Angle, i == 0,
+                        m.Cx + offX, m.Cy + offY, box.Width, box.Height, m.Angle, i == 0,
                         string.Format(CultureInfo.InvariantCulture, "#{0} {1:0.00}", i + 1, m.Score)));
                 }
 
