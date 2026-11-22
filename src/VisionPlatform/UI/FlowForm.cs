@@ -192,7 +192,10 @@ namespace VisionPlatform.UI
             // 面板被拖窄后右侧控件会被裁掉、看不见也点不到。开 AutoScroll 后出现滚动条，
             // 内容始终可达；同时把相机下拉加宽到能完整显示"[Sim] 模拟相机 (1280x1024)"。
             panelBottom.AutoScroll = true;
-            if (cmbCamera != null) cmbCamera.Width = 262;
+
+            // 【第一行重排】相机下拉按"能完整显示 [Sim] 模拟相机 (1280x1024)"取 230px，
+            // 后面三个控件顺次右移 —— 否则下拉压住「刷新绑定」按钮（现场截图：刷新按钮被盖）。
+            RelayoutBindRow();
 
             // 输出结果面板 + 右栏结构重整：见 BuildRightColumn 的注释
             // （放在 UiStyle.ApplyForm 之后：本面板自建配色是唯一来源，
@@ -542,6 +545,35 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
+        /// 「绑定与运行」第一行重排（相机 / 刷新绑定 / 显示视图）。
+        /// <para>
+        /// 这一组是按绝对坐标摆的，Designer 里相机下拉 200px、刷新按钮 x=270 —— 两者只差 70px，
+        /// 相机名一长（"[Sim] 模拟相机 (1280x1024)"）按内容加宽就会盖住刷新按钮。
+        /// 这里统一按"相机下拉 230 + 刷新 60 + 视图标签 + 数字框"重排，任何相机名都不重叠。
+        /// </para>
+        /// </summary>
+        private void RelayoutBindRow()
+        {
+            if (cmbCamera != null)
+            {
+                cmbCamera.Location = new Point(62, 27);
+                cmbCamera.Width = 230;
+            }
+            if (btnRefreshBinding != null) btnRefreshBinding.Location = new Point(296, 26);
+            if (lblView != null) lblView.Location = new Point(364, 30);
+            if (numViewIndex != null) numViewIndex.Location = new Point(432, 28);
+
+            // 按钮挂了图标后需要更宽，否则文字被裁（"运行节点" → "运行节"）
+            if (btnValidate != null) btnValidate.Width = 88;
+            if (btnStep != null) btnStep.Width = 88;
+            if (btnRunNode != null) btnRunNode.Width = 92;
+            if (btnRun != null) btnRun.Width = 88;
+            if (btnRunLoop != null) btnRunLoop.Width = 100;
+            if (btnStop != null) btnStop.Width = 80;
+            if (btnAutoLayout != null) btnAutoLayout.Width = 124;
+        }
+
+        /// <summary>
         /// 流程编辑器按钮图标（左图标 + 右文字，由 <see cref="UiButton"/> 自绘）。
         /// 图标名与 <c>docs/设计/界面图标清单.md</c> 对应，缺失时自动降级为纯文字。
         /// </summary>
@@ -783,7 +815,7 @@ namespace VisionPlatform.UI
         private void BuildNgModeSelector()
         {
             // 先腾位置：自动布局 270 → 380（宽 110，正好停在"运行"496 之前）
-            btnAutoLayout.Location = new Point(380, 60);
+            btnAutoLayout.Location = new Point(370, 60);
 
             var lblNg = new Label
             {
@@ -799,7 +831,8 @@ namespace VisionPlatform.UI
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(30, 30, 38),
                 ForeColor = Color.Gainsboro,
-                Location = new Point(70, 62),
+                // x 从 70 → 80："NG 处理："标签本身约 68px，压在 70 上会重叠（现场截图可见）
+                Location = new Point(80, 62),
                 // 文案收短后 130px 足够：原来的"NG 继续跑，末节点判定"需要 ~170px，
                 // 会把右边的「整帧超时」挤出面板（现场截图：只显示到"末节点判"）。
                 Width = 130
@@ -816,7 +849,7 @@ namespace VisionPlatform.UI
             {
                 AutoSize = true,
                 ForeColor = Color.Silver,
-                Location = new Point(226, 66),
+                Location = new Point(216, 66),
                 Text = "整帧超时："
             };
 
@@ -826,7 +859,7 @@ namespace VisionPlatform.UI
                 ForeColor = Color.Gainsboro,
                 BorderStyle = BorderStyle.FixedSingle,
                 Location = new Point(286, 62),
-                Width = 62,
+                Width = 76,          // 62 装不下"600000"（现场截图显示成"000"）
                 Minimum = 0,
                 Maximum = 600000,
                 Increment = 10,
