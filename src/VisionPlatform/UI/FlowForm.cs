@@ -96,6 +96,9 @@ namespace VisionPlatform.UI
         {
             InitializeComponent();
 
+            // 窗口尺寸变化时重排「绑定与运行」：按钮组贴右缘，宽度跟随客户区
+            this.Resize += delegate { RelayoutBindRow(); };
+
             // 流程级「NG 处理方式」：建在 InitializeComponent 之后、用运行时 Controls.Add，
             // 刻意不动 Designer —— 本项目历史上出现过 VS 重序列化把事件订阅弄丢的事故。
             BuildNgModeSelector();
@@ -192,6 +195,21 @@ namespace VisionPlatform.UI
             // 面板被拖窄后右侧控件会被裁掉、看不见也点不到。开 AutoScroll 后出现滚动条，
             // 内容始终可达；同时把相机下拉加宽到能完整显示"[Sim] 模拟相机 (1280x1024)"。
             panelBottom.AutoScroll = true;
+
+            // 【布局调整：流程管理搬到左栏底部】原来 grpFlows(362) 与 grpBind(760) 左右并排，
+            // 合计 1122 > 窗口客户区(1155) 减去左栏(200) 后的 955 —— 绑定区右侧必然被切
+            //（现场截图："运行节点"只剩一半、右边一大片空）。把流程管理移到左栏（工具箱下方）
+            // 后，绑定区独占整行，1083 宽的窗口也能把所有按钮排下。
+            MoveFlowListToLeft();
+
+            // 【整体放大】底部区域 196 → 228：分组 212、日志框 90（多显示 3 行）
+            panelBottom.Height = 228;
+            grpBind.Height = 212;
+            if (lblRunStatus != null)
+            {
+                lblRunStatus.Height = 90;
+                lblRunStatus.Width = grpBind.Width - 24;
+            }
 
             // 【第一行重排】相机下拉按"能完整显示 [Sim] 模拟相机 (1280x1024)"取 230px，
             // 后面三个控件顺次右移 —— 否则下拉压住「刷新绑定」按钮（现场截图：刷新按钮被盖）。
@@ -545,6 +563,57 @@ namespace VisionPlatform.UI
         }
 
         /// <summary>
+        /// 把「流程管理」分组从底部面板搬到左栏（工具箱下方），并把组内控件重排到左栏宽度。
+        /// <para>
+        /// 【为什么搬】底部原本是"流程管理 + 绑定与运行"左右并排，两者宽度合计 1122px，
+        /// 而窗口最小客户区 1155 - 左栏 200 = 955 —— 绑定区右边永远被裁。搬到左栏后
+        /// 绑定区独占整行（约 870px @1155 窗口），按钮组才能完整显示。
+        /// </para>
+        /// </summary>
+        private void MoveFlowListToLeft()
+        {
+            if (panelLeft == null || grpFlows == null || panelBottom == null) return;
+            if (grpFlows.Parent == panelLeft) return;      // 幂等：重复调用直接返回
+
+            panelBottom.Controls.Remove(grpFlows);
+            grpFlows.Dock = DockStyle.Bottom;
+            grpFlows.Height = 188;
+            panelLeft.Controls.Add(grpFlows);              // index 0 → 先占底部，树的 Fill 吃剩余
+
+            // 组内控件重排到 200px 宽（列表 + 2×3 按钮）
+            if (lstFlows != null)
+            {
+                lstFlows.Location = new Point(8, 20);
+                lstFlows.Size = new Size(184, 74);
+            }
+            PlaceFlowButton(btnNewFlow, 8, 98);
+            PlaceFlowButton(btnCopyFlow, 100, 98);
+            PlaceFlowButton(btnRenameFlow, 8, 126);
+            PlaceFlowButton(btnDeleteFlow, 100, 126);
+            PlaceFlowButton(btnFlowUp, 8, 154);
+            PlaceFlowButton(btnFlowDown, 100, 154);
+
+            // 左栏只有 200px，按钮文案收短（完整含义进 tooltip），否则一行放不下两个按钮
+            _bindTip.SetToolTip(btnNewFlow, "新建流程");
+            _bindTip.SetToolTip(btnCopyFlow, "复制流程");
+            _bindTip.SetToolTip(btnRenameFlow, "重命名流程");
+            _bindTip.SetToolTip(btnDeleteFlow, "删除流程");
+            _bindTip.SetToolTip(btnFlowUp, "流程上移（改变 PLC 地址映射的序号）");
+            _bindTip.SetToolTip(btnFlowDown, "流程下移（改变 PLC 地址映射的序号）");
+            if (btnNewFlow != null) btnNewFlow.Text = "新建";
+            if (btnCopyFlow != null) btnCopyFlow.Text = "复制";
+            if (btnRenameFlow != null) btnRenameFlow.Text = "重命名";
+            if (btnDeleteFlow != null) btnDeleteFlow.Text = "删除";
+        }
+
+        private static void PlaceFlowButton(UiButton button, int x, int y)
+        {
+            if (button == null) return;
+            button.Location = new Point(x, y);
+            button.Size = new Size(88, 26);
+        }
+
+        /// <summary>
         /// 「绑定与运行」第一行重排（相机 / 刷新绑定 / 显示视图）。
         /// <para>
         /// 这一组是按绝对坐标摆的，Designer 里相机下拉 200px、刷新按钮 x=270 —— 两者只差 70px，
@@ -554,14 +623,26 @@ namespace VisionPlatform.UI
         /// </summary>
         private void RelayoutBindRow()
         {
+            if (panelBottom == null || grpBind == null) return;
+
+            // 【宽度跟随窗体】Designer 里 grpBind 固定 760、从 x=380 开始 —— 窗体 1155 宽时
+            // 右缘只剩 15px，"运行节点"正好被切掉（现场截图）。这里按客户区宽算：
+            // 右侧始终留 12px 边距；比 740 还窄时不再收缩（交给 panelBottom.AutoScroll）。
+            // 流程管理已移到左栏，绑定区从面板左侧 8px 起、吃掉整行宽度
+            if (grpBind.Left != 8) grpBind.Left = 8;
+            int avail = panelBottom.ClientSize.Width - 16;
+            if (avail < 780) avail = 780;
+            if (grpBind.Width != avail) grpBind.Width = avail;
+
+            // 行 1：相机 / 刷新绑定 / 显示视图
             if (cmbCamera != null)
             {
                 cmbCamera.Location = new Point(62, 27);
                 cmbCamera.Width = 230;
             }
-            if (btnRefreshBinding != null) btnRefreshBinding.Location = new Point(296, 26);
-            if (lblView != null) lblView.Location = new Point(364, 30);
-            if (numViewIndex != null) numViewIndex.Location = new Point(432, 28);
+            if (btnRefreshBinding != null) btnRefreshBinding.Location = new Point(300, 26);
+            if (lblView != null) lblView.Location = new Point(370, 30);
+            if (numViewIndex != null) numViewIndex.Location = new Point(438, 28);
 
             // 按钮挂了图标后需要更宽，否则文字被裁（"运行节点" → "运行节"）
             if (btnValidate != null) btnValidate.Width = 88;
@@ -571,6 +652,27 @@ namespace VisionPlatform.UI
             if (btnRunLoop != null) btnRunLoop.Width = 100;
             if (btnStop != null) btnStop.Width = 80;
             if (btnAutoLayout != null) btnAutoLayout.Width = 124;
+
+            // 【按钮组右对齐】两行分别贴右缘，窗口变宽时吃掉空白，变窄时也不会被裁
+            int right = grpBind.Width - 10;
+            if (btnRunNode != null) btnRunNode.Left = right - btnRunNode.Width;
+            if (btnStep != null && btnRunNode != null)
+                btnStep.Left = btnRunNode.Left - 6 - btnStep.Width;
+            if (btnValidate != null && btnStep != null)
+                btnValidate.Left = btnStep.Left - 6 - btnValidate.Width;
+
+            if (btnStop != null) btnStop.Left = right - btnStop.Width;
+            if (btnRunLoop != null && btnStop != null)
+                btnRunLoop.Left = btnStop.Left - 6 - btnRunLoop.Width;
+            if (btnRun != null && btnRunLoop != null)
+                btnRun.Left = btnRunLoop.Left - 6 - btnRun.Width;
+
+            // 「自动整理布局」在第二行：贴运行按钮左侧，但不越过「整帧超时」数字框（x≈362）
+            if (btnAutoLayout != null && btnRun != null)
+                btnAutoLayout.Left = Math.Max(372, btnRun.Left - 12 - btnAutoLayout.Width);
+
+            // 日志框跟随宽度（高度在构造里放大到 86，日志区多两行可见）
+            if (lblRunStatus != null) lblRunStatus.Width = grpBind.Width - 24;
         }
 
         /// <summary>
