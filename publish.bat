@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal enabledelayedexpansion
 
 REM ==============================================================
@@ -57,7 +57,7 @@ for %%F in (msvcp140.dll vcruntime140.dll vcruntime140_1.dll vcomp140.dll concrt
 )
 
 REM ---- 4. data folders (created empty on first run; keep existing content) ----
-for %%D in (Config Recipes Templates Images Logs Calibrations OCRModel) do (
+for %%D in (Config Recipes Templates Images Logs Calibrations OCRModel License) do (
     if not exist "%DST%\%%D" mkdir "%DST%\%%D"
 )
 
@@ -82,6 +82,7 @@ REM ---- 6. deployment notes ----
     echo.
     echo First start:
     echo   - Config\appconfig.json is generated automatically
+    echo   - License\ holds license.lic - drop the file from your vendor here
     echo   - Recipes / Templates / Images are empty: import a project bundle
     echo     or create a recipe in the UI
     echo   - Cameras are NOT configured: bind them in Camera management

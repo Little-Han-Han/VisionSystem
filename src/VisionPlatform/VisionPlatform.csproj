@@ -47,6 +47,7 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Management" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Camera\CameraGrabGate.cs" />
@@ -83,6 +84,14 @@
     <Compile Include="Communication\TcpClientSession.cs" />
     <Compile Include="Communication\TcpServerSession.cs" />
     <Compile Include="Core\AppPaths.cs" />
+    <Compile Include="Core\Licensing\LicenseChecker.cs" />
+    <Compile Include="Core\Licensing\LicenseDefaults.cs" />
+    <Compile Include="Core\Licensing\LicenseInfo.cs" />
+    <Compile Include="Core\Licensing\LicenseStatus.cs" />
+    <Compile Include="Core\Licensing\LicenseStore.cs" />
+    <Compile Include="Core\Licensing\LicenseToken.cs" />
+    <Compile Include="Core\Licensing\LicenseVerifier.cs" />
+    <Compile Include="Core\Licensing\MachineFingerprint.cs" />
     <Compile Include="Core\AssetPaths.cs" />
     <Compile Include="Core\NativeDllPath.cs" />
     <Compile Include="Core\AppSettings.cs" />
@@ -213,6 +222,7 @@
     <Compile Include="UI\LoginForm.Designer.cs">
       <DependentUpon>LoginForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\LicenseForm.cs" />
     <Compile Include="UI\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>

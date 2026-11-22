@@ -153,6 +153,25 @@ namespace VisionPlatform.Core
             return RunModeTriggered;
         }
 
+        /// <summary>
+        /// 授权校验模式：<c>Off</c>（默认，不校验）/ <c>Warn</c>（只记日志不拦截）/
+        /// <c>Enforce</c>（未授权即拦截启动）。
+        /// <para>
+        /// 【默认 Off 是刻意为之】签发工具（LicenseTool）尚未产出正式公钥，
+        /// 此时强制校验会让所有现场无法启动；等公钥内置后由部署方改成 Enforce。
+        /// </para>
+        /// </summary>
+        [System.Runtime.Serialization.DataMember]
+        public string LicenseMode { get; set; }
+
+        /// <summary>没有许可证文件时的试用天数（0 = 不给试用，直接按 Missing 处理）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int LicenseTrialDays { get; set; }
+
+        /// <summary>机器指纹匹配阈值（默认 3/5；5 = 严格绑定，2 = 宽松）。</summary>
+        [System.Runtime.Serialization.DataMember]
+        public int LicenseMinFingerprintMatch { get; set; }
+
         /// <summary>当前配置是否触发式运行（产线握手模式）。</summary>
         public bool IsTriggeredRun
         {
@@ -173,7 +192,10 @@ namespace VisionPlatform.Core
                 AllowCameraShare = false,
                 DbPath = "",
                 LogRetentionDays = DefaultLogRetentionDays,
-                RunMode = RunModeTriggered
+                RunMode = RunModeTriggered,
+                LicenseMode = Core.Licensing.LicenseDefaults.Modes.Off,
+                LicenseTrialDays = 0,
+                LicenseMinFingerprintMatch = Core.Licensing.LicenseDefaults.MinFingerprintMatch
             };
         }
 
@@ -191,7 +213,12 @@ namespace VisionPlatform.Core
                 AllowCameraShare = AllowCameraShare,
                 DbPath = DbPath,
                 LogRetentionDays = LogRetentionDays,
-                RunMode = NormalizeRunMode(RunMode)
+                RunMode = NormalizeRunMode(RunMode),
+                LicenseMode = Core.Licensing.LicenseDefaults.Modes.Normalize(LicenseMode),
+                LicenseTrialDays = LicenseTrialDays,
+                LicenseMinFingerprintMatch = LicenseMinFingerprintMatch <= 0
+                    ? Core.Licensing.LicenseDefaults.MinFingerprintMatch
+                    : LicenseMinFingerprintMatch
             };
         }
     }

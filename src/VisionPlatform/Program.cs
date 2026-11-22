@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Windows.Forms;
 using VisionPlatform.Core;
+using VisionPlatform.Core.Licensing;
 using VisionPlatform.Data;
 using VisionPlatform.Recipe;
 using VisionPlatform.UI;
@@ -74,6 +75,31 @@ namespace VisionPlatform
 
             Logger.Info("===== VisionPlatform 启动 =====");
             Logger.Info("软件版本：" + Application.ProductVersion);
+
+            // ---------- 授权校验 ----------
+            // 放在启动画面前（拦住就是拦住，不让用户先看到界面再被踢），
+            // 且必须在 Logger/LogDb 就绪之后，授权失败也要留证据。
+            // 模式见 SystemSettings.LicenseMode：Off（默认）/ Warn / Enforce。
+            if (!EnsureLicense())
+            {
+                Logger.Info("授权校验未通过，软件退出");
+                Logger.Shutdown();
+                LogDb.Shutdown();
+                return;
+            }
+
+            // 命令行 --license：只打开授权窗口（现场查看机器码 / 换证，不必启动整套流程）
+            if (Environment.GetCommandLineArgs() != null
+                && Array.IndexOf(Environment.GetCommandLineArgs(), "--license") >= 0)
+            {
+                LicenseInfo shown;
+                LicenseStatus st = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out shown);
+                using (var f = new LicenseForm(st, shown, ""))
+                    f.ShowDialog();
+                Logger.Shutdown();
+                LogDb.Shutdown();
+                return;
+            }
 
             // 性能归因探针（VA_PERF_STATS=1 才启动）：把连续运行的 CPU 拆到算法/界面/线程上。
             // 平时完全不启动线程、不产生日志。
@@ -159,6 +185,75 @@ namespace VisionPlatform
             Logger.Info("===== VisionPlatform 退出 =====");
             Logger.Shutdown();
             LogDb.Shutdown();
+        }
+
+        /// <summary>
+        /// 启动授权校验。返回 false 表示"不允许启动"，调用方应退出。
+        /// <para>
+        /// 三种模式（<c>System.LicenseMode</c>）：
+        /// <list type="bullet">
+        /// <item><c>Off</c>（默认）：不校验，只记录一条含机器码的日志（便于现场报给供应商）。</item>
+        /// <item><c>Warn</c>：校验并记录结果，<b>不拦截</b>启动（试运行阶段用）。</item>
+        /// <item><c>Enforce</c>：不可用即弹授权窗口；用户未导入有效许可证则退出。</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        private static bool EnsureLicense()
+        {
+            string mode = Core.Licensing.LicenseDefaults.Modes.Normalize(
+                ConfigStore.Current != null && ConfigStore.Current.System != null
+                    ? ConfigStore.Current.System.LicenseMode
+                    : null);
+
+            string machineCode = Core.Licensing.MachineFingerprint.GetMachineCode();
+            string licenseFile = Core.Licensing.LicenseStore.GetFilePath(AppPaths.Root);
+
+            if (string.Equals(mode, Core.Licensing.LicenseDefaults.Modes.Off, StringComparison.Ordinal))
+            {
+                // 关闭态也要把机器码写进日志：现场报"要个授权"时我们直接能查
+                Logger.Info("授权校验已关闭（LicenseMode=Off）｜机器码 " + machineCode
+                            + "｜许可证 " + licenseFile);
+                return true;
+            }
+
+            Core.Licensing.LicenseInfo info;
+            Core.Licensing.LicenseStatus status = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out info);
+
+            Logger.Info("授权校验（" + mode + "）：" + status.Describe()
+                        + (info != null ? "｜" + info.Summary() : "")
+                        + "｜机器码 " + machineCode);
+
+            if (status.IsUsable())
+            {
+                // 记录本次成功校验时间（时间回拨检测的基准）；纯函数 Check 不写盘，写盘由这里负责
+                Core.Licensing.LicenseChecker.TouchState(AppPaths.Root);
+                return true;
+            }
+
+            if (string.Equals(mode, Core.Licensing.LicenseDefaults.Modes.Warn, StringComparison.Ordinal))
+            {
+                Logger.Warn("授权不可用，但当前为 Warn 模式，继续启动：" + status.Describe());
+                return true;
+            }
+
+            // Enforce：弹授权窗口，导入成功可直接继续启动
+            using (var form = new LicenseForm(status, info, ""))
+            {
+                DialogResult r = form.ShowDialog();
+                if (r != DialogResult.OK && !form.Imported) return false;
+            }
+
+            Core.Licensing.LicenseInfo after;
+            Core.Licensing.LicenseStatus afterStatus = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out after);
+            if (!afterStatus.IsUsable())
+            {
+                Logger.Warn("导入后仍不可用：" + afterStatus.Describe());
+                return false;
+            }
+
+            Core.Licensing.LicenseChecker.TouchState(AppPaths.Root);
+            Logger.Info("授权已导入并生效：" + (after != null ? after.Summary() : ""));
+            return true;
         }
 
         /// <summary>根据配置文件中的算法参数，恢复上次使用的配方或检测参数快照。</summary>

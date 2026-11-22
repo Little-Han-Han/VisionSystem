@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 
 namespace VisionPlatform.Core
@@ -50,6 +50,13 @@ namespace VisionPlatform.Core
                     "VisionPlatform");
             }
         }
+
+        /// <summary>
+        /// 许可证目录 = <c>&lt;程序目录&gt;\License</c>。
+        /// <para>存放 <c>license.lic</c> 与时间回拨状态 <c>state.bin</c>：
+        /// 独立成目录便于现场"换授权只丢一个文件"，升级时也不会被二进制覆盖。</para>
+        /// </summary>
+        public static string LicenseDir { get { return Path.Combine(Root, "License"); } }
 
         /// <summary>配方目录。</summary>
         public static string RecipeDir { get { return Path.Combine(Root, "Recipes"); } }
@@ -115,6 +122,7 @@ namespace VisionPlatform.Core
                 if (!Directory.Exists(LogDir)) Directory.CreateDirectory(LogDir);
                 if (!Directory.Exists(TemplateDir)) Directory.CreateDirectory(TemplateDir);
                 if (!Directory.Exists(ConfigDir)) Directory.CreateDirectory(ConfigDir);
+                if (!Directory.Exists(LicenseDir)) Directory.CreateDirectory(LicenseDir);
 
                 // 一次性迁移：老版本的 appconfig.json 在程序根目录，静默搬到 Config\。
                 // 只在"新位置还没有文件"时搬，避免覆盖用户已经在用的新配置。
