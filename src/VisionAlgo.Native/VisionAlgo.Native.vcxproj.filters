@@ -23,9 +23,6 @@
   </ItemGroup>
   <!-- 头文件夹 -->
   <ItemGroup>
-    <ClInclude Include="include\vision_algo.h">
-      <Filter>include</Filter>
-    </ClInclude>
     <ClInclude Include="include\algo\va_preprocess.h">
       <Filter>include\algo</Filter>
     </ClInclude>
@@ -73,6 +70,10 @@
     </ClInclude>
     <ClInclude Include="include\algo\va_ocrdl.h">
       <Filter>include\algo</Filter>
+    </ClInclude>
+    <ClInclude Include="include\algo\va_barcode.h" />
+    <ClInclude Include="include\vision_algo.h">
+      <Filter>src\algo</Filter>
     </ClInclude>
   </ItemGroup>
   <!-- 源文件夹 -->
@@ -128,6 +129,7 @@
     <ClCompile Include="src\algo\algo_ocrdl.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
+    <ClCompile Include="src\algo\algo_barcode.cpp" />
   </ItemGroup>
   <!-- Common 文件夹：公共头文件与实现 -->
   <ItemGroup>

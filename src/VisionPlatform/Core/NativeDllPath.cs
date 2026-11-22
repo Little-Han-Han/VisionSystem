@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 
 namespace VisionPlatform.Core
@@ -6,7 +6,7 @@ namespace VisionPlatform.Core
     /// <summary>
     /// 第三方原生 DLL 搜索路径注册。
     /// <para>
-    /// 【为什么需要】外部依赖统一收在 <c>&lt;程序目录&gt;\thirdparty\{opencv,openvino,sqlite}\</c>，
+    /// 【为什么需要】外部依赖统一收在 <c>&lt;程序目录&gt;\THIRDPARTY\{opencv,openvino,sqlite}\</c>，
     /// 而 Windows 加载器默认只搜「exe 目录 → 系统目录 → PATH」——
     /// 不把子目录加进搜索路径，<c>VisionAlgo.Native.dll</c> 就找不到 <c>opencv_world455.dll</c>，
     /// <c>sqlite3.dll</c> 也找不到（表现为「找不到指定的模块」/ DllNotFoundException）。
@@ -23,17 +23,17 @@ namespace VisionPlatform.Core
     /// 早于 Logger 初始化即可覆盖）。
     /// </para>
     /// <para>
-    /// 【兼容】老部署（第三方 dll 与 exe 平铺）没有 thirdparty 目录 → 直接返回，行为不变。
+    /// 【兼容】老部署（第三方 dll 与 exe 平铺）没有 THIRDPARTY 目录 → 直接返回，行为不变。
     /// </para>
     /// </summary>
     public static class NativeDllPath
     {
-        /// <summary>把 &lt;程序目录&gt;\thirdparty\* 各子目录追加进本进程 PATH（幂等）。</summary>
+        /// <summary>把 &lt;程序目录&gt;\THIRDPARTY\* 各子目录追加进本进程 PATH（幂等）。</summary>
         public static void Register()
         {
             try
             {
-                string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "thirdparty");
+                string root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ThirdParty");
                 if (!Directory.Exists(root)) return;
 
                 string[] dirs;

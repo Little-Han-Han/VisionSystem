@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -197,7 +197,7 @@ namespace VisionPlatform.Flow
             if (string.Equals(srcSafeFlow, dstSafeFlow, StringComparison.Ordinal)
                 && string.Equals(srcSafeNode, dstSafeNode, StringComparison.Ordinal)) return;
 
-            string[] kinds = { "Templates", "OCRModel", "Models" };
+            string[] kinds = { "Templates", System.IO.Path.Combine("Models", "OCR"), System.IO.Path.Combine("Models", "DL") };
             foreach (string kind in kinds)
             {
                 string src = Path.Combine(root, kind, srcSafeFlow, srcSafeNode);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -97,7 +97,7 @@ namespace VisionPlatform.Flow
                 sb.Append(ok ? c : '_');
             }
 
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel", sb + Extension);
+            return Path.Combine(Core.AppPaths.OcrModelDir, sb + Extension);
         }
 
         /// <summary>参数值 → 绝对路径（空值给默认；<c>Path.Combine</c> 遇绝对路径直接返回它）。</summary>

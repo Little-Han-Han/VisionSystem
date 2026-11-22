@@ -536,6 +536,16 @@ namespace VisionPlatform.UI
             int maxWidth;
             foreach (FlowModuleCategory cat in FlowModule.GroupByCategory())
             {
+                // 深度学习模块按许可证功能位过滤：证里没有 deep 时**整类不显示** ——
+                // 树里连节点都没有，用户自然拖不出来（比"拖了再报错"体验好，也难被绕过）。
+                // 传统算法（classic）永远可用，不参与过滤。
+                if (string.Equals(cat.Key, VisionPlatform.Framework.Modules.ModuleCategories.DeepLearning,
+                                  StringComparison.Ordinal)
+                    && !AppContext.CanUseDeepLearning)
+                {
+                    continue;
+                }
+
                 var root = new TreeNode(cat.DisplayName);
                 root.Tag = null;                       // 分类节点：不参与拖拽
                 root.ForeColor = UiTheme.ColorTextSecondary;
@@ -577,21 +587,25 @@ namespace VisionPlatform.UI
 
             panelBottom.Controls.Remove(grpFlows);
             grpFlows.Dock = DockStyle.Bottom;
-            grpFlows.Height = 188;
+            // 【高度按"能不能用"给】原来 188px 里列表只有 74px（4 行），50 条流程得靠拖滚动条找。
+            // 现在列表 214px（约 12 行可见）+ 6 个按钮仍放得下；左栏 637px 时工具箱还剩 300px。
+            grpFlows.Height = 352;   // 含 GroupBox 标题区（客户区比总高小 ~20px）
             panelLeft.Controls.Add(grpFlows);              // index 0 → 先占底部，树的 Fill 吃剩余
 
             // 组内控件重排到 200px 宽（列表 + 2×3 按钮）
             if (lstFlows != null)
             {
                 lstFlows.Location = new Point(8, 20);
-                lstFlows.Size = new Size(184, 74);
+                lstFlows.Size = new Size(184, 226);
+                // 不按整行高度取整：否则给定高度会被"吃掉"几像素
+                lstFlows.IntegralHeight = false;
             }
-            PlaceFlowButton(btnNewFlow, 8, 98);
-            PlaceFlowButton(btnCopyFlow, 100, 98);
-            PlaceFlowButton(btnRenameFlow, 8, 126);
-            PlaceFlowButton(btnDeleteFlow, 100, 126);
-            PlaceFlowButton(btnFlowUp, 8, 154);
-            PlaceFlowButton(btnFlowDown, 100, 154);
+            PlaceFlowButton(btnNewFlow, 8, 252);
+            PlaceFlowButton(btnCopyFlow, 100, 252);
+            PlaceFlowButton(btnRenameFlow, 8, 280);
+            PlaceFlowButton(btnDeleteFlow, 100, 280);
+            PlaceFlowButton(btnFlowUp, 8, 308);
+            PlaceFlowButton(btnFlowDown, 100, 308);
 
             // 左栏只有 200px，按钮文案收短（完整含义进 tooltip），否则一行放不下两个按钮
             _bindTip.SetToolTip(btnNewFlow, "新建流程");
@@ -610,7 +624,7 @@ namespace VisionPlatform.UI
         {
             if (button == null) return;
             button.Location = new Point(x, y);
-            button.Size = new Size(88, 26);
+            button.Size = new Size(88, 24);
         }
 
         /// <summary>
@@ -1871,9 +1885,10 @@ namespace VisionPlatform.UI
             string libPath = OcrCharLibraryFile.ResolveActive(lib, flowId);
             if (!string.IsNullOrEmpty(libPath)) return libPath;
 
-            string v = node != null ? node.GetString("TemplateDir", "OCRModel") : "OCRModel";
+            string v = node != null ? node.GetString("TemplateDir", "Models\\OCR") : "Models\\OCR";
             v = (v ?? "").Trim();
-            if (v.Length == 0) v = "OCRModel";
+            if (v.Length == 0) v = "Models\\OCR";
+            if (string.Equals(v, "OCRModel", StringComparison.OrdinalIgnoreCase)) v = "Models\\OCR";   // 旧值兼容
 
             try { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, v); }
             catch (Exception) { return v; }

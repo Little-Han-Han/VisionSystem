@@ -1,4 +1,6 @@
-using System;
+﻿using System;
+using System.Diagnostics;
+using System.Threading;
 using System.Collections.Generic;
 using VisionPlatform.Core;
 
@@ -74,9 +76,9 @@ namespace VisionPlatform.Camera
                 Logger.Warn("枚举本机摄像头失败：" + ex.Message);
             }
 
-            // 模拟相机：无硬件时的兜底设备
-            var sim = new SimCamera();
-            list.Add(sim.Info);
+            // 【已移除模拟相机】产线只用真实相机：不再枚举 SIM-0，
+            // 现场打开相机列表里也就不会出现一个"假设备"干扰判断。
+            // SimCamera 类保留（仅供 Smoke 回归），但不再注册到这里。
 
             // 海康相机
             try
@@ -136,6 +138,12 @@ namespace VisionPlatform.Camera
         /// 因此重复调用不会重复打开、不会泄漏句柄。</para>
         /// </summary>
         /// <returns>本次成功打开的相机台数（已打开的也计入）。</returns>
+        /// <summary>单台相机打开的超时上限（毫秒）。</summary>
+        private const int OpenTimeoutMs = 8000;
+
+        /// <summary>整批打开的总预算（毫秒）：超了跳过剩余相机，保证启动能往下走。</summary>
+        private const int OpenAllBudgetMs = 15000;
+
         public int OpenAll()
         {
             List<CameraInfo> list;
@@ -156,13 +164,23 @@ namespace VisionPlatform.Camera
             }
 
             int opened = 0;
+            var budget = Stopwatch.StartNew();
             foreach (CameraInfo info in list)
             {
                 if (info == null || string.IsNullOrEmpty(info.Id)) continue;
 
+                // 【必须给总预算】相机驱动（DirectShow / 厂商 SDK）在设备被占用时可能
+                // 长时间不返回，把启动画面永远卡住 —— 现场表现就是"卡在加载页"。
+                if (budget.ElapsedMilliseconds > OpenAllBudgetMs)
+                {
+                    Logger.Warn("启动打开相机：已超总预算 " + OpenAllBudgetMs + "ms，跳过剩余相机（"
+                                + info.Id + " 及之后），可在「相机管理」里手动打开");
+                    break;
+                }
+
                 try
                 {
-                    OpResult<ICamera> r = Open(info.Id);
+                    OpResult<ICamera> r = OpenWithTimeout(info.Id, OpenTimeoutMs);
                     if (r != null && r.Success) opened++;
                     else Logger.Warn("启动打开相机失败 " + info.Id + "：" + (r != null ? r.Message : "未知原因"));
                 }
@@ -173,6 +191,53 @@ namespace VisionPlatform.Camera
             }
 
             return opened;
+        }
+
+        /// <summary>
+        /// 带超时地打开一台相机。
+        /// <para>
+        /// 【为什么要单开线程】<see cref="Open"/> 内部会调厂商 SDK / DirectShow，
+        /// 这些调用**没有超时参数**，设备异常时直接阻塞。用后台线程 + 等待上限兜住：
+        /// 超时后放弃本次打开（后台线程随进程退出而结束），启动流程继续。
+        /// </para>
+        /// </summary>
+        private static OpResult<ICamera> OpenWithTimeout(string id, int timeoutMs)
+        {
+            OpResult<ICamera> result = null;
+            string error = null;
+            var done = new ManualResetEventSlim(false);
+
+            var worker = new Thread(delegate()
+            {
+                try
+                {
+                    result = Instance.Open(id);
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+                finally
+                {
+                    done.Set();
+                }
+            });
+            worker.IsBackground = true;
+            worker.Name = "CameraOpenTimeout";
+
+            try
+            {
+                worker.Start();
+            }
+            catch (Exception ex)
+            {
+                return OpResult<ICamera>.Fail("启动打开线程失败：" + ex.Message);
+            }
+
+            if (!done.Wait(timeoutMs))
+                return OpResult<ICamera>.Fail("打开超时（" + timeoutMs + "ms 无响应，可能被其它程序占用或驱动异常）");
+
+            return result ?? OpResult<ICamera>.Fail(error ?? "未知原因");
         }
 
         /// <summary>关闭指定相机。</summary>
@@ -212,8 +277,9 @@ namespace VisionPlatform.Camera
 
         private ICamera CreateById(string id)
         {
+            // 模拟相机已停用：老配方里若还残留 SIM-0，这里明确拒绝（下面会走"未知相机"分支）
             if (id.StartsWith("SIM", StringComparison.OrdinalIgnoreCase))
-                return new SimCamera();
+                return null;
 
             // 本机摄像头：Id 形如 "USB-1"，后缀即设备序号
             if (id.StartsWith("USB", StringComparison.OrdinalIgnoreCase))

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -74,6 +74,10 @@
        这样部署不需要 assets 目录，也不会在 bin 下产生副本；改图标重编译即可。 -->
   <ItemGroup>
     <EmbeddedResource Include="..\..\assets\icons\ui\png\*.png">
+      <!-- Link：在 VS 解决方案资源管理器里把这 288 个图标**归到 Resources\Icons 一个文件夹**下，
+           不再散落在项目树根部。物理文件仍在 assets\icons\ui\png（唯一来源）。
+           LogicalName 必须保留：UiIcons.Get 按 uiicons.<文件名> 取流，Link 不影响它。 -->
+      <Link>Resources\Icons\%(Filename)%(Extension)</Link>
       <LogicalName>uiicons.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

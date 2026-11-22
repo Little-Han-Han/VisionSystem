@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using VisionPlatform.Core;
@@ -78,7 +78,13 @@ namespace VisionPlatform.Recipe
         }
 
         /// <summary>方案目录下的资产子目录（模板 / OCR 字符库 / 深度学习模型 / 采集图）。</summary>
-        public static readonly string[] RecipeSubDirs = { "Templates", "OCRModel", "Models", "Images" };
+        public static readonly string[] RecipeSubDirs =
+        {
+            "Templates",
+            System.IO.Path.Combine("Models", "OCR"),
+            System.IO.Path.Combine("Models", "DL"),
+            "Images"
+        };
 
         private static void EnsureRecipeSubdirs(string recipeDir)
         {

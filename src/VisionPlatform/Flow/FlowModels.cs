@@ -656,12 +656,19 @@ namespace VisionPlatform.Flow
         {
             if (node == null) return false;
 
-            string v = node.GetString("TemplateDir", "OCRModel");
+            string v = node.GetString("TemplateDir", "Models\\OCR");
             v = (v ?? "").Trim();
 
             if (v.Length == 0)
             {
-                node.Set("TemplateDir", "OCRModel");
+                node.Set("TemplateDir", "Models\\OCR");
+                return true;
+            }
+
+            // 旧默认值 "OCRModel" → 新的 "MODELS\OCR"（目录已合并，旧路径不再存在）
+            if (string.Equals(v, "OCRModel", StringComparison.OrdinalIgnoreCase))
+            {
+                node.Set("TemplateDir", "Models\\OCR");
                 return true;
             }
 
@@ -672,7 +679,7 @@ namespace VisionPlatform.Flow
                 string leaf = System.IO.Path.GetFileName(v.TrimEnd('\\', '/'));
                 if (!string.Equals(leaf, "OcrChars", StringComparison.OrdinalIgnoreCase)) return false;
 
-                node.Set("TemplateDir", "OCRModel");
+                node.Set("TemplateDir", "Models\\OCR");
                 return true;
             }
             catch (Exception)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -228,6 +228,7 @@ namespace VisionPlatform.Native
         public double max_overlap;
         public int    subpixel;
         public double greediness;   // 贪婪系数 0~1，越大越快；0 = 关闭启发式
+        public int    symmetric;    // 1 = 对精修候选做反向边缘覆盖重评（新增字段放末尾）
     }
 
     /// <summary>训练参数（对应 C 端 VA_ShapeTrainParam）：控制特征点数量与空间稀疏间距。</summary>
@@ -2137,7 +2138,7 @@ namespace VisionPlatform.Native
             if (System.IO.File.Exists(cand)) return cand;
 
             string fn = System.IO.Path.GetFileName(p);
-            string cand2 = System.IO.Path.Combine(baseDir, "models", fn);
+            string cand2 = System.IO.Path.Combine(baseDir, "Models", "DL", fn);
             if (System.IO.File.Exists(cand2)) return cand2;
 
             return p;
@@ -3444,6 +3445,12 @@ namespace VisionPlatform.Native
         /// </summary>
         public double Greediness { get; set; }
 
+        /// <summary>
+        /// 对称双向评分（默认 false）。开启后只在精修后的少量候选上做反向边缘覆盖重评，
+        /// 对"主体相同、内部多一条线/多个耳"的类似形状区分更稳；粗扫路径不变，但单帧更慢。
+        /// </summary>
+        public bool Symmetric { get; set; }
+
         public static ShapeParam Default()
         {
             return new ShapeParam
@@ -3459,7 +3466,8 @@ namespace VisionPlatform.Native
                 MaxMatches = 1,
                 MaxOverlap = 0.5,
                 Subpixel = true,
-                Greediness = 0.9
+                Greediness = 0.9,
+                Symmetric = false
             };
         }
 
@@ -3499,6 +3507,7 @@ namespace VisionPlatform.Native
             p.max_overlap = MaxOverlap;
             p.subpixel = Subpixel ? 1 : 0;
             p.greediness = Greediness;
+            p.symmetric = Symmetric ? 1 : 0;
             return p;
         }
 

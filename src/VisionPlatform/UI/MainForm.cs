@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Text;
 using System.Windows.Forms;
 using VisionPlatform.Camera;
 using VisionPlatform.Communication;
@@ -71,6 +72,15 @@ namespace VisionPlatform.UI
 
         /// <summary>最近一次结论（null = 尚未判定），结论保持到下次判定（FR-UI-03 验收④）。</summary>
         private bool? _verdict;
+
+        /// <summary>状态栏最左的「当前方案」段（加粗，独立 Label 才能单独加粗）。</summary>
+        private ToolStripStatusLabel _lblRecipeStatus;
+
+        /// <summary>状态栏右侧的相机连接标签（每台配置的相机一个：绿底=已连接、红底=未连接）。</summary>
+        private readonly List<ToolStripStatusLabel> _cameraStatusLabels = new List<ToolStripStatusLabel>();
+
+        /// <summary>上次渲染的相机状态签名（名称+连接位）：没变化就不重建，避免状态栏闪烁。</summary>
+        private string _cameraStatusSignature = "";
 
         /// <summary>最近一次结论摘要文本（用于状态栏与运行状态的「最近结论」）。</summary>
         private string _lastSummary = "";
@@ -307,6 +317,17 @@ namespace VisionPlatform.UI
             RefreshFlowCombo();
 
             _initializing = false;
+
+            // 状态栏最左：当前方案（加粗）。运行时插入而不改 Designer —— VS 打开就会重写
+            // *.Designer.cs，手加的 Items.Add 容易被冲掉。
+            _lblRecipeStatus = new ToolStripStatusLabel
+            {
+                Spring = false,
+                Font = new Font(UiTheme.FamilyBody, 9f, FontStyle.Bold),
+                ForeColor = UiTheme.ColorTextPrimary
+            };
+            statusStrip.Items.Insert(0, _lblRecipeStatus);
+            statusStrip.Items.Insert(1, new ToolStripStatusLabel("  "));   // 与运行信息之间留空隙
 
             UpdateStatus();
             UpdateStats();
@@ -734,6 +755,8 @@ namespace VisionPlatform.UI
 
                     tsComboCameras.EndUpdate();
                     FitToolbarComboWidth(tsComboCameras, 70, 340);   // "[USB] 本机摄像头 0 (640x480)" 也能完整显示
+                    // 布局下拉：AutoSize 关掉后宽度不再自适应，这里给足（"2 x 2" + 箭头）
+                    FitToolbarComboWidth(tsComboLayout, 88, 120);
 
                     RefreshBindCombos();
 
@@ -1904,6 +1927,9 @@ namespace VisionPlatform.UI
                 ? "注销并恢复访客低权限（仅可查看日志）"
                 : "管理员登录后解锁全部功能（未登录仅可查看日志）";
 
+            // 文本在「登录」↔「注销 用户名」之间切换，宽度必须跟着重算，否则用户名被裁
+            FitToolbarItemWidth(tsBtnLogin);
+
             // 运行控制按钮必须一并与权限位同步，否则 UpdateStatus() 每次刷新都会把它们打回启用
             UpdateRunButtons();
         }
@@ -1987,16 +2013,29 @@ namespace VisionPlatform.UI
             string verdictText = _verdict.HasValue ? (_verdict.Value ? "OK" : "NG") : "--";
             string costText = _lastElapsedMs > 0 ? (_lastElapsedMs.ToString("F0") + " ms") : "--";
 
+            // 【状态栏布局】左边单独一段"当前方案"（加粗），右边是运行信息；
+            // 统计与流程信息已移到右栏卡片 / 流程管理，底部不再重复（现场反馈太挤）。
+            if (_lblRecipeStatus != null)
+            {
+                string recipeName = recipe != null && !string.IsNullOrEmpty(recipe.Name)
+                    ? recipe.Name : "（未选择方案）";
+                string recipeText = "当前方案：" + recipeName;
+                if (_lblRecipeStatus.Text != recipeText) _lblRecipeStatus.Text = recipeText;
+            }
+
+            // 【不再显示"相机：xxx"】右侧的彩色相机标签已经表达了"哪台连没连上"，
+            // 这里再写一遍当前相机名属于重复信息（现场反馈：一眼看不出该看哪个）。
             statusLabel.Text = string.Format(
-                "相机：{0} | 状态：{1} | 视图：{2} | 最近：{3} | 耗时：{4} | 统计：{5} 件（OK {6} / NG {7}） | 流程：{8} | 通讯：{9}",
-                cam != null ? cam.Name : "--",
+                "状态：{0} | 视图：{1} | 最近：{2} | 耗时：{3} | 通讯：{4}",
                 runState,
                 _views.Count,
                 verdictText,
                 costText,
-                _statTotal, _statOk, _statNg,
-                ActiveFlowName,
                 CommState.HasActiveChannel ? "正常" : "未连接");
+
+            // 相机连接状态用彩色标签画在状态栏右侧（绿=已连接 / 红=未连接），
+            // 配置了多少台就显示多少个 —— 4 台只连上 3 台时第 4 个是红的，不会被隐藏。
+            UpdateCameraStatusLabels();
 
             // 右栏 ④ 运行状态
             lblRunStateValue.Text = runState;
@@ -2345,6 +2384,16 @@ namespace VisionPlatform.UI
 
                 item.Font = UiTheme.FontToolbar;
 
+                if (item is ToolStripSeparator) continue;
+
+                // 【内边距必须在类型分支之前统一设】原来 Label（相机标定等）提前 continue，
+                // 没有 Padding，导致它比按钮 / 胶囊矮一截（现场截图：几个入口高度不一致）。
+                // 胶囊底色由 UiToolStripRenderer 按 item 尺寸绘制，尺寸一致才齐平。
+                item.Padding = new Padding(6, 3, 6, 3);
+
+                // 宽高一起统一：Label 与 Button 都必须走这一步，否则 AutoSize 各算各的
+                FitToolbarItemSize(item, ToolbarItemHeight);
+
                 ToolStripLabel label = item as ToolStripLabel;
                 if (label != null)
                 {
@@ -2354,11 +2403,7 @@ namespace VisionPlatform.UI
                     continue;
                 }
 
-                if (item is ToolStripSeparator) continue;
-
                 item.ForeColor = UiTheme.ColorTextPrimary;
-                // 项多时 10px 内边距会把相机 / 布局下拉挤到显示不全，收窄到 6px
-                item.Padding = new Padding(6, 3, 6, 3);
 
                 // 语义色：只给"一看就要点"的动作上色，其余保持中性卡片底
                 // （启动 / 暂停已从工具栏移除，运行控制统一在右栏）
@@ -2487,10 +2532,99 @@ namespace VisionPlatform.UI
             // ToolStrip 不会重算缓存的首选尺寸（PerformLayout 也无效，实测截图文字仍被
             // 图标挤成"刷…"）。这里直接按"图标 + 间距 + 文字 + 内边距"定死宽度，
             // 行为可预测，不依赖布局缓存何时失效。
-            Size textSize = TextRenderer.MeasureText(target.Text, UiTheme.FontToolbar);
-            target.AutoSize = false;
-            target.Width = textSize.Width + icon.Width + 6 + target.Padding.Horizontal + 4;
+            FitToolbarItemWidth(target);
             if (target.Height < 24) target.Height = 28;
+        }
+
+        /// <summary>
+        /// 刷新状态栏右侧的相机连接标签。
+        /// <para>
+        /// 【用颜色而不是文字】现场一眼就能看出"哪台没连上"，不用读文字。
+        /// 绿底=已连接、红底=未连接；名称常显，SN 放 tooltip。
+        /// </para>
+        /// <para>数量多时（如 8 台）标签会挤，但状态栏本来就该给人一眼扫过的信息；
+        /// 名称过长由 ToolStrip 自动省略，悬停看全名与 SN。</para>
+        /// </summary>
+        private void UpdateCameraStatusLabels()
+        {
+            List<CameraExpectationState> states = CameraExpectationStatus.GetStates();
+
+            // 签名比对：只有"数量/名称/连接状态"变化才重建（每次 UpdateStatus 都重建会闪）
+            var sig = new StringBuilder();
+            foreach (CameraExpectationState st in states)
+                sig.Append(st.Name).Append(st.Loaded ? '1' : '0').Append('|');
+
+            string signature = sig.ToString();
+            if (string.Equals(signature, _cameraStatusSignature, StringComparison.Ordinal)) return;
+            _cameraStatusSignature = signature;
+
+            foreach (ToolStripStatusLabel old in _cameraStatusLabels) statusStrip.Items.Remove(old);
+            _cameraStatusLabels.Clear();
+
+            foreach (CameraExpectationState st in states)
+            {
+                var label = new ToolStripStatusLabel
+                {
+                    Text = st.Name,
+                    BackColor = st.Loaded ? UiTheme.ColorOk : UiTheme.ColorNg,
+                    ForeColor = Color.White,
+                    Font = new Font(UiTheme.FamilyBody, 8.5f, FontStyle.Bold),
+                    Margin = new Padding(3, 3, 3, 3),
+                    ToolTipText = st.Name
+                                  + (string.IsNullOrEmpty(st.Detail) ? "" : "（" + st.Detail + "）")
+                                  + (string.IsNullOrEmpty(st.Serial) ? "" : " SN " + st.Serial)
+                                  + (st.Loaded ? " 已连接" : " 未连接")
+                };
+                statusStrip.Items.Add(label);
+                _cameraStatusLabels.Add(label);
+            }
+        }
+
+        /// <summary>
+        /// 按"图标 + 文字 + 内边距"重算工具条项宽度。
+        /// <para>
+        /// 【为什么需要它】登录按钮的文本会在「登录」与「注销 用户名」之间切换；
+        /// 若宽度只在挂图标时算一次，用户名一长就被裁成「注销 ad」（现场截图）。
+        /// </para>
+        /// </summary>
+        /// <summary>工具条所有条目统一高度（胶囊底板按 item 尺寸绘制，高度一致才齐平）。</summary>
+        private const int ToolbarItemHeight = 28;
+
+        private static void FitToolbarItemWidth(ToolStripItem item)
+        {
+            FitToolbarItemSize(item, ToolbarItemHeight);
+        }
+
+        /// <summary>
+        /// 统一设置工具条条目的宽与高。
+        /// <para>
+        /// 【为什么高度也要显式设】只设宽度时高度仍由 AutoSize 按"图标 + 字体 + 内边距"算，
+        /// 不同条目算出来差 2~4px（现场截图：日志查看 / 登录 比胶囊组高一截）。
+        /// 胶囊底色是渲染器按 item 矩形画的，矩形不齐就一眼看出来。
+        /// </para>
+        /// </summary>
+        private static void FitToolbarItemSize(ToolStripItem item, int height)
+        {
+            if (item == null) return;
+            if (item is ToolStripSeparator) return;
+
+            // 下拉框也要压到同一高度：ToolStripComboBox 默认按内部 ComboBox 的字体高度算（实测 40），
+            // 与 28 高的胶囊按钮并排会凸出一截 —— 这才是"高度不一致"最明显的来源。
+            ToolStripComboBox combo = item as ToolStripComboBox;
+            if (combo != null)
+            {
+                combo.AutoSize = false;
+                combo.Height = height;
+                return;   // 宽度由调用方按最长项另算（FitToolbarComboWidth）
+            }
+
+            Size textSize = TextRenderer.MeasureText(item.Text ?? "", UiTheme.FontToolbar);
+            int iconWidth = item.Image != null ? item.Image.Width : 0;
+
+            item.AutoSize = false;
+            item.Width = textSize.Width + iconWidth + (iconWidth > 0 ? 6 : 0)
+                       + item.Padding.Horizontal + 8;
+            item.Height = height;
         }
 
         /// <summary>
@@ -2502,6 +2636,7 @@ namespace VisionPlatform.UI
             // 主界面没走 UiStyle.ApplyForm（手写 ApplyTheme），数值框策略要在这里单独补上。
             // ApplyTree 幂等，构造与主题切换重复调用无副作用。
             NumericInputPolicy.ApplyTree(this);
+            _cameraStatusSignature = "";      // 强制按新主题色重建相机标签
 
             // ---- 窗体与容器 ----
             BackColor = UiTheme.ColorAppBg;

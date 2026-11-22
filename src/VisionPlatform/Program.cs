@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Windows.Forms;
 using VisionPlatform.Core;
-using VisionPlatform.Core.Licensing;
+using VisionLicense;
 using VisionPlatform.Data;
 using VisionPlatform.Recipe;
 using VisionPlatform.UI;
@@ -30,6 +31,29 @@ namespace VisionPlatform
 
         /// <summary>算法库实例，全局共享（模板训练状态保存在其中）。</summary>
         public static Native.VisionAlgo Algo { get; set; }
+
+        /// <summary>
+        /// 当前许可证（<c>LicenseMode=Off</c> 或未读到许可证时为 <c>null</c>）。
+        /// <para>功能位判断统一走 <see cref="HasFeature"/> / <see cref="CanUseDeepLearning"/>，
+        /// 不要在界面各处硬编码字符串。</para>
+        /// </summary>
+        public static VisionLicense.LicenseInfo License { get; set; }
+
+        /// <summary>许可证是否包含某功能位；无许可证（未启用校验）时返回 <c>true</c>，不限制。</summary>
+        public static bool HasFeature(string key)
+        {
+            if (License == null) return true;
+            return License.HasFeature(key);
+        }
+
+        /// <summary>
+        /// 是否允许使用深度学习模块（功能位 <c>deep</c>）。
+        /// <para>传统算法（<c>classic</c>）不在这里判断 —— 它永远包含在许可证里。</para>
+        /// </summary>
+        public static bool CanUseDeepLearning
+        {
+            get { return HasFeature("deep"); }
+        }
     }
 
     internal static class Program
@@ -37,7 +61,13 @@ namespace VisionPlatform
         [STAThread]
         private static void Main()
         {
-            // 第一行：把 thirdparty\* 各子目录加进本进程 DLL 搜索路径。
+            // 【第一件事：目录布局迁移】老版本目录名是小写/旧名（Config / OCRModel / models），
+            // 新版本统一大写并把两类模型收进 MODELS\。必须在 NativeDllPath.Register 与
+            // AppPaths.Ensure 之前做：前者要找 THIRDPARTY，后者会创建新目录让迁移失效。
+            // 迁移细节在日志就绪后补记（此时 Logger 还不可用）。
+            List<string> layoutMoves = Core.PathMigration.EnsureLayout(Core.AppPaths.Root);
+
+            // 第二行：把 THIRDPARTY\* 各子目录加进本进程 DLL 搜索路径。
             // 必须早于任何 P/Invoke（VisionAlgo.Native / sqlite3 都是首次调用时加载）。
             Core.NativeDllPath.Register();
 
@@ -74,6 +104,20 @@ namespace VisionPlatform
             NumericInputPolicy.Install();
 
             Logger.Info("===== VisionPlatform 启动 =====");
+
+            // 目录布局迁移结果（迁移本身发生在 Logger 就绪之前）
+            if (layoutMoves != null)
+            {
+                foreach (string move in layoutMoves)
+                {
+                    // "跳过"是失败项（多为目录被资源管理器/杀软占用）：提级成 WARN，
+                    // 并说明"下次启动会重试"，否则现场只看到名字没改却不知道原因。
+                    if (move.IndexOf("[跳过]", StringComparison.Ordinal) >= 0)
+                        Logger.Warn("[目录迁移] " + move + "（关闭占用该目录的窗口后，下次启动会自动重试）");
+                    else
+                        Logger.Info("[目录迁移] " + move);
+                }
+            }
             Logger.Info("软件版本：" + Application.ProductVersion);
 
             // ---------- 授权校验 ----------
@@ -88,14 +132,11 @@ namespace VisionPlatform
                 return;
             }
 
-            // 命令行 --license：只打开授权窗口（现场查看机器码 / 换证，不必启动整套流程）
+            // 命令行 --license：弹一个只读信息框（现场查机器码 / 看当前授权，不启动整套流程）
             if (Environment.GetCommandLineArgs() != null
                 && Array.IndexOf(Environment.GetCommandLineArgs(), "--license") >= 0)
             {
-                LicenseInfo shown;
-                LicenseStatus st = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out shown);
-                using (var f = new LicenseForm(st, shown, ""))
-                    f.ShowDialog();
+                ShowLicenseInfo(QueryLicense());
                 Logger.Shutdown();
                 LogDb.Shutdown();
                 return;
@@ -190,70 +231,198 @@ namespace VisionPlatform
         /// <summary>
         /// 启动授权校验。返回 false 表示"不允许启动"，调用方应退出。
         /// <para>
-        /// 三种模式（<c>System.LicenseMode</c>）：
-        /// <list type="bullet">
-        /// <item><c>Off</c>（默认）：不校验，只记录一条含机器码的日志（便于现场报给供应商）。</item>
-        /// <item><c>Warn</c>：校验并记录结果，<b>不拦截</b>启动（试运行阶段用）。</item>
-        /// <item><c>Enforce</c>：不可用即弹授权窗口；用户未导入有效许可证则退出。</item>
-        /// </list>
+        /// 三种模式（<c>System.LicenseMode</c>）：<c>Off</c>（只记日志）/ <c>Warn</c>（不拦截）/
+        /// <c>Enforce</c>（默认，不可用即弹窗并退出）。
+        /// </para>
+        /// <para>
+        /// 【验签逻辑不在这里】全部走 <c>VisionLicense.Contract</c> —— 与签发工具共用同一份实现，
+        /// 避免"签发端改了字段、客户端还在按旧格式验"这类只有现场才会暴露的漂移。
         /// </para>
         /// </summary>
         private static bool EnsureLicense()
         {
-            string mode = Core.Licensing.LicenseDefaults.Modes.Normalize(
-                ConfigStore.Current != null && ConfigStore.Current.System != null
-                    ? ConfigStore.Current.System.LicenseMode
-                    : null);
+            SystemSettings sys = ConfigStore.Current != null ? ConfigStore.Current.System : null;
+            string mode = SystemSettings.NormalizeLicenseMode(sys != null ? sys.LicenseMode : null);
 
-            string machineCode = Core.Licensing.MachineFingerprint.GetMachineCode();
-            string licenseFile = Core.Licensing.LicenseStore.GetFilePath(AppPaths.Root);
+            // 文件名兼容：现场习惯写 licence.lic，Contract 只认 license.lic
+            string migrated = LicenseFileCompat.EnsureCanonical(AppPaths.LicenseDir);
+            if (!string.IsNullOrEmpty(migrated)) Logger.Info(migrated);
 
-            if (string.Equals(mode, Core.Licensing.LicenseDefaults.Modes.Off, StringComparison.Ordinal))
+            // 内置公钥 + 指纹阈值（Contract 的静态配置，每次启动设一次）
+            LicenseChecker.SetPublicKey(LicensePublicKey.Value);
+            LicenseChecker.FingerprintThreshold = ProductCatalog.DefaultFingerprintThreshold;
+
+            if (string.Equals(mode, "Off", StringComparison.Ordinal))
             {
-                // 关闭态也要把机器码写进日志：现场报"要个授权"时我们直接能查
-                Logger.Info("授权校验已关闭（LicenseMode=Off）｜机器码 " + machineCode
-                            + "｜许可证 " + licenseFile);
+                // 关闭态不拦截，但仍读一次许可证：功能位（如深度学习）照样按证限制，
+                // 免得开发机"关掉授权"后以为功能位也不生效。
+                LicenseCheckResult probe = QueryLicense();
+                if (probe.IsValid) AppContext.License = probe.Info;
+
+                Logger.Info("授权校验已关闭（LicenseMode=Off）｜机器码 " + SafeMachineCode()
+                            + "｜许可证 " + LicenseFileCompat.CanonicalPath(AppPaths.LicenseDir)
+                            + "｜功能位 " + DescribeFeatures(probe.Info));
                 return true;
             }
 
-            Core.Licensing.LicenseInfo info;
-            Core.Licensing.LicenseStatus status = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out info);
+            LicenseCheckResult result = QueryLicense();
+            Logger.Info("授权校验（" + mode + "）：" + result.Status
+                        + (string.IsNullOrEmpty(result.Message) ? "" : "｜" + result.Message)
+                        + "｜机器码 " + SafeMachineCode());
 
-            Logger.Info("授权校验（" + mode + "）：" + status.Describe()
-                        + (info != null ? "｜" + info.Summary() : "")
-                        + "｜机器码 " + machineCode);
-
-            if (status.IsUsable())
+            if (result.IsValid)
             {
-                // 记录本次成功校验时间（时间回拨检测的基准）；纯函数 Check 不写盘，写盘由这里负责
-                Core.Licensing.LicenseChecker.TouchState(AppPaths.Root);
+                AppContext.License = result.Info;          // 功能位判断的唯一数据源
+                LicenseChecker.TouchState(AppPaths.LicenseDir, DateTime.UtcNow);
+                Logger.Info("授权功能位：" + DescribeFeatures(result.Info));
                 return true;
             }
 
-            if (string.Equals(mode, Core.Licensing.LicenseDefaults.Modes.Warn, StringComparison.Ordinal))
+            if (string.Equals(mode, "Warn", StringComparison.Ordinal))
             {
-                Logger.Warn("授权不可用，但当前为 Warn 模式，继续启动：" + status.Describe());
+                Logger.Warn("授权不可用，但当前为 Warn 模式，继续启动：" + result.Status);
                 return true;
             }
 
-            // Enforce：弹授权窗口，导入成功可直接继续启动
-            using (var form = new LicenseForm(status, info, ""))
+            // Enforce：提示原因 + 本机机器码，然后退出（不提供自助导入，换证统一走供应商）
+            ShowLicenseBlocked(result);
+            return false;
+        }
+
+        /// <summary>
+        /// 查询当前授权（含"首次绑定模式自动激活"）。
+        /// <para>
+        /// 【自动激活的取舍】现场把供应商给的文件丢进 License\ 就该能用，
+        /// 不该要求操作员再点一次"激活"。代价是：文件被复制到第二台机器时，
+        /// Contract 会因为激活段与本机指纹不符判 MachineMismatch（正是我们要的）。
+        /// </para>
+        /// </summary>
+        private static LicenseCheckResult QueryLicense()
+        {
+            LicenseChecker.SetPublicKey(LicensePublicKey.Value);
+
+            LicenseInfo info;
+            LicenseCheckResult r = LicenseChecker.Check(AppPaths.LicenseDir, out info);
+
+            if (r.Status == LicenseStatus.NeedActivation)
             {
-                DialogResult r = form.ShowDialog();
-                if (r != DialogResult.OK && !form.Imported) return false;
+                Logger.Info("许可证为「首次启动绑定」模式，正在激活本机…");
+                r = LicenseChecker.Activate(AppPaths.LicenseDir, out info);
+                if (r.IsValid) Logger.Info("本机激活成功，许可证已与本机绑定");
+            }
+            return r;
+        }
+
+        /// <summary>
+        /// 授权不可用时的提示（系统 MessageBox，无自定义窗体）。
+        /// <para>
+        /// 必须把**本机机器码**一起显示：现场唯一需要它做的事就是"把它报给供应商换证"。
+        /// 不给"导入许可证"按钮是刻意的 —— 换证属于商务动作，避免现场自行塞文件绕过。
+        /// </para>
+        /// </summary>
+        private static void ShowLicenseBlocked(LicenseCheckResult result)
+        {
+            string reason = result != null
+                ? (string.IsNullOrEmpty(result.Message) ? result.Status.ToString() : result.Message)
+                : "未找到许可证";
+
+            string text =
+                "软件无法启动：" + LicenseStatusText(result) + Environment.NewLine + Environment.NewLine
+                + "原因：" + reason + Environment.NewLine + Environment.NewLine
+                + "本机机器码：" + SafeMachineCode() + Environment.NewLine
+                + "许可证文件：" + LicenseFileCompat.CanonicalPath(AppPaths.LicenseDir) + Environment.NewLine + Environment.NewLine
+                + "请把「本机机器码」发给供应商获取许可证文件；" + Environment.NewLine
+                + "拿到 license.lic 后放入上面的许可证目录，再重新启动软件。";
+
+            MessageBox.Show(text, "软件授权", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        /// <summary>只读展示当前授权状态（<c>--license</c> 参数用）。</summary>
+        private static void ShowLicenseInfo(LicenseCheckResult result)
+        {
+            if (result == null)
+            {
+                MessageBox.Show("未获取到授权信息。", "软件授权", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
 
-            Core.Licensing.LicenseInfo after;
-            Core.Licensing.LicenseStatus afterStatus = Core.Licensing.LicenseChecker.Check(AppPaths.Root, out after);
-            if (!afterStatus.IsUsable())
+            string text = "";
+
+            if (result.IsValid && result.Info != null)
             {
-                Logger.Warn("导入后仍不可用：" + afterStatus.Describe());
-                return false;
+                LicenseInfo info = result.Info;
+                string features = DescribeFeatures(info);
+
+                text = "授权有效" + Environment.NewLine + Environment.NewLine
+                     + "许可证编号：" + (string.IsNullOrEmpty(info.LicenseNo) ? "—" : info.LicenseNo) + Environment.NewLine
+                     + "客户：" + (string.IsNullOrEmpty(info.Customer) ? "—" : info.Customer) + Environment.NewLine
+                     + "版本：" + (string.IsNullOrEmpty(info.Edition) ? "—" : info.Edition) + Environment.NewLine
+                     + "有效期：" + (info.IsPerpetual ? "永久"
+                            : info.ExpireUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")) + Environment.NewLine
+                     + "包含模块：" + (features.Length > 0 ? features : "—") + Environment.NewLine + Environment.NewLine
+                     + "本机机器码：" + SafeMachineCode();
+            }
+            else
+            {
+                text = "授权不可用：" + LicenseStatusText(result) + Environment.NewLine + Environment.NewLine
+                     + "原因：" + (string.IsNullOrEmpty(result.Message) ? "—" : result.Message) + Environment.NewLine + Environment.NewLine
+                     + "本机机器码：" + SafeMachineCode() + Environment.NewLine
+                     + "许可证文件：" + LicenseFileCompat.CanonicalPath(AppPaths.LicenseDir);
             }
 
-            Core.Licensing.LicenseChecker.TouchState(AppPaths.Root);
-            Logger.Info("授权已导入并生效：" + (after != null ? after.Summary() : ""));
-            return true;
+            MessageBox.Show(text, "软件授权", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>状态码 → 中文（无自定义窗体后，提示文案由这里统一给）。</summary>
+        private static string LicenseStatusText(LicenseCheckResult result)
+        {
+            if (result == null) return "未找到许可证";
+
+            switch (result.Status)
+            {
+                case LicenseStatus.Valid: return "授权有效";
+                case LicenseStatus.NotFound: return "未找到许可证";
+                case LicenseStatus.Malformed: return "许可证文件已损坏";
+                case LicenseStatus.SignatureInvalid: return "许可证签名无效";
+                case LicenseStatus.VersionUnsupported: return "许可证格式过新，请升级软件";
+                case LicenseStatus.ProductMismatch: return "许可证不属于本产品";
+                case LicenseStatus.MachineMismatch: return "许可证与本机不匹配";
+                case LicenseStatus.Expired: return "许可证已过期";
+                case LicenseStatus.ClockTampered: return "系统时间异常（检测到回拨）";
+                case LicenseStatus.Revoked: return "许可证已吊销";
+                case LicenseStatus.NeedActivation: return "许可证待激活";
+                case LicenseStatus.ActivationFailed: return "许可证激活失败";
+                default: return "授权校验失败";
+            }
+        }
+
+        /// <summary>功能位 → 中文串（日志与提示框共用）。</summary>
+        private static string DescribeFeatures(LicenseInfo info)
+        {
+            if (info == null || info.Features == null || info.Features.Length == 0) return "—";
+
+            string names = "";
+            foreach (KeyValuePair<string, string> kv in ProductCatalog.FeatureKeys)
+            {
+                if (!info.HasFeature(kv.Key)) continue;
+                if (names.Length > 0) names += "、";
+                names += kv.Value;
+            }
+            return names.Length > 0 ? names : "—";
+        }
+
+        /// <summary>采集机器码（只用于日志，失败返回 "(采集失败)"）。</summary>
+        private static string SafeMachineCode()
+        {
+            try
+            {
+                MachineFingerprint fp = MachineFingerprint.Collect();
+                return fp != null ? fp.Code : "(采集失败)";
+            }
+            catch (Exception)
+            {
+                return "(采集失败)";
+            }
         }
 
         /// <summary>根据配置文件中的算法参数，恢复上次使用的配方或检测参数快照。</summary>

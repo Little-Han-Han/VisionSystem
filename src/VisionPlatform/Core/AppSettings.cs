@@ -164,18 +164,20 @@ namespace VisionPlatform.Core
         [System.Runtime.Serialization.DataMember]
         public string LicenseMode { get; set; }
 
-        /// <summary>没有许可证文件时的试用天数（0 = 不给试用，直接按 Missing 处理）。</summary>
-        [System.Runtime.Serialization.DataMember]
-        public int LicenseTrialDays { get; set; }
-
-        /// <summary>机器指纹匹配阈值（默认 3/5；5 = 严格绑定，2 = 宽松）。</summary>
-        [System.Runtime.Serialization.DataMember]
-        public int LicenseMinFingerprintMatch { get; set; }
-
         /// <summary>当前配置是否触发式运行（产线握手模式）。</summary>
         public bool IsTriggeredRun
         {
             get { return NormalizeRunMode(RunMode) == RunModeTriggered; }
+        }
+
+        /// <summary>授权模式归一化：空/未知一律 Enforce（宁严不松）。</summary>
+        public static string NormalizeLicenseMode(string mode)
+        {
+            if (string.IsNullOrWhiteSpace(mode)) return "Enforce";
+            string m = mode.Trim();
+            if (string.Equals(m, "Off", StringComparison.OrdinalIgnoreCase)) return "Off";
+            if (string.Equals(m, "Warn", StringComparison.OrdinalIgnoreCase)) return "Warn";
+            return "Enforce";
         }
 
         public static SystemSettings CreateDefault()
@@ -193,9 +195,7 @@ namespace VisionPlatform.Core
                 DbPath = "",
                 LogRetentionDays = DefaultLogRetentionDays,
                 RunMode = RunModeTriggered,
-                LicenseMode = Core.Licensing.LicenseDefaults.Modes.Off,
-                LicenseTrialDays = 0,
-                LicenseMinFingerprintMatch = Core.Licensing.LicenseDefaults.MinFingerprintMatch
+                LicenseMode = "Enforce"      // 正式发版：无有效许可证不允许启动（Off/Warn 留给调试）
             };
         }
 
@@ -214,11 +214,7 @@ namespace VisionPlatform.Core
                 DbPath = DbPath,
                 LogRetentionDays = LogRetentionDays,
                 RunMode = NormalizeRunMode(RunMode),
-                LicenseMode = Core.Licensing.LicenseDefaults.Modes.Normalize(LicenseMode),
-                LicenseTrialDays = LicenseTrialDays,
-                LicenseMinFingerprintMatch = LicenseMinFingerprintMatch <= 0
-                    ? Core.Licensing.LicenseDefaults.MinFingerprintMatch
-                    : LicenseMinFingerprintMatch
+                LicenseMode = NormalizeLicenseMode(LicenseMode)
             };
         }
     }

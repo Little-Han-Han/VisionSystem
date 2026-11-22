@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using VisionPlatform.Vision;
 
@@ -55,7 +55,7 @@ namespace VisionPlatform.Recipe
                 Name = string.IsNullOrWhiteSpace(name) ? "默认配方" : name,
                 Product = "DEFAULT",
                 Note = "新建配方",
-                CameraId = "SIM-0",
+                CameraId = "",   // 不再默认绑定模拟相机：由用户在「绑定与运行」里选真实相机
                 Inspection = new InspectionConfig(),
                 Modified = DateTime.Now
             };

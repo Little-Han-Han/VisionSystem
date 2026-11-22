@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -23,6 +23,12 @@ namespace VisionPlatform.UI
     {
         private ImageViewer _viewer;
         private Bitmap _source;                 // 当前参与匹配的图像（窗体持有所有权）
+
+        // 本窗体独占的算法上下文。不能用 AppContext.Algo：
+        // 启动后主界面的循环检测/NCC 模板训练会复用那个上下文，形状模型是单槽位，
+        // 调试页训练完到点「执行匹配」之间只要它被人用过，槽位里就不一定是刚训练的模型，
+        // 现场表现为「软件启动后第一次匹配 0 个目标，再点一次又正常」。
+        private VisionAlgo _algo;
         private ShapeModelInfo _modelInfo;
         private List<ShapeModelPoint> _features;   // 模板特征点（独立图层用）
         private DataTable _resultTable;            // 结果表格数据源（支持点列头排序）
@@ -121,6 +127,7 @@ namespace VisionPlatform.UI
             this.numOverlap = MakeNum(0, 2, 0.5m, 2);
             this.numGreediness = MakeNum(0, 1, 0.9m, 2);
             this.chkSubpixel = new System.Windows.Forms.CheckBox();
+            this.chkSymmetric = new System.Windows.Forms.CheckBox();
             this.lblPoseHint = new System.Windows.Forms.Label();
 
             // ---------- 搜索区域 ----------
@@ -181,6 +188,7 @@ namespace VisionPlatform.UI
             AddRow("重叠抑制阈值", this.numOverlap, r++);
             AddRow("贪婪系数(大=快)", this.numGreediness, r++);
             AddFull(this.chkSubpixel, r++);
+            AddFull(this.chkSymmetric, r++);
             AddFull(this.lblPoseHint, r++);
 
             // ---------- 搜索区域 ----------
@@ -227,6 +235,11 @@ namespace VisionPlatform.UI
             this.chkSubpixel.ForeColor = System.Drawing.Color.Gainsboro;
             this.chkSubpixel.Text = "亚像素精化（更慢更准）";
             this.chkSubpixel.Checked = true;
+
+            this.chkSymmetric.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.chkSymmetric.ForeColor = System.Drawing.Color.Gainsboro;
+            this.chkSymmetric.Text = "对称双向评分（类似形状更稳，更慢）";
+            this.chkSymmetric.Checked = false;
 
             this.lblPoseHint.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblPoseHint.ForeColor = System.Drawing.Color.Gray;
@@ -301,6 +314,7 @@ namespace VisionPlatform.UI
             numOverlap.Value = (decimal)p.MaxOverlap;
             numGreediness.Value = (decimal)p.Greediness;
             chkSubpixel.Checked = p.Subpixel;
+            chkSymmetric.Checked = p.Symmetric;
         }
 
         private ShapeParam BuildParam()
@@ -318,6 +332,7 @@ namespace VisionPlatform.UI
             p.MaxOverlap = (double)numOverlap.Value;
             p.Subpixel = chkSubpixel.Checked;
             p.Greediness = (double)numGreediness.Value;
+            p.Symmetric = chkSymmetric.Checked;
             return p;
         }
 
@@ -409,6 +424,15 @@ namespace VisionPlatform.UI
         private void SetSource(Bitmap bmp)
         {
             DisposeSource();
+
+            // 换训练帧即作废旧模型：本地状态与原生槽位必须一起失效。
+            // 只清 _modelInfo 不清原生槽位，会在「换图后没重训就点匹配」时拿到上一张图的模型。
+            if (_algo != null && _modelInfo != null) _algo.ClearShapeModel();
+            _modelInfo = null;
+            _features = null;
+            lblModelInfo.ForeColor = Color.Gold;
+            lblModelInfo.Text = "尚未训练模型";
+
             _source = bmp;
 
             _viewer.SetImage((Bitmap)bmp.Clone(), true);
@@ -580,14 +604,17 @@ namespace VisionPlatform.UI
 
         #region 训练与匹配
 
+        /// <summary>
+        /// 取本窗体独占的算法上下文（<see cref="FlowRunManager"/>/主界面循环检测用的上下文不能共用）。
+        /// </summary>
         private VisionAlgo EnsureAlgo()
         {
-            if (AppContext.Algo != null) return AppContext.Algo;
+            if (_algo != null) return _algo;
 
             try
             {
-                AppContext.Algo = new VisionAlgo();
-                return AppContext.Algo;
+                _algo = new VisionAlgo();
+                return _algo;
             }
             catch (Exception ex)
             {
@@ -613,6 +640,11 @@ namespace VisionPlatform.UI
                 MaxFeatures = (int)numMaxFeatures.Value,
                 MinFeatureDist = (double)numMinFeatureDist.Value
             };
+
+            // 清空本上下文旧模型再训练：单槽位不允许"上一次训练残留"参与这次匹配。
+            // 同时清掉本线程可能残留的算法软超时（流程节点设置的是它自己的线程，这里不影响流程）。
+            VisionAlgo.SetDeadline(0);
+            algo.ClearShapeModel();
 
             var r = algo.CreateShapeModel(_source, TemplateRect, train);
             if (!r.Success)
@@ -669,6 +701,21 @@ namespace VisionPlatform.UI
             {
                 MessageBox.Show(this, "尚未训练形状模型。请先框选模板区域并点击「训练形状模型」。",
                     "形状匹配", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // 与训练侧对称：清掉本线程残留软超时，并复查原生槽位确实还装着刚训练的模型。
+            // 复查失败时把本地状态一并作废，避免"界面显示已训练、原生却是空槽"的假成功。
+            VisionAlgo.SetDeadline(0);
+            var nativeInfo = algo.GetShapeModelInfo();
+            if (!nativeInfo.Success || nativeInfo.Value == null || nativeInfo.Value.PointCount <= 0)
+            {
+                _modelInfo = null;
+                _features = null;
+                lblModelInfo.ForeColor = Color.OrangeRed;
+                lblModelInfo.Text = "模型已失效";
+                lblVerdict.ForeColor = Color.OrangeRed;
+                lblVerdict.Text = "匹配失败：原生槽位里没有有效模型，请重新训练形状模型";
                 return;
             }
 
@@ -753,6 +800,31 @@ namespace VisionPlatform.UI
         {
             base.OnFormClosing(e);
             DisposeSource();
+
+            // 关闭调试页即归还独占上下文；不要碰 AppContext.Algo。
+            ReleaseAlgoContext();
+        }
+
+        /// <summary>
+        /// 释放本窗体独占的算法上下文（幂等）。两条路径都会走到：
+        /// <list type="bullet">
+        /// <item>用户点关闭 → <see cref="OnFormClosing"/>；</item>
+        /// <item>程序化 Dispose（窗体从未 Show 时 Close 即 Dispose）→ Designer 的 Dispose(bool)。</item>
+        /// </list>
+        /// </summary>
+        private void ReleaseAlgoContext()
+        {
+            if (_algo == null) return;
+
+            try
+            {
+                _algo.Dispose();
+            }
+            catch (Exception)
+            {
+                // 原生上下文释放失败不阻断关闭流程
+            }
+            _algo = null;
         }
     }
 }

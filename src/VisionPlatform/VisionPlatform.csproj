@@ -48,6 +48,12 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Management" />
+    <!-- 授权契约（含验签）：源码在 LicenseTool 仓库的 VisionLicense.Contract，
+         签发端与客户端共用同一份实现，避免两边算法漂移。 -->
+    <Reference Include="VisionLicense.Contract">
+      <HintPath>..\..\ThirdParty\License\VisionLicense.Contract.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Camera\CameraGrabGate.cs" />
@@ -84,14 +90,10 @@
     <Compile Include="Communication\TcpClientSession.cs" />
     <Compile Include="Communication\TcpServerSession.cs" />
     <Compile Include="Core\AppPaths.cs" />
-    <Compile Include="Core\Licensing\LicenseChecker.cs" />
-    <Compile Include="Core\Licensing\LicenseDefaults.cs" />
-    <Compile Include="Core\Licensing\LicenseInfo.cs" />
-    <Compile Include="Core\Licensing\LicenseStatus.cs" />
-    <Compile Include="Core\Licensing\LicenseStore.cs" />
-    <Compile Include="Core\Licensing\LicenseToken.cs" />
-    <Compile Include="Core\Licensing\LicenseVerifier.cs" />
-    <Compile Include="Core\Licensing\MachineFingerprint.cs" />
+    <Compile Include="Core\CameraExpectationStatus.cs" />
+    <Compile Include="Core\LicenseFileCompat.cs" />
+    <Compile Include="Core\LicensePublicKey.cs" />
+    <Compile Include="Core\PathMigration.cs" />
     <Compile Include="Core\AssetPaths.cs" />
     <Compile Include="Core\NativeDllPath.cs" />
     <Compile Include="Core\AppSettings.cs" />
@@ -222,7 +224,6 @@
     <Compile Include="UI\LoginForm.Designer.cs">
       <DependentUpon>LoginForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="UI\LicenseForm.cs" />
     <Compile Include="UI\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -291,10 +292,10 @@
   <PropertyGroup>
     <!-- 把 C++ 算法库及其 OpenCV 运行时复制到主程序输出目录 -->
     <PostBuildEvent>xcopy /Y /D /Q "$(ProjectDir)..\..\bin\x64\$(ConfigurationName)\VisionAlgo.Native.dll" "$(TargetDir)" &gt;nul 2&gt;&amp;1
-if not exist "$(TargetDir)thirdparty\opencv" mkdir "$(TargetDir)thirdparty\opencv"
-if /i "$(ConfigurationName)"=="Debug" (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455d.dll" "$(TargetDir)thirdparty\opencv\" &gt;nul 2&gt;&amp;1) else (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455.dll" "$(TargetDir)thirdparty\opencv\" &gt;nul 2&gt;&amp;1)
-if not exist "$(TargetDir)thirdparty\sqlite" mkdir "$(TargetDir)thirdparty\sqlite"
-xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)thirdparty\sqlite\" &gt;nul 2&gt;&amp;1
+if not exist "$(TargetDir)ThirdParty\opencv" mkdir "$(TargetDir)ThirdParty\opencv"
+if /i "$(ConfigurationName)"=="Debug" (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455d.dll" "$(TargetDir)ThirdParty\opencv\" &gt;nul 2&gt;&amp;1) else (xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\OpenCV\bin\x64\opencv_world455.dll" "$(TargetDir)ThirdParty\opencv\" &gt;nul 2&gt;&amp;1)
+if not exist "$(TargetDir)ThirdParty\sqlite" mkdir "$(TargetDir)ThirdParty\sqlite"
+xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\SQLite\sqlite3.dll" "$(TargetDir)ThirdParty\sqlite\" &gt;nul 2&gt;&amp;1
 if exist "$(ProjectDir)..\..\ThirdParty\Communication" if not exist "$(TargetDir)Communication" mkdir "$(TargetDir)Communication"
 if exist "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" xcopy /Y /D /Q "$(ProjectDir)..\..\ThirdParty\Communication\*.dll" "$(TargetDir)Communication\" &gt;nul 2&gt;&amp;1
 exit /b 0</PostBuildEvent>

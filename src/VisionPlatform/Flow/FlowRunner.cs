@@ -1084,7 +1084,7 @@ namespace VisionPlatform.Flow
         {
             try
             {
-                string dir = System.IO.Path.Combine(Core.AppPaths.Root, "models", "ocr");
+                string dir = Core.AppPaths.OcrModelDir;
                 if (!System.IO.Directory.Exists(dir)) return;
 
                 if (string.IsNullOrWhiteSpace(det))
@@ -1645,7 +1645,7 @@ namespace VisionPlatform.Flow
             if (!string.IsNullOrEmpty(hit)) return hit;
 
             // 2) 全局 models/<任务>/
-            return FirstOnnx(System.IO.Path.Combine(Core.AppPaths.Root, "models", DlFolderOf(task)));
+            return FirstOnnx(System.IO.Path.Combine(Core.AppPaths.DlModelDir, DlFolderOf(task)));
         }
 
         private static string FirstOnnx(string dir)
@@ -2341,16 +2341,18 @@ namespace VisionPlatform.Flow
                 bool showStringBox = node.GetBool("ShowStringBox", true);
 
                 // ③ 模板目录：
-                //    默认值（"OCRModel"）→ 优先用「方案\OCRModel\流程名\节点名」（同一流程里的
-                //    不同 OCR 节点各用各的字库）；方案没绑定该流程时自动回落到全局 OCRModel。
+                //    默认值（"MODELS\OCR"）→ 优先用「MODELS\OCR\流程名\节点名」（同一流程里的
+                //    不同 OCR 节点各用各的字库）；方案没绑定该流程时自动回落到全局 MODELS\OCR。
                 //    用户显式填了别的目录 → 原样尊重，不动。
-                string dirName = node.GetString("TemplateDir", "OCRModel");
-                if (string.IsNullOrWhiteSpace(dirName)) dirName = "OCRModel";
+                string dirName = node.GetString("TemplateDir", DefaultOcrDirName);
+                if (string.IsNullOrWhiteSpace(dirName)) dirName = DefaultOcrDirName;
 
                 string dir;
-                if (string.Equals(dirName.Trim(), "OCRModel", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(dirName.Trim(), DefaultOcrDirName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(dirName.Trim(), "OCRModel", StringComparison.OrdinalIgnoreCase))
                 {
-                    string global = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel");
+                    // 旧值 "OCRModel" 也走这条路：目录已合并到 MODELS\OCR
+                    string global = Core.AppPaths.OcrModelDir;
                     string scoped = Core.AssetPaths.OcrDirOf(s.Flow, node);
                     dir = Core.AssetPaths.Ensure(scoped, global);
                 }
@@ -3285,9 +3287,12 @@ namespace VisionPlatform.Flow
             return OpResult<OcrTemplateLoadResult>.Ok(result);
         }
 
+        /// <summary>OCR 字符库默认目录（相对程序目录；节点参数里存的就是这个名字）。</summary>
+        private const string DefaultOcrDirName = "Models\\OCR";
+
         private OpResult<OcrTemplateLoadResult> EnsureOcrTemplates(string dir, string normKey)
         {
-            if (string.IsNullOrWhiteSpace(dir)) dir = "OCRModel";
+            if (string.IsNullOrWhiteSpace(dir)) dir = DefaultOcrDirName;
 
             if (!Directory.Exists(dir))
             {
@@ -4008,7 +4013,8 @@ namespace VisionPlatform.Flow
                 MaxMatches = node.GetInt("MaxMatches", 1),
                 MaxOverlap = node.GetDouble("MaxOverlap", 0.5),
                 Subpixel = node.GetBool("Subpixel", true),
-                Greediness = node.GetDouble("Greediness", 0.9)
+                Greediness = node.GetDouble("Greediness", 0.9),
+                Symmetric = node.GetBool("Symmetric", false)
             };
 
             Rectangle search = ApplyRoi(s, node, "SearchX", "SearchY", "SearchW", "SearchH");

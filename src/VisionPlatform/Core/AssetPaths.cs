@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using VisionPlatform.Flow;
@@ -90,6 +90,21 @@ namespace VisionPlatform.Core
             return Path.Combine(root, kind, flowName, nodeName);
         }
 
+        /// <summary>优先用新路径；新路径不存在而旧路径存在时回退到旧路径（只读兼容，不迁移）。</summary>
+        private static string PreferExisting(string preferred, string legacy)
+        {
+            try
+            {
+                if (System.IO.Directory.Exists(preferred)) return preferred;
+                if (!string.IsNullOrEmpty(legacy) && System.IO.Directory.Exists(legacy)) return legacy;
+            }
+            catch (Exception)
+            {
+                // 路径不可访问时按"新路径"处理，由调用方创建
+            }
+            return preferred;
+        }
+
         /// <summary>模板资产目录（模板匹配、圆/线查找等节点的模板图）。</summary>
         public static string TemplateDirOf(FlowDefinition flow, FlowNode node)
         {
@@ -99,13 +114,20 @@ namespace VisionPlatform.Core
         /// <summary>OCR 字符库目录（同一流程里不同 OCR 节点各自独立）。</summary>
         public static string OcrDirOf(FlowDefinition flow, FlowNode node)
         {
-            return DirOf("OCRModel", flow, node);
+            // 【旧方案兼容】目录合并前 OCR 字符库在 <方案>\OCRModel\...，合并后在 <方案>\Models\OCR\...
+            // 只在"新路径不存在、旧路径存在"时用旧的 —— 否则老方案一升级 OCR 模板就"丢失"。
+            return PreferExisting(
+                DirOf(System.IO.Path.Combine("Models", "OCR"), flow, node),
+                DirOf("OCRModel", flow, node));
         }
 
         /// <summary>深度学习模型目录（按节点分，便于同一流程跑不同模型）。</summary>
         public static string ModelDirOf(FlowDefinition flow, FlowNode node)
         {
-            return DirOf("Models", flow, node);
+            // 同上：合并前是 <方案>\Models\...，合并后是 <方案>\Models\DL\...
+            return PreferExisting(
+                DirOf(System.IO.Path.Combine("Models", "DL"), flow, node),
+                DirOf("Models", flow, node));
         }
 
         /// <summary>确保目录存在；返回最终可用路径（dir 为空时返回 fallback）。</summary>

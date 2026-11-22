@@ -603,6 +603,198 @@ bool ScorePoseFast(const DirLevel& lv, const Pose& pose,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// 反向边缘覆盖（Symmetric 选项专用）
+//
+// 原 ScorePose 只回答「模板边缘在图像里有没有被支持」，目标上多出来的边缘不扣分。
+// 对纯圆模板，带十字/四耳的圆会把圆边缘全部支持，得分 0.98 —— 与真圆几乎不可分。
+// 反向评分反过来问：候选框内的图像边缘点，有多少能被某条模板边缘解释？
+// 多出来的内部线条在这里没有对应模板点，覆盖率会显著下降。
+//
+// 只在精修后的 top-N 候选上做，粗扫 / 金字塔精化路径完全不变；默认关闭。
+// ---------------------------------------------------------------------------
+const float kReverseRadiusPx = 3.0f;        // 允许的训练/匹配边缘定位误差（像素）
+const float kReverseMinCos = 0.70f;         // 梯度方向近似一致（约 46° 以内）
+const float kReverseMinGrad = 20.0f;        // 只把明显梯度像素当"图像边缘"，与 Canny 低阈值同量级
+const int   kReverseMaxSamples = 20000;     // 单个候选最多采样多少图像边缘像素
+
+struct TemplatePointGrid {
+    int minX, minY, cols, rows;
+    float cell;
+    std::vector<int> start;   // CSR 行偏移，长度 = cols*rows+1
+    std::vector<int> ids;
+
+    TemplatePointGrid() : minX(0), minY(0), cols(0), rows(0), cell(1.0f) {}
+
+    void Build(const Pose& pose)
+    {
+        start.clear();
+        ids.clear();
+        if (pose.ox.empty()) return;
+
+        float loX = pose.ox[0], hiX = pose.ox[0];
+        float loY = pose.oy[0], hiY = pose.oy[0];
+        for (size_t i = 1; i < pose.ox.size(); ++i)
+        {
+            loX = std::min(loX, pose.ox[i]); hiX = std::max(hiX, pose.ox[i]);
+            loY = std::min(loY, pose.oy[i]); hiY = std::max(hiY, pose.oy[i]);
+        }
+
+        minX = (int)std::floor(loX);
+        minY = (int)std::floor(loY);
+        cell = std::max(4.0f, kReverseRadiusPx * 3.0f);
+        cols = (int)std::ceil((hiX - (float)minX) / cell) + 1;
+        rows = (int)std::ceil((hiY - (float)minY) / cell) + 1;
+        if (cols < 1) cols = 1;
+        if (rows < 1) rows = 1;
+
+        start.assign((size_t)cols * (size_t)rows + 1, 0);
+        for (size_t i = 0; i < pose.ox.size(); ++i)
+        {
+            int gx = (int)std::floor((pose.ox[i] - (float)minX) / cell);
+            int gy = (int)std::floor((pose.oy[i] - (float)minY) / cell);
+            gx = gx < 0 ? 0 : (gx >= cols ? cols - 1 : gx);
+            gy = gy < 0 ? 0 : (gy >= rows ? rows - 1 : gy);
+            ++start[(size_t)gy * (size_t)cols + (size_t)gx + 1];
+        }
+        for (size_t i = 1; i < start.size(); ++i) start[i] += start[i - 1];
+
+        ids.resize(pose.ox.size());
+        std::vector<int> cursor(start.begin(), start.end() - 1);
+        for (size_t i = 0; i < pose.ox.size(); ++i)
+        {
+            int gx = (int)std::floor((pose.ox[i] - (float)minX) / cell);
+            int gy = (int)std::floor((pose.oy[i] - (float)minY) / cell);
+            gx = gx < 0 ? 0 : (gx >= cols ? cols - 1 : gx);
+            gy = gy < 0 ? 0 : (gy >= rows ? rows - 1 : gy);
+            const size_t c = (size_t)gy * (size_t)cols + (size_t)gx;
+            ids[(size_t)cursor[c]++] = (int)i;
+        }
+    }
+
+    // 查询候选点附近是否有模板点，返回方向余弦的最大值
+    float BestCos(const cv::Mat& gx, const cv::Mat& gy, const Pose& pose,
+                  float qx, float qy, int ix, int iy) const
+    {
+        if (cols <= 0 || rows <= 0 || start.empty()) return 0.0f;
+
+        int cx0 = (int)std::floor((qx - (float)minX) / cell) - 1;
+        int cy0 = (int)std::floor((qy - (float)minY) / cell) - 1;
+        int cx1 = cx0 + 2;   // cell >= 2*r + 1，3×3 格一定覆盖半径 r
+        int cy1 = cy0 + 2;
+
+        const float vx = gx.ptr<float>(iy)[ix];
+        const float vy = gy.ptr<float>(iy)[ix];
+        const float mag = std::sqrt(vx * vx + vy * vy);
+        if (mag <= 1e-6f) return 0.0f;
+
+        const float r2 = kReverseRadiusPx * kReverseRadiusPx;
+        float best = 0.0f;
+
+        for (int yy = cy0; yy <= cy1; ++yy)
+        {
+            if (yy < 0 || yy >= rows) continue;
+            for (int xx = cx0; xx <= cx1; ++xx)
+            {
+                if (xx < 0 || xx >= cols) continue;
+                const size_t c = (size_t)yy * (size_t)cols + (size_t)xx;
+                for (int k = start[c]; k < start[c + 1]; ++k)
+                {
+                    const int i = ids[(size_t)k];
+                    const float dx = pose.ox[(size_t)i] - qx;
+                    const float dy = pose.oy[(size_t)i] - qy;
+                    if (dx * dx + dy * dy > r2) continue;
+
+                    float cosv = (pose.rx[(size_t)i] * vx + pose.ry[(size_t)i] * vy) / mag;
+                    if (cosv > best) best = cosv > 1.0f ? 1.0f : cosv;
+                }
+            }
+        }
+        return best;
+    }
+};
+
+float ReverseCoverage(const GradLevel& lv, const Pose& pose,
+                      float cx, float cy, double halfW, double halfH, double angleDeg)
+{
+    const int iw = lv.gx.cols;
+    const int ih = lv.gy.rows;
+    if (iw <= 0 || ih <= 0 || pose.ox.empty()) return 0.0f;
+
+    TemplatePointGrid grid;
+    grid.Build(pose);
+
+    const double a = angleDeg * kDeg2Rad;
+    const float ca = (float)std::cos(a);
+    const float sa = (float)std::sin(a);
+    const float r = kReverseRadiusPx;
+
+    const double rad = std::sqrt(halfW * halfW + halfH * halfH) + r;
+    int x0 = (int)std::floor((double)cx - rad);
+    int y0 = (int)std::floor((double)cy - rad);
+    int x1 = (int)std::ceil((double)cx + rad);
+    int y1 = (int)std::ceil((double)cy + rad);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= iw) x1 = iw - 1;
+    if (y1 >= ih) y1 = ih - 1;
+    if (x0 > x1 || y0 > y1) return 0.0f;
+
+    const long long area = (long long)(x1 - x0 + 1) * (long long)(y1 - y0 + 1);
+    int step = 1;
+    if (area > kReverseMaxSamples)
+        step = (int)std::ceil(std::sqrt((double)area / (double)kReverseMaxSamples));
+    if (step < 1) step = 1;
+
+    const float hw = (float)halfW;
+    const float hh = (float)halfH;
+    int total = 0;
+    int explained = 0;
+
+    for (int yy = y0; yy <= y1; yy += step)
+    {
+        const float* px = lv.gx.ptr<float>(yy);
+        const float* py = lv.gy.ptr<float>(yy);
+        for (int xx = x0; xx <= x1; xx += step)
+        {
+            const float vx = px[xx];
+            const float vy = py[xx];
+            // 与训练侧 Canny 的低阈值同量级：只评价真正的边缘像素。
+            // 若用"非平坦"判据，压缩噪声/抗锯齿梯度会撑大分母，覆盖率被稀释到 0.1 以下。
+            if (vx * vx + vy * vy < kReverseMinGrad * kReverseMinGrad) continue;
+
+            const float dx = (float)xx - cx;
+            const float dy = (float)yy - cy;
+
+            // 世界坐标 → 模板局部坐标（BuildPose 用的旋转的逆变换）
+            const float lx = dx * ca + dy * sa;
+            const float ly = -dx * sa + dy * ca;
+            if (lx < -hw - r || lx > hw + r || ly < -hh - r || ly > hh + r) continue;
+
+            ++total;
+            if (grid.BestCos(lv.gx, lv.gy, pose, dx, dy, xx, yy) >= kReverseMinCos)
+                ++explained;
+        }
+    }
+
+    const float rev = total > 0 ? (float)explained / (float)total : 0.0f;
+
+    // 仅诊断：VA_SHAPE_SYM_DEBUG=1 时打印反向覆盖的采样规模与坐标口径。
+    // 正常路径完全不进入（静态布尔只初始化一次）。
+    static const bool dbg = EnvFlag("VA_SHAPE_SYM_DEBUG");
+    if (dbg)
+    {
+        std::fprintf(stderr, "[sym] c=(%.1f,%.1f) a=%.1f pts=%zu grid=(%d,%d %dx%d) "
+                             "sample=%d/%d rev=%.3f p0=(%.1f,%.1f)\n",
+                     cx, cy, angleDeg, pose.ox.size(), grid.minX, grid.minY, grid.cols, grid.rows,
+                     explained, total, rev,
+                     pose.ox.empty() ? 0.0f : pose.ox[0],
+                     pose.oy.empty() ? 0.0f : pose.oy[0]);
+    }
+
+    return rev;
+}
+
 } // anonymous namespace
 
 namespace va {
@@ -1136,6 +1328,9 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
         if (greediness < 0.0) greediness = 0.0;
         if (greediness > 1.0) greediness = 1.0;
 
+        // Symmetric 是可选精评：默认关闭，绝不改变粗扫 / 精化路径。
+        const bool symmetric = (param->symmetric != 0);
+
         // ---------- 6. 最粗层全局扫描 ----------
         // 循环次序：位置在外、姿态在内 —— 这样才能拿「本位置当前最优」当剪枝阈值，
         // 也能让同一位置的所有姿态共处一个并行域（原实现每个姿态 fork/join 一次）。
@@ -1588,6 +1783,19 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
             }
         }
 
+        // Symmetric 只重评前向分最高的少量候选：反向覆盖要遍历候选框内图像边缘，
+        // 成本与 (候选数 × 模板面积) 成正比，不能对 keep 个候选全做。
+        // 先按前向分排序，保证留下的是最可能进入最终结果的那些。
+        int symmetricLimit = 0;
+        if (symmetric)
+        {
+            std::sort(cands.begin(), cands.end(), ScoreBetter);
+            symmetricLimit = maxMatches * 12;
+            if (symmetricLimit < 8) symmetricLimit = 8;
+            if (symmetricLimit > 64) symmetricLimit = 64;
+            if (symmetricLimit > (int)cands.size()) symmetricLimit = (int)cands.size();
+        }
+
         // ---------- 9. 最细层诚实重评 ----------
         // 上面每一级都带阈值剪枝，返回的分数只是「不低于真实分」的近似值（剪得越早越乐观）。
         // 下游拿 score 判 OK/NG，必须是真实分：这里用 threshold=0、abandonAvg=0
@@ -1607,9 +1815,26 @@ int FindShapeModel(Context* ctx, const VA_Image* gray, const VA_ShapeParam* para
 
                 float s = 0.0f;
                 if (ScorePose(grads[0], pl, (float)c.cx, (float)c.cy, 0.0f, 0.0f, s))
-                    c.score = s;
+                {
+                    if (symmetric && ci < symmetricLimit)
+                    {
+                        // 反向覆盖：候选框内的图像边缘有多少能被模板边缘解释。
+                        // 用几何平均合成，既保留自匹配的近似 1.0，又让"目标多出边缘"显著扣分。
+                        const double halfW = 0.5 * ctx->shape.width * c.scale;
+                        const double halfH = 0.5 * ctx->shape.height * c.scale;
+                        float rev = ReverseCoverage(grads[0], pl, (float)c.cx, (float)c.cy,
+                                                    halfW, halfH, c.angle);
+                        c.score = (float)std::sqrt((double)s * (double)rev);
+                    }
+                    else
+                    {
+                        c.score = s;
+                    }
+                }
                 else
+                {
                     c.score = 0.0;   // 覆盖率不足（目标大半出画）→ 不予输出
+                }
             }
         }
 

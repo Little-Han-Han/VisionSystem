@@ -1,4 +1,4 @@
-namespace VisionPlatform.UI
+﻿namespace VisionPlatform.UI
 {
     partial class AlgoForm
     {
@@ -6,6 +6,10 @@ namespace VisionPlatform.UI
 
         protected override void Dispose(bool disposing)
         {
+            // 【必须在这里也释放】窗体从未 Show 时 Close() 是直接 Dispose，**不触发
+            // OnFormClosing** —— 原来的释放逻辑只写在 OnFormClosing 里，程序化 Dispose
+            // （用例 / 宿主统一销毁）会把独占的原生算法上下文漏掉。
+            if (disposing) ReleaseAlgoContext();
             if (disposing && (components != null)) components.Dispose();
             base.Dispose(disposing);
         }
@@ -134,7 +138,7 @@ namespace VisionPlatform.UI
 
         #endregion
 
-        private const int kParamRows = 42;
+        private const int kParamRows = 43;
         private const int kRowHeight = 28;
 
         // ---------- 布局辅助（手工编写，便于按行追加参数）----------
@@ -217,6 +221,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.NumericUpDown numOverlap;
         private System.Windows.Forms.NumericUpDown numGreediness;
         private System.Windows.Forms.CheckBox chkSubpixel;
+        private System.Windows.Forms.CheckBox chkSymmetric;
         private System.Windows.Forms.Label lblPoseHint;
 
         private System.Windows.Forms.NumericUpDown numSrchX;

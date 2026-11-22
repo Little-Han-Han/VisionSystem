@@ -452,6 +452,8 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Dbl("MaxOverlap", "重叠阈值", 0, 1, 3, 0.05m, "0.5", "", true));
             t.Fields.Add(Dbl("Greediness", "贪婪系数", 0, 1, 3, 0.05m, "0.9", "0 = 关闭启发式（最慢最稳）", true));
             t.Fields.Add(Bool("Subpixel", "亚像素精化", "1", "", true));
+            t.Fields.Add(Bool("Symmetric", "对称双向评分", "0",
+                "1 = 额外检查图像上多出的边缘；区分圆/带十字圆等细微差别更稳，但更慢。默认关闭以保持旧行为。", true));
 
             // 这一组刻意只有一行 Action：模板状态的唯一真源是 T03 的模板状态卡片。
             // 这里如果再加一行 Note 显示状态，就成了两处显示同一状态，刷新时机一旦不同步

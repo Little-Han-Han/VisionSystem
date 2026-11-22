@@ -58,6 +58,27 @@ namespace VisionPlatform.Core
         /// </summary>
         public static string LicenseDir { get { return Path.Combine(Root, "License"); } }
 
+        /// <summary>图片保存目录 = <c>&lt;程序目录&gt;\IMAGES</c>。</summary>
+        public static string ImageDir { get { return Path.Combine(Root, "Images"); } }
+
+        /// <summary>标定记录目录 = <c>&lt;程序目录&gt;\CALIBRATIONS</c>。</summary>
+        public static string CalibDir { get { return Path.Combine(Root, "Calibrations"); } }
+
+        /// <summary>模型根目录 = <c>&lt;程序目录&gt;\MODELS</c>（OCR 与深度学习两类模型都收在这里）。</summary>
+        public static string ModelsDir { get { return Path.Combine(Root, "Models"); } }
+
+        /// <summary>OCR 字符库根目录 = <c>&lt;程序目录&gt;\MODELS\OCR</c>（原 <c>OCRModel</c>）。</summary>
+        public static string OcrModelDir { get { return Path.Combine(ModelsDir, "OCR"); } }
+
+        /// <summary>深度学习模型根目录 = <c>&lt;程序目录&gt;\MODELS\DL</c>（原 <c>models</c>）。</summary>
+        public static string DlModelDir { get { return Path.Combine(ModelsDir, "DL"); } }
+
+        /// <summary>第三方原生库目录 = <c>&lt;程序目录&gt;\THIRDPARTY</c>（opencv / openvino / sqlite / vcruntime）。</summary>
+        public static string ThirdPartyDir { get { return Path.Combine(Root, "ThirdParty"); } }
+
+        /// <summary>通讯协议插件目录 = <c>&lt;程序目录&gt;\COMMUNICATION</c>。</summary>
+        public static string CommPluginDir { get { return Path.Combine(Root, "Communication"); } }
+
         /// <summary>配方目录。</summary>
         public static string RecipeDir { get { return Path.Combine(Root, "Recipes"); } }
 
@@ -109,7 +130,7 @@ namespace VisionPlatform.Core
         /// </summary>
         public static string OcrCharsDir
         {
-            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OCRModel"); }
+            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models", "OCR"); }
         }
 
         /// <summary>确保目录存在。</summary>
@@ -123,6 +144,10 @@ namespace VisionPlatform.Core
                 if (!Directory.Exists(TemplateDir)) Directory.CreateDirectory(TemplateDir);
                 if (!Directory.Exists(ConfigDir)) Directory.CreateDirectory(ConfigDir);
                 if (!Directory.Exists(LicenseDir)) Directory.CreateDirectory(LicenseDir);
+                if (!Directory.Exists(ImageDir)) Directory.CreateDirectory(ImageDir);
+                if (!Directory.Exists(CalibDir)) Directory.CreateDirectory(CalibDir);
+                if (!Directory.Exists(OcrModelDir)) Directory.CreateDirectory(OcrModelDir);
+                if (!Directory.Exists(DlModelDir)) Directory.CreateDirectory(DlModelDir);
 
                 // 一次性迁移：老版本的 appconfig.json 在程序根目录，静默搬到 Config\。
                 // 只在"新位置还没有文件"时搬，避免覆盖用户已经在用的新配置。
