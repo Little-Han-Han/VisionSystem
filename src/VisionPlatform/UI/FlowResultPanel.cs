@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -6,6 +6,8 @@ using System.Windows.Forms;
 using VisionPlatform.Flow;
 using VisionSystem.Controls.Geometry;
 
+// System.Globalization.RegionInfo 与本项目的 Flow.RegionInfo 同名，显式指定
+using RegionInfo = VisionPlatform.Flow.RegionInfo;
 namespace VisionPlatform.UI
 {
     /// <summary>
@@ -52,6 +54,9 @@ namespace VisionPlatform.UI
         private bool _filling;
 
         // 结果缓存：key = 节点 Id。换流程清空、重跑按节点覆盖、切节点只读。
+        private string _diagNodeId = "";
+        private int _diagRegions = -2;
+
         private readonly Dictionary<string, NodeResultCache> _cache =
             new Dictionary<string, NodeResultCache>(StringComparer.Ordinal);
 
@@ -193,12 +198,22 @@ namespace VisionPlatform.UI
             var colGeo = new DataGridViewTextBoxColumn();
             colGeo.HeaderText = "位置 · 尺寸";
             colGeo.Name = "colGeo";
-            colGeo.FillWeight = 50f;
+            colGeo.FillWeight = 46f;
             colGeo.MinimumWidth = 90;
+
+            // 形状特征列（圆度/矩形度/长宽比/占空比/凸度）：
+            // 只有 Blob 这类"逐目标有形状属性"的节点会填，其它节点留空。
+            var colShape = new DataGridViewTextBoxColumn();
+            colShape.HeaderText = "形状特征";
+            colShape.Name = "colShape";
+            colShape.FillWeight = 42f;
+            colShape.MinimumWidth = 110;
+            colShape.DefaultCellStyle.Font = UiTheme.FontMono;
 
             grid.Columns.Add(colNo);
             grid.Columns.Add(colMetric);
             grid.Columns.Add(colGeo);
+            grid.Columns.Add(colShape);
 
             // 选中行 → 高亮对应图形（表格里一行就是一个目标，天然对应 Shapes 下标）
             grid.SelectionChanged += OnGridSelectionChanged;
@@ -373,6 +388,36 @@ namespace VisionPlatform.UI
             c.Shapes = copy;
             c.ShapesTruncated = truncated;
 
+            // 【临时诊断】表格"没有特征值"时靠它定位：快照里到底有没有 Regions。
+            // 只在"换了节点"或计数变化时记一条，不刷屏。
+            int regionCount = snap.Regions != null ? snap.Regions.Count : -1;
+            if (_diagNodeId != c.NodeId || _diagRegions != regionCount)
+            {
+                _diagNodeId = c.NodeId;
+                _diagRegions = regionCount;
+                try
+                {
+                    Core.Logger.Info("[结果表] " + c.NodeName + " type=" + type
+                                     + " shapes=" + (c.Shapes != null ? c.Shapes.Count : -1)
+                                     + " regions=" + regionCount);
+                }
+                catch (Exception) { }
+            }
+
+            // 逐目标结果（含形状特征）：结果表格据此显示面积/圆度/矩形度/长宽比…
+            // 【防御】链尾/汇总快照曾经只带 Shapes 不带 Regions，把已解析好的表格覆盖成空。
+            // 判据：新快照没有 Regions，但缓存里有、且目标图形数一致 → 认为这是同一次运行的
+            // 补充快照，保留原 Regions（宁可显示旧值，也不要把特征列清空）。
+            var incoming = (snap.Regions != null) ? snap.Regions : new List<RegionInfo>();
+            bool keepExisting = incoming.Count == 0
+                                && c.Regions != null && c.Regions.Count > 0
+                                && c.Shapes != null && copy.Count == c.Shapes.Count;
+
+            if (!keepExisting)
+            {
+                c.Regions = new List<RegionInfo>(incoming);
+            }
+
             TryUpdateThumbnail(c, isNew);
 
             if (string.IsNullOrEmpty(_shownNodeId))
@@ -487,8 +532,74 @@ namespace VisionPlatform.UI
             FillGrid(c);
         }
 
+        /// <summary>取形状的标签（无标签返回 ""）。</summary>
+        private static string LabelOf(IGeometryShape s)
+        {
+            var rect = s as RectangleShape;
+            if (rect != null) return rect.Label ?? "";
+            var rr = s as RotatedRectShape;
+            if (rr != null) return rr.Label ?? "";
+            return "";
+        }
+
         /// <summary>
-        /// 把"当前节点的全部目标"填进表格：一行一个目标，三列（序号 / 判据 / 位置·尺寸）。
+        /// 是否算"一个目标"。规则：矩形 / 旋转矩形且有非空标签。
+        /// <para>Blob 的最小外接矩形、深度学习的效果框等辅助图形没有标签，不能进表格。</para>
+        /// </summary>
+        private static bool HasTargetLabel(IGeometryShape s)
+        {
+            if (!(s is RectangleShape) && !(s is RotatedRectShape)) return false;
+            return !string.IsNullOrEmpty(LabelOf(s));
+        }
+
+        /// <summary>从 <c>#12 …</c> 解析出 12；没有前缀用 <paramref name="fallback"/>。</summary>
+        private static int TryParseIndexPrefix(string label, int fallback)
+        {
+            if (string.IsNullOrEmpty(label) || label[0] != '#') return fallback;
+
+            int end = 1;
+            while (end < label.Length && char.IsDigit(label[end])) end++;
+            if (end == 1) return fallback;
+
+            int v;
+            return int.TryParse(label.Substring(1, end - 1), out v) ? v : fallback;
+        }
+
+        /// <summary>第 2 列：面积 / 周长（Blob 这类逐目标节点的主判据）。</summary>
+        private static string DescribeRegionMetric(RegionInfo r)
+        {
+            if (r == null) return "";
+            if (r.Perimeter > 0)
+                return string.Format(CultureInfo.InvariantCulture, "A={0:0} P={1:0}", r.Area, r.Perimeter);
+            return string.Format(CultureInfo.InvariantCulture, "A={0:0}", r.Area);
+        }
+
+        /// <summary>第 3 列：中心 / 尺寸 / 角度。</summary>
+        private static string DescribeRegionGeo(RegionInfo r)
+        {
+            if (r == null) return "";
+            return string.Format(CultureInfo.InvariantCulture,
+                "({0:0.0}, {1:0.0}) {2:0}×{3:0} ∠{4:0.0}°",
+                r.Cx, r.Cy, r.Width, r.Height, r.Angle);
+        }
+
+        /// <summary>第 4 列：圆度 / 矩形度 / 长宽比 / 占空比 / 凸度（0 表示该节点不算这些）。</summary>
+        private static string DescribeRegionFeatures(RegionInfo r)
+        {
+            if (r == null) return "";
+            if (r.Rectangularity <= 0 && r.AspectRatio <= 0 && r.Solidity <= 0) return "";
+
+            var sb = new System.Text.StringBuilder();
+            if (r.Circularity > 0) sb.AppendFormat(CultureInfo.InvariantCulture, "圆 {0:0.00}", r.Circularity);
+            if (r.Rectangularity > 0) sb.AppendFormat(CultureInfo.InvariantCulture, "  矩 {0:0.00}", r.Rectangularity);
+            if (r.AspectRatio > 0) sb.AppendFormat(CultureInfo.InvariantCulture, "  比 {0:0.00}", r.AspectRatio);
+            if (r.FillRate > 0) sb.AppendFormat(CultureInfo.InvariantCulture, "  占 {0:0.00}", r.FillRate);
+            if (r.Solidity > 0) sb.AppendFormat(CultureInfo.InvariantCulture, "  凸 {0:0.00}", r.Solidity);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 把"当前节点的全部目标"填进表格：一行一个目标（序号 / 判据 / 位置·尺寸 / 形状特征）。
         /// <para>填表期间置 <see cref="_filling"/>，避免 SelectionChanged 回灌出假的"选中"事件。</para>
         /// </summary>
         private void FillGrid(NodeResultCache c)
@@ -503,27 +614,60 @@ namespace VisionPlatform.UI
 
                 if (c == null)
                 {
-                    grid.Rows.Add("", "该节点尚未运行", "");
+                    grid.Rows.Add("", "该节点尚未运行", "", "");
                     return;
                 }
 
-                int total = (c.Shapes != null) ? c.Shapes.Count : 0;
-                if (total == 0)
+                // 【优先用 Regions】它带完整形状特征（面积/周长/圆度/矩形度/长宽比/占空比/凸度），
+                // 旧实现只能从 Shapes 反推几何，"输出太少"正是这个原因。
+                if (c.Regions != null && c.Regions.Count > 0)
                 {
-                    grid.Rows.Add("", "该节点没有可定位的目标", "");
+                    int rlimit = Math.Min(c.Regions.Count, MaxDetailRows);
+                    for (int i = 0; i < rlimit; i++)
+                    {
+                        RegionInfo r = c.Regions[i];
+                        grid.Rows.Add(
+                            r.Index > 0 ? r.Index.ToString(CultureInfo.InvariantCulture) : (i + 1).ToString(CultureInfo.InvariantCulture),
+                            DescribeRegionMetric(r),
+                            DescribeRegionGeo(r),
+                            DescribeRegionFeatures(r));
+                    }
+
+                    if (c.Regions.Count > rlimit)
+                        grid.Rows.Add("", "（共 " + c.Regions.Count + " 条，仅显示前 " + rlimit + " 条）", "", "");
                     return;
                 }
 
-                int limit = Math.Min(total, MaxDetailRows);
+                // 只用"带标签的目标图形"：Blob 会额外画最小外接矩形（无标签），
+                // 若按 Shapes 下标逐行会出现序号跳号、混入辅助框（现场截图：14/15/16/17/2…）
+                var targets = new List<IGeometryShape>();
+                if (c.Shapes != null)
+                {
+                    foreach (IGeometryShape sp in c.Shapes)
+                    {
+                        if (sp == null) continue;
+                        if (!HasTargetLabel(sp)) continue;
+                        targets.Add(sp);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    grid.Rows.Add("", "该节点没有可定位的目标", "", "");
+                    return;
+                }
+
+                int limit = Math.Min(targets.Count, MaxDetailRows);
                 for (int i = 0; i < limit; i++)
                 {
                     string metric, geo;
-                    DescribeShapeParts(c.Shapes[i], out metric, out geo);
-                    grid.Rows.Add((i + 1).ToString(CultureInfo.InvariantCulture), metric, geo);
+                    DescribeShapeParts(targets[i], out metric, out geo);
+                    int no = TryParseIndexPrefix(LabelOf(targets[i]), i + 1);
+                    grid.Rows.Add(no.ToString(CultureInfo.InvariantCulture), metric, geo, "");
                 }
 
-                if (total > limit || c.ShapesTruncated)
-                    grid.Rows.Add("", "（共 " + total + " 条，仅显示前 " + limit + " 条）", "");
+                if (targets.Count > limit || c.ShapesTruncated)
+                    grid.Rows.Add("", "（共 " + targets.Count + " 条，仅显示前 " + limit + " 条）", "", "");
             }
             finally
             {
@@ -542,14 +686,19 @@ namespace VisionPlatform.UI
 
             int idx = grid.CurrentRow != null ? grid.CurrentRow.Index : -1;
             NodeResultCache c = GetCache(_shownNodeId);
-            int total = (c != null && c.Shapes != null) ? c.Shapes.Count : 0;
+            if (c == null || idx < 0) { FireShapeSelected("", -1); return; }
 
-            if (idx < 0 || idx >= total)
+            // Blob 会同时画"轴对齐框 + 最小外接矩形"，Shapes 数量 ≠ 目标数，
+            // 所以优先用 RegionInfo.ShapeIndex 拿真实下标；没有就回退到行号。
+            if (c.Regions != null && idx < c.Regions.Count)
             {
-                FireShapeSelected("", -1);
+                int si = c.Regions[idx].ShapeIndex;
+                FireShapeSelected(c.NodeId, si >= 0 ? si : idx);
                 return;
             }
 
+            int total = (c.Shapes != null) ? c.Shapes.Count : 0;
+            if (idx >= total) { FireShapeSelected("", -1); return; }
             FireShapeSelected(c.NodeId, idx);
         }
 

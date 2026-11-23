@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using VisionPlatform.Native;
@@ -69,7 +69,13 @@ namespace VisionPlatform.Flow
         public static readonly Color ColorRefCross = Color.Cyan;
 
         /// <summary>变换后的 ROI 轮廓（青，虚线）。</summary>
-        public static readonly Color ColorRoi = Color.Cyan;
+        /// <summary>
+        /// 搜索区域 / ROI 轮廓颜色：<b>品红</b>。
+        /// <para>【为什么不沿用青色】检测结果框（Blob / 匹配框）本身是青的，ROI 再用青色就分不清
+        /// "哪里是搜索范围、哪里是找到的目标"。虚线的方案成本高（形状类要加 DashStyle 并改渲染器），
+        /// 先用颜色区分：ROI 品红、目标框青、最小外接矩形琥珀。</para>
+        /// </summary>
+        public static readonly Color ColorRoi = Color.FromArgb(236, 112, 255);
 
         /// <summary>拟合结果（直线 / 圆）的颜色。</summary>
         public static readonly Color ColorFit = Color.DeepSkyBlue;

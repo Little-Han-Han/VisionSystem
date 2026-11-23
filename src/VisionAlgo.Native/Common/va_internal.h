@@ -236,6 +236,8 @@ int Preprocess(Context* ctx, const VA_Image* src, VA_Image* dst,
 
 int BlobAnalyze(Context* ctx, const VA_Image* gray, double minArea, double maxArea,
                 VA_Blob* outBlobs, int maxCount, int* outCount);
+int BlobAnalyzeEx(Context* ctx, const VA_Image* gray, double minArea, double maxArea,
+                  VA_Blob* outBlobs, int maxCount, int* outCount, int* outLabels);
 
 int Sharpness(Context* ctx, const VA_Image* gray, double* outScore);
 

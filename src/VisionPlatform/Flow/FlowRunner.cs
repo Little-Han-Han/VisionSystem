@@ -4549,6 +4549,12 @@ namespace VisionPlatform.Flow
             double minCircularity = node.GetDouble("MinCircularity", 0);
             int maxCount = node.GetInt("MaxCount", 50);
 
+            // 显示与修正开关（v1.0.13）
+            bool displayMask      = node.GetBool("DisplayMask", true);
+            bool displayMinRect   = node.GetBool("DisplayMinRect", true);
+            bool showFeatureLabel = node.GetBool("ShowFeatureLabel", false);
+            bool applyCorrection  = node.GetBool("ApplyCorrection", true);
+
             Bitmap work = null;
             Bitmap cropped = null;
             try
@@ -4585,7 +4591,7 @@ namespace VisionPlatform.Flow
                 int roiH = node.GetInt("RoiH", 0);
 
                 // 位置修正带旋转时走仿射裁剪（拿到的图跟着工件一起转），否则维持整数裁剪
-                bool blobAffine = HasRoiRotation(s);
+                bool blobAffine = applyCorrection && HasRoiRotation(s);
 
                 if (roiW > 0 && roiH > 0 && blobAffine)
                 {
@@ -4603,7 +4609,9 @@ namespace VisionPlatform.Flow
                     // 无上游定位时 Transform 未写入，ApplyToRect 原样返回，行为与改造前完全一致。
                     int wx = (int)Math.Round(roiX - s.OffsetX);
                     int wy = (int)Math.Round(roiY - s.OffsetY);
-                    var userRect = s.Transform.ApplyToRect(new Rectangle(wx, wy, roiW, roiH));
+                    var userRect = applyCorrection
+                        ? s.Transform.ApplyToRect(new Rectangle(wx, wy, roiW, roiH))
+                        : new Rectangle(wx, wy, roiW, roiH);
 
                     int rx = Math.Max(0, Math.Min(userRect.X, input.Width - 1));
                     int ry = Math.Max(0, Math.Min(userRect.Y, input.Height - 1));
@@ -4621,11 +4629,24 @@ namespace VisionPlatform.Flow
                 // 先多取一些，本地按宽高 / 圆度过滤后再截断到 MaxCount
                 int cap = maxCount > 0 ? Math.Min(maxCount * 4 + 8, 256) : 256;
 
-                var br = _algo.AnalyzeBlobs(analyzeOn, minArea, maxArea, cap);
+                int[] blobLabels = null;
+                var br = displayMask
+                    ? _algo.AnalyzeBlobsEx(analyzeOn, minArea, maxArea, cap, out blobLabels)
+                    : _algo.AnalyzeBlobs(analyzeOn, minArea, maxArea, cap);
                 if (!br.Success)
                 {
                     p.Summary = Fail("Blob 失败：", br);
                     return false;
+                }
+
+                // Mask 叠加：标签图对应「分析图」（可能被 ROI 裁过），按 ROI 左上角贴回整帧
+                if (blobLabels != null)
+                {
+                    int ox = usedRoi.IsEmpty ? 0 : usedRoi.X;
+                    int oy = usedRoi.IsEmpty ? 0 : usedRoi.Y;
+                    p.Overlay = NodeOverlayFactory.BlobMask(
+                        blobLabels, analyzeOn.Width, analyzeOn.Height,
+                        input.Width, input.Height, ox, oy);
                 }
 
                 int allCount = br.Value != null ? br.Value.Count : 0;
@@ -4644,15 +4665,35 @@ namespace VisionPlatform.Flow
 
                 // ROI 裁剪后，Blob 坐标相对裁剪图；加回裁剪区左上角还原到工作帧坐标
                 // 标签 = 序号 + 面积 + 圆度（UI-R05）：三样是判断"这块是不是目标"的最小充分信息
+                var blobShapeIndex = new List<int>(kept.Count);   // 每个目标对应的 BlobRect 下标（结果表选中高亮用）
                 for (int i = 0; i < kept.Count; i++)
                 {
                     BlobResult b = kept[i];
                     PointF bc = MapRoiPoint(s, usedRoi, 0.0, blobAffine, b.Cx, b.Cy);
                     double cx = bc.X;
                     double cy = bc.Y;
-                    string label = string.Format(CultureInfo.InvariantCulture,
-                        "#{0} {1:0}px² · {2:0.00}", i + 1, b.Area, Circularity(b));
+                    string label = showFeatureLabel
+                        ? string.Format(CultureInfo.InvariantCulture,
+                            "#{0} {1:0}px² · 圆{2:0.00} 矩{3:0.00} 比{4:0.00}",
+                            i + 1, b.Area, b.Roundness, b.Rectangularity, b.AspectRatio)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            "#{0} {1:0}px² · {2:0.00}", i + 1, b.Area, Circularity(b));
                     p.Shapes.Add(FlowShapes.BlobRect(cx, cy, b.Width, b.Height, label));
+                    blobShapeIndex.Add(p.Shapes.Count - 1);
+
+                    // 最小外接矩形（带角度）：轴对齐框看不出斜放工件的真实姿态，
+                    // 琥珀色与青色 Blob 框区分开，勾选才画。
+                    if (displayMinRect && b.MinRectWidth > 0 && b.MinRectHeight > 0)
+                    {
+                        PointF mc = MapRoiPoint(s, usedRoi, 0.0, blobAffine, b.MinRectCx, b.MinRectCy);
+                        var minRect = new RotatedRectShape(mc,
+                                                           (float)b.MinRectWidth,
+                                                           (float)b.MinRectHeight,
+                                                           (float)b.Angle);
+                        minRect.StrokeColor = Color.FromArgb(255, 214, 92);
+                        minRect.LineWidth = 1.2f;
+                        p.Shapes.Add(minRect);
+                    }
                 }
 
                 // 主判据：数量 + 最大面积（及该目标的圆度）。必须在任何 return false 之前填好，
@@ -4679,7 +4720,15 @@ namespace VisionPlatform.Flow
                         Width = b2.Width,
                         Height = b2.Height,
                         Angle = b2.Angle,
-                        Circularity = Circularity(b2)
+                        Circularity = b2.Roundness,
+                        Perimeter = b2.Perimeter,
+                        Rectangularity = b2.Rectangularity,
+                        Solidity = b2.Solidity,
+                        AspectRatio = b2.AspectRatio,
+                        FillRate = b2.FillRate,
+                        MinRectWidth = b2.MinRectWidth,
+                        MinRectHeight = b2.MinRectHeight,
+                        ShapeIndex = i < blobShapeIndex.Count ? blobShapeIndex[i] : -1
                     });
                 }
 
@@ -4764,12 +4813,9 @@ namespace VisionPlatform.Flow
         /// </summary>
         private static double Circularity(BlobResult b)
         {
-            double wh = b.Width * b.Height;
-            if (wh <= 0) return 0.0;
-            double v = b.Area / wh;
-            if (v < 0.0) v = 0.0;
-            if (v > 1.0) v = 1.0;
-            return v;
+            // 【v1.0.13 起用真实圆度】旧实现是 A/(W·H)（那是"占空比"，圆会算出 0.785），
+            // 原生现在按 4πA/P² 用真实轮廓周长算，正圆 ≈1.0。
+            return b.Roundness;
         }
 
         // ---------------------- 直线卡尺（FR-ALG-14 / 15）----------------------

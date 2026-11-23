@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -72,6 +72,60 @@ namespace VisionPlatform.Flow
                         buf[off + 1] = c.G;
                         buf[off + 2] = c.R;
                         buf[off + 3] = 105;         // 半透明：能看清底图纹理
+                    }
+                }
+
+                Marshal.Copy(buf, 0, data.Scan0, buf.Length);
+            }
+            finally
+            {
+                bmp.UnlockBits(data);
+            }
+            return bmp;
+        }
+
+        /// <summary>
+        /// 把 Blob 标签图（0=背景，k=第 k 个连通域，1 起）画成彩色半透明叠加层。
+        /// <para>与 <see cref="SegMask"/> 的区别：标签是 int（连通域数可超过 255），
+        /// 且不透明度稍高 —— 现场要看清"每块区域的边界在哪"，太淡会糊成一片。</para>
+        /// </summary>
+        /// <param name="offsetX">标签图左上角在整帧中的 X（ROI 裁剪时 = 裁剪框左上角）。</param>
+        /// <param name="offsetY">标签图左上角在整帧中的 Y。</param>
+        public static Bitmap BlobMask(int[] labels, int mapW, int mapH, int width, int height,
+                                      int offsetX = 0, int offsetY = 0)
+        {
+            if (labels == null || mapW <= 0 || mapH <= 0 || width <= 0 || height <= 0) return null;
+            if (labels.Length < mapW * mapH) return null;
+
+            var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            BitmapData data = bmp.LockBits(new Rectangle(0, 0, width, height),
+                                           ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var buf = new byte[data.Stride * height];
+
+                for (int y = 0; y < height; y++)
+                {
+                    // 先换算到标签图坐标；落在偏移区外直接跳过（ROI 外的像素不着色）
+                    int my = y - offsetY;
+                    if (my < 0 || my >= mapH) continue;
+                    int row = my * mapW;
+                    int dstRow = y * data.Stride;
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        int mx = x - offsetX;
+                        if (mx < 0 || mx >= mapW) continue;
+
+                        int id = labels[row + mx];
+                        if (id <= 0) continue;
+
+                        Color c = ColorOf(id - 1);
+                        int off = dstRow + x * 4;
+                        buf[off + 0] = c.B;         // BGRA
+                        buf[off + 1] = c.G;
+                        buf[off + 2] = c.R;
+                        buf[off + 3] = 125;
                     }
                 }
 

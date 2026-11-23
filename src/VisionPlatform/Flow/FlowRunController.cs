@@ -76,6 +76,9 @@ namespace VisionPlatform.Flow
         /// <summary>该节点产出的<strong>辅助</strong>图形（ROI 轮廓 / 卡尺窗口，不进结果区明细）。</summary>
         public List<IGeometryShape> AuxShapes = new List<IGeometryShape>();
 
+        /// <summary>逐目标结果（面积/圆度/矩形度/长宽比…）。结果表格用它显示完整特征。</summary>
+        public List<RegionInfo> Regions = new List<RegionInfo>();
+
         /// <summary>该节点的主判据（结果区/画布/预览共用的唯一真源）；未填时各字段为"不适用"。</summary>
         public FlowNodeMetrics Metrics = new FlowNodeMetrics();
 
@@ -811,6 +814,7 @@ namespace VisionPlatform.Flow
                 snap.KeepFrameForUi = true;   // UI 异步消费，广播后别立刻释放
             }
 
+            if (p.Regions != null) snap.Regions = new List<RegionInfo>(p.Regions);
             if (p.Shapes != null) snap.Shapes = new List<IGeometryShape>(p.Shapes);
             if (p.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(p.AuxShapes);
             if (p.Metrics != null) snap.Metrics = p.Metrics;
@@ -880,6 +884,10 @@ namespace VisionPlatform.Flow
                     snap.Summary = last.Summary ?? "";
                     if (last.Metrics != null) snap.Metrics = last.Metrics;
                     if (last.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(last.AuxShapes);
+                    // 【必须一起带上】regions 是逐目标的形状特征（面积/圆度/矩形度…）。
+                    // 少了这条，链尾快照会把 UI 里已经解析好的表格覆盖成"无特征值"——
+                    // 现场表现就是"表格对不上、特征列空"（诊断日志里 regions=29 紧跟 regions=0）。
+                    if (last.Regions != null) snap.Regions = new List<RegionInfo>(last.Regions);
                     if (snap.Shapes.Count == 0 && last.Shapes != null)
                         snap.Shapes = new List<IGeometryShape>(last.Shapes);
                 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -57,6 +57,9 @@ namespace VisionPlatform.UI
 
         /// <summary>辅助图形（ROI 轮廓 / 卡尺窗口）；<strong>不进结果区明细</strong>，只在画布上画。</summary>
         public List<IGeometryShape> AuxShapes = new List<IGeometryShape>();
+
+        /// <summary>逐目标结果（含形状特征）；表格优先用它，拿不到再回退到 Shapes 的描述。</summary>
+        public List<RegionInfo> Regions = new List<RegionInfo>();
 
         /// <summary>图形是否被截断（界面据此提示"仅显示前 N 条"）。</summary>
         public bool ShapesTruncated;

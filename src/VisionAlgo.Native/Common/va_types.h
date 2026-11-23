@@ -1,4 +1,4 @@
-/* 公共数据类型：与 C# 侧结构体一一对应（LayoutKind.Sequential）。 */
+﻿/* 公共数据类型：与 C# 侧结构体一一对应（LayoutKind.Sequential）。 */
 #ifndef VA_TYPES_H
 #define VA_TYPES_H
 
@@ -35,12 +35,26 @@ typedef struct VA_PreprocessParam {
 
 /* 连通域描述 */
 typedef struct VA_Blob {
-    double cx;
-    double cy;
-    double area;
-    double width;
-    double height;
-    double angle;
+    /* ---- 原有字段：偏移不变（托管 VA_Blob 按顺序布局，插字段会错位） ---- */
+    double cx;              /* 质心 X */
+    double cy;              /* 质心 Y */
+    double area;            /* 面积（像素数） */
+    double width;           /* 轴对齐外接框宽 */
+    double height;          /* 轴对齐外接框高 */
+    double angle;           /* 最小外接矩形角度（度，OpenCV minAreaRect 原值，[-90,0)） */
+
+    /* ---- 形状特征（v1.0.13 追加；与托管 VA_Blob 顺序严格一致） ---- */
+    double perimeter;       /* 轮廓周长（像素） */
+    double roundness;       /* 圆度 4πA/P²，1=正圆（凸形才可比，凹形会偏小） */
+    double rectangularity;  /* 矩形度 A / 最小外接矩形面积，1=矩形 */
+    double solidity;        /* 凸度 A / 凸包面积，凹缺陷越深越小 */
+    double compactness;     /* 紧致度 P²/(4πA)，越小越紧凑（圆=1） */
+    double aspect_ratio;    /* 长宽比 长边/短边（最小外接矩形），>=1 */
+    double fill_rate;       /* 占空比 A /（轴对齐外接框面积） */
+    double min_cx;          /* 最小外接矩形中心 X */
+    double min_cy;          /* 最小外接矩形中心 Y */
+    double min_w;           /* 最小外接矩形宽（长边） */
+    double min_h;           /* 最小外接矩形高（短边） */
 } VA_Blob;
 
 /* 圆拟合结果 */

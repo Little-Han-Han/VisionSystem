@@ -77,12 +77,26 @@ namespace VisionPlatform.Native
     [StructLayout(LayoutKind.Sequential)]
     public struct VA_Blob
     {
+        // 前 6 个字段顺序不可改（与 C++ VA_Blob 的偏移一一对应）
         public double cx;
         public double cy;
         public double area;
         public double width;
         public double height;
         public double angle;
+
+        // 形状特征（与 C++ 追加顺序严格一致；错一个就会整体错位）
+        public double perimeter;
+        public double roundness;
+        public double rectangularity;
+        public double solidity;
+        public double compactness;
+        public double aspect_ratio;
+        public double fill_rate;
+        public double min_cx;
+        public double min_cy;
+        public double min_w;
+        public double min_h;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -573,6 +587,14 @@ namespace VisionPlatform.Native
                                                  double min_area, double max_area,
                                                  [In, Out] VA_Blob[] out_blobs,
                                                  int max_count, out int out_count);
+
+        /// <summary>扩展版：额外输出标签图（out_labels 为 width*height 个 int32，可传 IntPtr.Zero）。</summary>
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
+        public static extern int va_blob_analyze_ex(IntPtr handle, ref VA_Image gray,
+                                                    double min_area, double max_area,
+                                                    [In, Out] VA_Blob[] out_blobs,
+                                                    int max_count, out int out_count,
+                                                    IntPtr out_labels);
 
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
         public static extern int va_sharpness(IntPtr handle, ref VA_Image gray, out double score);
@@ -1084,6 +1106,65 @@ namespace VisionPlatform.Native
             }
         }
 
+
+        /// <summary>
+        /// 连通域分析（扩展）：同时返回**标签图**，用于界面按连通域上色。
+        /// <para>labels[i] = k 表示该像素属于第 k 个连通域（1 起，对应返回列表下标+1）；
+        /// 0 = 背景或被面积/数量过滤掉的区域。只要不需要着色就走 <see cref="AnalyzeBlobs"/>，
+        /// 这里多一次 2MB 分配与一次全图像素遍历。</para>
+        /// </summary>
+        public OpResult<List<BlobResult>> AnalyzeBlobsEx(Bitmap gray, double minArea, double maxArea,
+                                                        int maxCount, out int[] labels)
+        {
+            labels = null;
+            if (gray == null) return OpResult<List<BlobResult>>.Fail("输入图像为空");
+
+            using (var gi = new GrayInput(gray))
+            {
+                IntPtr buf = IntPtr.Zero;
+                try
+                {
+                    VA_Image img = gi.Image;
+                    int w = img.width;
+                    int h = img.height;
+
+                    VA_Blob[] raw = new VA_Blob[maxCount];
+                    int count = 0;
+
+                    if (w > 0 && h > 0)
+                    {
+                        int bytes = w * h * sizeof(int);
+                        buf = Marshal.AllocHGlobal(bytes);
+                        Marshal.Copy(new byte[bytes], 0, buf, bytes);   // 先清零：无连通域时不写回就是全 0
+                    }
+
+                    int rc = NativeMethods.va_blob_analyze_ex(_handle, ref img, minArea, maxArea,
+                                                              raw, maxCount, out count, buf);
+                    if (rc != VaResult.OK)
+                        return OpResult<List<BlobResult>>.Fail(VaResult.ToString(rc) + "：" + LastError);
+
+                    var list = new List<BlobResult>();
+                    for (int i = 0; i < count && i < raw.Length; i++)
+                        list.Add(BlobResult.FromNative(raw[i]));
+
+                    if (buf != IntPtr.Zero && w > 0 && h > 0)
+                    {
+                        labels = new int[w * h];
+                        Marshal.Copy(buf, labels, 0, labels.Length);
+                    }
+
+                    return OpResult<List<BlobResult>>.Ok(list);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<List<BlobResult>>.Fail("Blob 分析失败：" + ex.Message);
+                }
+                finally
+                {
+                    if (buf != IntPtr.Zero) Marshal.FreeHGlobal(buf);
+                }
+            }
+        }
         /// <summary>清晰度评价：拉普拉斯方差，越大越清晰。</summary>
         public OpResult<double> Sharpness(Bitmap gray)
         {
@@ -2707,14 +2788,62 @@ namespace VisionPlatform.Native
         public double Area { get; set; }
         public double Width { get; set; }
         public double Height { get; set; }
+
+        /// <summary>最小外接矩形角度（度，OpenCV minAreaRect 原值 [-90,0)）。</summary>
         public double Angle { get; set; }
+
+        // ---- 形状特征（v1.0.13 起由原生一次算全，不再用宽高硬估）----
+
+        /// <summary>轮廓周长（像素）。</summary>
+        public double Perimeter { get; set; }
+
+        /// <summary>圆度 4πA/P²（1=正圆）。</summary>
+        public double Roundness { get; set; }
+
+        /// <summary>矩形度 A/最小外接矩形面积（1=矩形）。</summary>
+        public double Rectangularity { get; set; }
+
+        /// <summary>凸度 A/凸包面积（凹缺陷越深越小）。</summary>
+        public double Solidity { get; set; }
+
+        /// <summary>紧致度 P²/(4πA)（越小越紧凑，圆=1）。</summary>
+        public double Compactness { get; set; }
+
+        /// <summary>长宽比（最小外接矩形 长边/短边，>=1）。</summary>
+        public double AspectRatio { get; set; }
+
+        /// <summary>占空比 A/(轴对齐外接框面积)。</summary>
+        public double FillRate { get; set; }
+
+        /// <summary>最小外接矩形中心 X。</summary>
+        public double MinRectCx { get; set; }
+
+        /// <summary>最小外接矩形中心 Y。</summary>
+        public double MinRectCy { get; set; }
+
+        /// <summary>最小外接矩形长边。</summary>
+        public double MinRectWidth { get; set; }
+
+        /// <summary>最小外接矩形短边。</summary>
+        public double MinRectHeight { get; set; }
 
         internal static BlobResult FromNative(VA_Blob b)
         {
             return new BlobResult
             {
                 Cx = b.cx, Cy = b.cy, Area = b.area,
-                Width = b.width, Height = b.height, Angle = b.angle
+                Width = b.width, Height = b.height, Angle = b.angle,
+                Perimeter = b.perimeter,
+                Roundness = b.roundness,
+                Rectangularity = b.rectangularity,
+                Solidity = b.solidity,
+                Compactness = b.compactness,
+                AspectRatio = b.aspect_ratio,
+                FillRate = b.fill_rate,
+                MinRectCx = b.min_cx,
+                MinRectCy = b.min_cy,
+                MinRectWidth = b.min_w,
+                MinRectHeight = b.min_h
             };
         }
 

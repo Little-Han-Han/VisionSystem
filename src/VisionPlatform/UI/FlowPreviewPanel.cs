@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -1003,11 +1003,11 @@ namespace VisionPlatform.UI
                 ? snap.AllShapes
                 : snap.Shapes;
 
-            // 辅助几何（ROI 轮廓 / 卡尺窗口 / OCR 区域与串框）：链尾模式下没有归属节点，
-            // 只画该节点时才有意义，故只在"节点视图"里带上。
-            List<IGeometryShape> aux = (mode == FlowPreviewMode.ChainEnd && snap.AllShapes.Count > 0)
-                ? null
-                : snap.AuxShapes;
+            // 辅助几何（ROI 轮廓 / 卡尺窗口 / OCR 区域与串框）：
+            // 【链尾也要画】原来这里返回 null，导致主界面（默认链尾视图）看不到搜索区域 ——
+            // 现场反馈"运行中看不到框在哪"。ROI 是"算法在哪找"的关键信息，必须常显。
+            // 链尾快照的 AuxShapes 来自末节点（PublishChainEnd 已复制），画出来即为该节点的搜索范围。
+            List<IGeometryShape> aux = snap.AuxShapes;
 
             // 记下本帧的「高亮身份上下文」：只有画的是该节点自身图形时，
             // 结果表格里的图形序号才能对上（链尾全链图形是各节点图形的拼接，序号不可比）。

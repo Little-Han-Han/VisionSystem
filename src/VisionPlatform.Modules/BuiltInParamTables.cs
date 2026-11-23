@@ -611,9 +611,21 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Dbl("MinWidth", "最小宽", 0, 100000, 0, 1m, "0", "", true));
             t.Fields.Add(Dbl("MinHeight", "最小高", 0, 100000, 0, 1m, "0", "", true));
             t.Fields.Add(Dbl("MinCircularity", "最小圆度", 0, 1, 3, 0.05m, "0"));
-            t.Fields.Add(Note("圆度＝面积/外接矩形面积（圆≈0.785，矩形≈1.0）。"));
+            t.Fields.Add(Note("圆度＝4πA/P²（基于真实轮廓周长：正圆≈1.0，方形≈0.785，细长条形更小）。"));
             t.Fields.Add(Int("MaxCount", "最多保留", 0, 1000, "50"));
             t.Fields.Add(Enum("SortBy", "排序", "Area", new[] { "面积降序" }, new[] { "Area" }, "", true));
+
+            t.Fields.Add(Group("位置修正"));
+            t.Fields.Add(Bool("ApplyCorrection", "跟随上游位置修正", "1",
+                "勾选：ROI 随工件位姿移动（上游有「位置修正」节点时生效）；不勾：ROI 固定用示教坐标"));
+
+            t.Fields.Add(Group("显示"));
+            t.Fields.Add(Bool("DisplayMask", "显示 Mask（连通域着色）", "1",
+                "按连通域上不同颜色，直接看每块区域的边界；关掉可省一次全图遍历"));
+            t.Fields.Add(Bool("DisplayMinRect", "显示最小外接矩形", "1",
+                "每个 Blob 画带角度的小外接矩形（区别于轴对齐框，适合斜放工件）"));
+            t.Fields.Add(Bool("ShowFeatureLabel", "标签显示形状特征", "0",
+                "在画面标签里追加 圆度/矩形度/长宽比，便于调参时直接看数值"));
 
             t.Fields.Add(Group("判定（0 = 不限）"));
             t.Fields.Add(Int("ExpectMin", "期望个数下限", 0, 1000, "0"));

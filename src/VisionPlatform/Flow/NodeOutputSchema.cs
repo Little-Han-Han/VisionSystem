@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -282,10 +282,34 @@ namespace VisionPlatform.Flow
         public double Height;
         /// <summary>角度（度）。</summary>
         public double Angle;
-        /// <summary>圆度（4πA/P²）。</summary>
+        /// <summary>圆度（4πA/P²，1=正圆）。</summary>
         public double Circularity;
+
+        // ---- 形状特征（Blob 等节点填充；其它节点保持 0）----
+
+        /// <summary>周长（像素）。</summary>
+        public double Perimeter;
+        /// <summary>矩形度 A/最小外接矩形面积（1=矩形）。</summary>
+        public double Rectangularity;
+        /// <summary>凸度 A/凸包面积。</summary>
+        public double Solidity;
+        /// <summary>长宽比（最小外接矩形 长/短）。</summary>
+        public double AspectRatio;
+        /// <summary>占空比 A/(轴对齐外接框面积)。</summary>
+        public double FillRate;
+        /// <summary>最小外接矩形长边。</summary>
+        public double MinRectWidth;
+        /// <summary>最小外接矩形短边。</summary>
+        public double MinRectHeight;
         /// <summary>附加文本（OCR 文本 / 类别名等）。</summary>
         public string Text = "";
+
+        /// <summary>
+        /// 对应 <c>Shapes</c> 列表里的下标（-1 = 未指定）。
+        /// <para>结果表选中某行要高亮对应图形；Blob 会同时画"轴对齐框 + 最小外接矩形"，
+        /// Shapes 数量与目标数不等，不能拿行号当下标。</para>
+        /// </summary>
+        public int ShapeIndex = -1;
 
         /// <summary>一行摘要：`#1 (320.0, 240.0) 40×30 A=1200 C=0.86`。</summary>
         public string Describe()

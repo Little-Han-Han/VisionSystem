@@ -68,7 +68,13 @@ namespace VisionPlatform.Modules
                 Clone(matchIn), Clone(matchOut));
 
             Register(FlowNodeType.Blob,
-                new List<FlowPortDef> { P("Image", "图像", FlowPortKind.Image, true) },
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    // 位置修正输入：把上游定位节点（模板匹配 / 形状匹配 / 位置修正）的位姿接进来，
+                    // ROI 随工件移动。不接则沿用帧级修正常量（见 RunBlob 的 ApplyCorrection）。
+                    P("Pose", "位置修正", FlowPortKind.Pose, false)
+                },
                 new List<FlowPortDef>
                 {
                     P("Image", "图像", FlowPortKind.Image, false),

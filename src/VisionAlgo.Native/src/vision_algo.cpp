@@ -191,6 +191,19 @@ int VA_CALL va_blob_analyze(void* handle,
     VA_CTX();
     return va::BlobAnalyze(ctx, gray, min_area, max_area, out_blobs, max_count, out_count);
 }
+int VA_CALL va_blob_analyze_ex(void* handle,
+                                     const VA_Image* gray,
+                                     double min_area,
+                                     double max_area,
+                                     VA_Blob* out_blobs,
+                                     int max_count,
+                                     int* out_count,
+                                     int* out_labels)
+{
+    VA_CTX();
+    return va::BlobAnalyzeEx(ctx, gray, min_area, max_area, out_blobs, max_count, out_count, out_labels);
+}
+
 
 int VA_CALL va_sharpness(void* handle, const VA_Image* gray, double* out_score)
 {
