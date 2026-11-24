@@ -42,6 +42,8 @@
     <Compile Include="Model\FlowNodeType.cs" />
     <Compile Include="Model\ParamItem.cs" />
     <Compile Include="Modules\FlowModuleRegistry.cs" />
+    <Compile Include="Modules\ParamOptionSources.cs" />
+    <Compile Include="Modules\AnomalyModelCatalog.cs" />
     <Compile Include="Communication\CommContracts.cs" />
     <Compile Include="Modules\FlowNodeModule.cs" />
     <Compile Include="Modules\ModuleCategories.cs" />

@@ -144,6 +144,7 @@
     <Compile Include="Native\NativeCamera.cs" />
     <Compile Include="Native\VisionAlgo.cs" />
     <Compile Include="Native\NativeDl.cs" />
+    <Compile Include="Native\NativeAnomaly.cs" />
     <Compile Include="Native\NativeCalib.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -197,6 +198,12 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="UI\OcrCharTrainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\AnomalyStatusCard.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="UI\AnomalyTrainForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="UI\NodeResultCache.cs" />

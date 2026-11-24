@@ -86,6 +86,7 @@ namespace VisionPlatform.Modules
                 case FlowNodeType.OcrDl:           return OcrDlTable();
                 case FlowNodeType.BarcodeRead:     return BarcodeRead();
                 case FlowNodeType.PointCloudSource: return PointCloudSource();
+                case FlowNodeType.AnomalyDetect:   return AnomalyDetect();
                 default:                           return null;
             }
         }
@@ -224,6 +225,21 @@ namespace VisionPlatform.Modules
             for (int i = 0; i < texts.Length; i++)
                 f.Options.Add(new NodeParamOption(texts[i], i < values.Length ? values[i] : texts[i]));
             return f;
+        }
+
+        /// <summary>
+        /// 动态下拉：选项由 <paramref name="source"/> 指向的来源在**渲染时**生成
+        /// （模块包在 <c>Register()</c> 里注册，宿主按 Key 取，不认识具体业务）。
+        /// </summary>
+        private static NodeParamField DynamicEnum(string key, string label, string def,
+                                                  string source, string hint,
+                                                  bool advanced = false)
+        {
+            return new NodeParamField
+            {
+                Key = key, Label = label, Kind = NodeParamKind.Enum, Default = def,
+                OptionsSource = source, Hint = hint, Advanced = advanced
+            };
         }
 
         // ---------------------- 各节点参数表 ----------------------
@@ -1163,5 +1179,53 @@ namespace VisionPlatform.Modules
             f.OptionsSource = "comm";
             return f;
         }
+
+        /// <summary>
+        /// 无监督缺陷检测（PaDiM / EfficientAD）。
+        /// <para>
+        /// 【为什么没有"模型路径"这一行】模型目录是固定的 <c>Models\Anomaly\</c>，
+        /// 参数里只存目录名，下拉框列出该目录下所有可用模型。现场换型号只换下拉项，
+        /// 不会出现"配置里写死某台电脑的 D 盘路径"这种换机即废的设置。
+        /// </para>
+        /// </summary>
+        private static NodeParamTable AnomalyDetect()
+        {
+            var t = new NodeParamTable { Type = FlowNodeType.AnomalyDetect, Title = "异常检测" };
+
+            t.Fields.Add(Group("模型（固定目录 Models\\Anomaly）"));
+            t.Fields.Add(DynamicEnum("Model", "模型", "", AnomalyOptionSource,
+                "下拉列出 Models\\Anomaly 下的全部模型；新建/训练模型请点下面的按钮"));
+            t.Fields.Add(Enum("Device", "推理设备", "CPU",
+                new[] { "CPU", "GPU", "NPU" }, new[] { "CPU", "GPU", "NPU" },
+                "OpenVINO 设备名；GPU/NPU 需对应的设备插件"));
+            t.Fields.Add(Action("TrainAnomaly", "训练 / 标注样本…",
+                "加载多张 OK / NG 图片，逐张标注后训练 PaDiM 模型或验证现有模型"));
+
+            t.Fields.Add(Group("检测区域（宽或高为 0 = 整图）"));
+            t.Fields.Add(Int("RoiX", "X", -100000, 100000, "0"));
+            t.Fields.Add(Int("RoiY", "Y", -100000, 100000, "0"));
+            t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0",
+                "异常检测最怕「视野里有多余东西」（反光、夹具、背景），ROI 收到产品表面上，误报会少一个量级"));
+            t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
+
+            t.Fields.Add(Group("判定"));
+            t.Fields.Add(Dbl("Threshold", "判定阈值", 0, 100, 3, 0.01m, "0",
+                "0 = 用模型自带的阈值（训练时按 OK 样本分数分布算出，推荐）。"
+                + "填非 0 则覆盖：数值是「马氏距离 / sqrt(d)」，越大越松"));
+            t.Fields.Add(Int("MinArea", "最小缺陷面积(px)", 1, 1000000, "20",
+                "小于该面积的连通域不计入缺陷数、不画框；抑制单像素噪点"));
+            t.Fields.Add(Dbl("AreaLimit", "面积占比上限", 0, 1, 4, 0.001m, "0",
+                "超阈值像素占 ROI 的比例超过它判 NG；0 = 不用面积判（只看最大分）"));
+            t.Fields.Add(Bool("ShowHeat", "显示热图", "1",
+                "把异常分渲染成伪彩叠加到画面上；关掉只看框和数字"));
+
+            t.FooterNote = "只给 OK 样本即可建模：PaDiM 逐位置统计正常纹理的分布，偏离越远分越高。"
+                         + "热图颜色越暖表示越异常（1.0 = 阈值线）。"
+                         + "输入可接「位置修正」，ROI 会随工件移动 —— 这是产线上稳定工作的前提。";
+            return t;
+        }
+
+        /// <summary>异常检测模型下拉的选项来源 Key（模块包在 Register 时注册实现）。</summary>
+        internal const string AnomalyOptionSource = "anomaly-models";
     }
 }

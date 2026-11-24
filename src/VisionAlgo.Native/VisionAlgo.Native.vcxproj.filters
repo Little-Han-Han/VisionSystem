@@ -72,6 +72,9 @@
       <Filter>include\algo</Filter>
     </ClInclude>
     <ClInclude Include="include\algo\va_barcode.h" />
+    <ClInclude Include="include\algo\va_anomaly.h">
+      <Filter>include\algo</Filter>
+    </ClInclude>
     <ClInclude Include="include\vision_algo.h">
       <Filter>src\algo</Filter>
     </ClInclude>
@@ -97,6 +100,9 @@
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_shape.cpp">
+      <Filter>src\algo</Filter>
+    </ClCompile>
+    <ClCompile Include="src\algo\algo_anomaly.cpp">
       <Filter>src\algo</Filter>
     </ClCompile>
     <ClCompile Include="src\algo\algo_measure.cpp">

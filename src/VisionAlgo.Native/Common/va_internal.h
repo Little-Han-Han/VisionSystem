@@ -1,4 +1,4 @@
-// 库内部头文件：不对外暴露，仅 src 下各编译单元之间共享。
+﻿// 库内部头文件：不对外暴露，仅 src 下各编译单元之间共享。
 // 对外接口一律以 C 风格声明在 include/ 下，这里只放 C++ 实现细节。
 #ifndef VA_INTERNAL_H
 #define VA_INTERNAL_H
@@ -37,6 +37,8 @@
 #include "algo/va_detect.h"
 #include "algo/va_dl.h"
 #include "algo/va_ocrdl.h"
+// 无监督缺陷检测（PaDiM / EfficientAD）的对外结构体（VA_AnomStat）
+#include "algo/va_anomaly.h"
 
 namespace va {
 
@@ -139,6 +141,108 @@ struct OcrDlState {
     OcrDlState() : det_w(0), det_h(0), rec_w(0), rec_h(0), has_det(false), created(false) {}
 };
 
+// ---------------------------------------------------------------------------
+//  无监督缺陷检测（PaDiM / EfficientAD）
+//  【为什么一个 Net 结构体够用】两类模型的子网络都只是「单输入单输出前向」，
+//  差别全在"输出怎么用"（PaDiM 取特征图算马氏距离、EfficientAD 取学生-教师差）。
+//  把加载 / 形状校验收敛到一处，新增第三类模型时只需再加一段后处理。
+// ---------------------------------------------------------------------------
+struct AnomNet {
+    ov::CompiledModel compiled;
+    ov::InferRequest  infer;
+    int  in_w, in_h;      // 期望的输入尺寸（模型静态形状）
+    int  out_c, out_h, out_w;  // 输出特征图尺寸（4D 输出时有效）
+    bool ok;
+
+    AnomNet() : in_w(0), in_h(0), out_c(0), out_h(0), out_w(0), ok(false) {}
+
+    void Reset() {
+        infer = ov::InferRequest();
+        compiled = ov::CompiledModel();
+        in_w = in_h = out_c = out_h = out_w = 0;
+        ok = false;
+    }
+};
+
+// 已加载的模型：PaDiM 的逐位置高斯统计，或 EfficientAD 的三个子网络
+struct AnomalyState {
+    int   kind;          // VA_ANOM_KIND_*
+    int   feat;          // VA_ANOM_FEAT_*（PaDiM 专用）
+    int   input_size;    // 分析分辨率
+    int   patch;         // 内置描述子的 patch 边长
+    int   gw, gh;        // 特征图网格
+    int   dim;           // 实际使用的特征维（= sel.size()）
+    int   src_dim;       // 特征原始维（OpenVINO 输出的通道数 / 内置描述子维数）
+    int   samples;       // 训练样本数
+    float threshold;     // 模型自带阈值（原始值刻度）
+    std::string dir;     // 模型目录
+    std::string device;  // 编译设备
+
+    std::vector<int>   sel;    // 维度选择表（src_dim → dim）
+    std::vector<float> mean;   // P*dim
+    std::vector<float> chol;   // P*dim*dim（下三角，未使用位置为 0）
+
+    AnomNet extractor;         // PaDiM 特征提取器（feat=HANDCRAFT 时 ok=false）
+    AnomNet teacher;
+    AnomNet student;
+    AnomNet ae;
+
+    float st_mean, st_std;     // EfficientAD：学生-教师分支的归一化统计
+    float ae_mean, ae_std;     // EfficientAD：自编码器分支
+
+    bool created;
+
+    AnomalyState()
+        : kind(0), feat(0), input_size(256), patch(8), gw(0), gh(0), dim(0), src_dim(0),
+          samples(0), threshold(0.0f), st_mean(0.0f), st_std(1.0f),
+          ae_mean(0.0f), ae_std(1.0f), created(false) {}
+
+    void Reset() {
+        kind = feat = 0;
+        input_size = 256; patch = 8;
+        gw = gh = dim = src_dim = samples = 0;
+        threshold = 0.0f;
+        dir.clear(); device.clear();
+        sel.clear(); mean.clear(); chol.clear();
+        extractor.Reset(); teacher.Reset(); student.Reset(); ae.Reset();
+        st_mean = 0.0f; st_std = 1.0f; ae_mean = 0.0f; ae_std = 1.0f;
+        created = false;
+    }
+};
+
+// PaDiM 训练会话：begin 建统计量累积器，add 逐张累加，finish 分解并落盘
+struct AnomalyTrainState {
+    bool      active;
+    int       feat, input_size, patch;
+    int       gw, gh, dim, src_dim;
+    long long n;              // 已 add 的样本数
+    bool      retain;         // 还在保留样本特征（算阈值用）；超出预算后置 false
+    long long retained;       // 已保留的 float 数
+    std::string out_dir;
+    std::string extractor;    // IR 相对路径（feat=OPENVINO 时非空）
+
+    std::vector<int>    sel;      // 维度选择表
+    std::vector<double> sum;      // P*dim
+    std::vector<double> outer;    // P*dim*dim
+    std::vector<float>  samples;  // n*P*dim（pos-major）
+
+    AnomNet net;                 // feat=OPENVINO 时加载的提取器
+
+    AnomalyTrainState()
+        : active(false), feat(0), input_size(256), patch(8), gw(0), gh(0), dim(0), src_dim(0),
+          n(0), retain(true), retained(0) {}
+
+    void Reset() {
+        active = false; feat = 0; input_size = 256; patch = 8;
+        gw = gh = dim = src_dim = 0;
+        n = 0; retain = true; retained = 0;
+        out_dir.clear(); extractor.clear();
+        sel.clear(); sum.clear(); outer.clear(); samples.clear();
+        net.Reset();
+    }
+};
+
+
 // 每个句柄对应一个上下文，模板等状态保存在这里
 struct Context {
     std::string lastError;
@@ -159,8 +263,13 @@ struct Context {
     DlState         pose;            // YOLO 姿态估计
     DlState         depth;           // 深度估计
     OcrDlState      ocrdl;           // 深度学习 OCR（PaddleOCR）
+    // 无监督缺陷检测：一个 ov::Core 共用给所有子网络（每建一个 Core 都会重载设备插件）
+    ov::Core          anomCore;
+    bool              anomCoreReady;
+    AnomalyState      anom;          // 已加载的异常检测模型
+    AnomalyTrainState anomTrain;     // PaDiM 训练会话
 
-    Context() : lastCode(0), hasTemplate(false) {}
+    Context() : lastCode(0), hasTemplate(false), anomCoreReady(false) {}
 };
 
 // 相机句柄：与算法 Context 平行、相互独立（见架构设计决策 2）。
@@ -236,6 +345,8 @@ int Preprocess(Context* ctx, const VA_Image* src, VA_Image* dst,
 
 int BlobAnalyze(Context* ctx, const VA_Image* gray, double minArea, double maxArea,
                 VA_Blob* outBlobs, int maxCount, int* outCount);
+// 扩展版连通域分析：额外算全形状特征，并可选输出标签图（outLabels 可为 0）。
+// 导出层的 va_blob_analyze_ex / 托管的 AnalyzeBlobsEx 都走这里。
 int BlobAnalyzeEx(Context* ctx, const VA_Image* gray, double minArea, double maxArea,
                   VA_Blob* outBlobs, int maxCount, int* outCount, int* outLabels);
 
@@ -309,6 +420,24 @@ int DlDepthRun(Context* ctx, const VA_Image* img, float* out_map, int width, int
                float* out_min, float* out_max);
 
 int DlClear(Context* ctx, int task);
+
+// ---------------------- 无监督缺陷检测（PaDiM / EfficientAD）---------------------
+// 模型目录是"数据"（model.json + 权重），加载 / 推理 / 训练都在 algo_anomaly.cpp。
+int AnomTrainBegin(Context* ctx, const char* out_dir, const char* extractor,
+                   int feat_kind, int input_size);
+int AnomTrainAdd(Context* ctx, const VA_Image* img, const int* roi);
+int AnomTrainFinish(Context* ctx, char* out_summary, int cap);
+int AnomTrainCount(Context* ctx, int* out_count);
+int AnomTrainCancel(Context* ctx);
+
+int AnomCreate(Context* ctx, const char* model_dir, const char* device);
+int AnomRun(Context* ctx, const VA_Image* img, const int* roi,
+            float threshold, int min_area_px, VA_AnomStat* out_stat,
+            float* out_map, int map_cap, int* out_w, int* out_h,
+            unsigned char* out_mask, int mask_cap);
+int AnomInfo(Context* ctx, char* buf, int cap);
+int AnomPeek(const char* model_dir, char* buf, int cap);
+int AnomClear(Context* ctx);
 
 // ---------------------- 深度学习 OCR（PaddleOCR）---------------------
 int OcrDlCreate(Context* ctx, const char* det_model, const char* rec_model,

@@ -73,6 +73,14 @@ namespace VisionPlatform.Core
         /// <summary>深度学习模型根目录 = <c>&lt;程序目录&gt;\MODELS\DL</c>（原 <c>models</c>）。</summary>
         public static string DlModelDir { get { return Path.Combine(ModelsDir, "DL"); } }
 
+        /// <summary>
+        /// 异常检测模型根目录 = <c>&lt;程序目录&gt;\Models\Anomaly</c>。
+        /// <para>每个模型一个子目录（<c>model.json</c> + <c>padim.bin</c> 或 EfficientAD 的 IR 三件套）。
+        /// 目录规则的真源在 <c>AnomalyModelCatalog</c>（Framework 层，模块包与宿主共用），
+        /// 这里只负责建目录 —— 两处的根目录必须一致。</para>
+        /// </summary>
+        public static string AnomalyModelDir { get { return Path.Combine(ModelsDir, "Anomaly"); } }
+
         /// <summary>第三方原生库目录 = <c>&lt;程序目录&gt;\THIRDPARTY</c>（opencv / openvino / sqlite / vcruntime）。</summary>
         public static string ThirdPartyDir { get { return Path.Combine(Root, "ThirdParty"); } }
 
@@ -148,6 +156,7 @@ namespace VisionPlatform.Core
                 if (!Directory.Exists(CalibDir)) Directory.CreateDirectory(CalibDir);
                 if (!Directory.Exists(OcrModelDir)) Directory.CreateDirectory(OcrModelDir);
                 if (!Directory.Exists(DlModelDir)) Directory.CreateDirectory(DlModelDir);
+                if (!Directory.Exists(AnomalyModelDir)) Directory.CreateDirectory(AnomalyModelDir);
 
                 // 一次性迁移：老版本的 appconfig.json 在程序根目录，静默搬到 Config\。
                 // 只在"新位置还没有文件"时搬，避免覆盖用户已经在用的新配置。

@@ -1,7 +1,7 @@
 ﻿# VisionSystem — 工业机器视觉软件
 
 <!-- VERSION_BLOCK_START -->
-> **当前版本：1.0.13.1**
+> **当前版本：1.0.14.0**
 <!-- VERSION_BLOCK_END -->
 
 > 更新记录见 [CHANGELOG.md](CHANGELOG.md)。
@@ -114,6 +114,9 @@
   `ImageViewer` **2D/3D 合用** —— 点云自动切 3D 模式，左键旋转 / 滚轮缩放 / 双击复位；
   **X/Y/Z 坐标轴**（X 红 / Y 绿 / Z 蓝，标签实时跟随）；OpenGL 零依赖（opengl32 P/Invoke 自建 wgl 上下文）
   且带**质量闸门** —— 无显卡驱动时自动降级内置逐点光栅渲染（HUD 标「软件渲染」），无 GPU 也能正常出图
+- **异常检测（1.0.14.0 新增）**：只用 OK 样本建模型（PaDiM 在软件内训练，EfficientAD 走 IR 推理），
+  参数面板顶部有模型状态卡片（挂的是哪个模型 / 目录在哪 / 一键刷新）、「样本 / 训练…」窗体支持
+  **多图同屏标注**（缩略图墙 + 双击循环标 OK/NG + 框 ROI）+ 训练 + 回验混淆统计
 - **配方**：`Recipe` + `RecipeStore`，JSON 存取、当前配方切换自动同步参数
 - **系统设置**：图片保存路径 / 格式（PNG/JPEG/BMP/TIFF）/ 保留天数（自动清理）/ 检测后自动保存与仅存 NG / 循环运行前是否要求通讯已连接
 - **配置持久化**：系统 / 算法 / 界面 / 流程 四类参数落到 `<程序目录>\Config\appconfig.json`（如 `bin\x64\Release\Config\appconfig.json`），重启自动加载；
@@ -124,7 +127,7 @@
 
 ## 已实现算法清单
 
-工具箱共 **30 个流程模块**（由 `VisionPlatform.Modules` 动态加载），按分类如下。
+工具箱共 **31 个流程模块**（由 `VisionPlatform.Modules` 动态加载），按分类如下。
 每个模块的端子、参数表、默认值都在模块包内声明，新增模块不需要改宿主界面。
 
 ### 采集
@@ -169,6 +172,13 @@
 - **目标姿态估计 DlPose**：YOLO 姿态，输出框 + 关键点。
 - **目标深度估计 DlDepth**：单目深度图（0~1 归一化）。
 - **OCR(深度学习) OcrDl**：PaddleOCR 两阶段（DB 文本检测 + CRNN 识别）。
+- **异常检测 AnomalyDetect**：无监督缺陷检测（PaDiM 原生训练 / EfficientAD 推理，OpenVINO 算）。
+  只用 OK 样本建模型，输出**热图 + 最大分 / 面积占比 / 缺陷数 / 最大缺陷框 / 最大分点位**；
+  模型固定放 `Models\Anomaly\<模型名>\`，参数面板下拉选模型（**没有文件对话框**），
+  支持检测区域 ROI（随位置修正移动）。训练入口在参数面板的「训练 / 标注样本…」：
+  多图同屏、逐张标 OK/NG、框 ROI、混淆统计。方案背景见
+  [docs/算法/无监督缺陷检测技术方案.md](docs/算法/无监督缺陷检测技术方案.md)，
+  模型目录 / 训练步骤 / EfficientAD 导出见 [docs/算法/异常检测-模型目录与训练.md](docs/算法/异常检测-模型目录与训练.md)。
 
 ### 3D 视觉
 - **读取点云 PointCloudSource**：PLY（ascii / binary_little_endian）、PCD（ascii / binary，含 RGB 解包）、
@@ -201,6 +211,11 @@
 - **相机仅支持软触发**，无硬触发 / IO 接口，外部触发信号接不进来。
 - **配方不含相机参数**：`Recipe` 只有 `CameraId`，曝光、增益、触发模式等未纳入。
 - **检测结果统计未落盘**：图像存证（保存路径 / 格式 / 保留天数 / 自动保存 / 仅存 NG）已完成，但 OK/NG **统计结果本身**仍未持久化（无数据库或 CSV 报表）。
+- **异常检测的 EfficientAD 只做推理**：学生网络需要反向传播训练，本库不含训练器；
+  要用心 `docs/算法/异常检测-模型目录与训练.md` 的导出流程（PyTorch → ONNX → ovc），
+  目前**只有 PaDiM 那条路是真机验证过的**，EfficientAD 的加载/融合分支待有 IR 后补回归。
+- **异常检测样本少时阈值偏松**：阈值由 k 折留出实测分数定（`×1.5` 余量），给 5 张 OK 图的模型
+  一定比给 50 张的更保守；现场建议 ≥ 20 张，30~50 张最稳。
 - **通讯自动化需先配置任务**：默认不启用任何通讯任务；需在「通讯 → 点位/任务…」配置点位、消息与任务后，
   心跳 / Ready-Busy / 结果推送 / 跨流程汇总才会运行。用法见 [通讯架构重构方案](docs/架构/通讯架构重构方案.md)；
   OPC UA 驱动待外部 SDK（放到 `ThirdParty/Communication` 后构建自动复制）。
@@ -240,7 +255,8 @@ VisionSystem/                              唯一解决方案根目录
 │   ├── README.md                          知识图谱：概念图 / 唯一权威出处 / 文档地图
 │   ├── 平台架构.md                        架构、分层、模块职责（改造前快照）
 │   ├── 架构/                              解耦重构 / 通讯架构重构方案 / 性能优化 / 流程拓扑与并发
-│   ├── 算法/                              算法更新记录
+│   ├── 算法/                              算法更新记录 / 无监督缺陷检测技术方案 /
+│   │                                      3D 检测算法与难点 / 异常检测-模型目录与训练
 │   ├── 案例/                              通讯配置完整案例（含 TCP 模拟器与示例 JSON）
 │   ├── API参考.md                         控件库完整 API 清单（待更新）
 │   ├── 遗留问题.md                        已知问题、TODO、占位实现（待更新）
@@ -254,7 +270,8 @@ VisionSystem/                              唯一解决方案根目录
     │   ├── include/
     │   │   ├── vision_algo.h              聚合头
     │   │   └── algo/                      算法头文件（preprocess / blob / fit / match / shape /
-    │   │                                  measure / detect / ocr / ocrdl / dl / barcode / camera）
+    │   │                                  measure / detect / ocr / ocrdl / dl / barcode / camera /
+    │   │                                  anomaly）
     │   ├── src/
     │   │   ├── vision_algo.cpp            导出层：句柄校验 + 转发
     │   │   └── algo/                      算法实现
@@ -267,17 +284,18 @@ VisionSystem/                              唯一解决方案根目录
     │   ├── Geometry/                      IGeometryShape / ShapeHandle / 各形状 / ShapeCollection
     │   ├── Interop/                       CvInterop（OpenCV 数据互操作）
     │   └── Rendering/                     Viewport（坐标变换）/ RenderOptions
-    ├── VisionPlatform.Framework/          【C#】契约层：模块契约 / FlowNodeType / 端子 / 参数表 / 分类
-    ├── VisionPlatform.Modules/            【C#】模块层：30 个模块的 BuiltIn 清单 / 默认值 / 端子 / 参数表
+    ├── VisionPlatform.Framework/          【C#】契约层：模块契约 / FlowNodeType / 端子 / 参数表 / 分类 /
+    │                                      动态选项来源 ParamOptionSources / 异常检测模型目录约定
+    ├── VisionPlatform.Modules/            【C#】模块层：31 个模块的 BuiltIn 清单 / 默认值 / 端子 / 参数表
     ├── VisionPlatform.UI.Controls/        【C#】通用界面层：UiTheme / UiStyle / UiTree / UiGrid /
     │                                      ParamListControl / NumericInputPolicy / 数值框与树主题
-    ├── SmokeUi/                           回归测试台（1162 项用例 + --create-sample / 探针；不入 sln，
+    ├── SmokeUi/                           回归测试台（1153 项用例 + --create-sample / 探针；不入 sln，
     │                                      用 _build_smoke.bat 构建）
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
         ├── Core/                          Logger（SQLite）/ AppPaths / Json / OpResult /
         │                                 AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore / PerfProbe
-        ├── Native/                        VisionAlgo（P/Invoke 封装）/ NativeCamera
+        ├── Native/                        VisionAlgo（P/Invoke 封装）/ NativeCamera / NativeAnomaly
         ├── Camera/                        ICamera / LocalCamera / SimCamera / HikCamera / CameraManager
         ├── Communication/                 TcpClientSession / TcpServerSession / ModbusTcpClient /
         │                                 CommRuntime（运行闸门）/ CommJobEngine / CommHub / CommPointMapper /
@@ -290,6 +308,7 @@ VisionSystem/                              唯一解决方案根目录
         ├── Models/                        User
         └── UI/                            MainForm / FlowForm / FlowCanvasControl / FlowPreviewPanel /
                                            CommForm / CommAutomationForm / CommActionEditorForm /
+                                           AnomalyTrainForm / AnomalyStatusCard /
                                            OcrCharTrainForm / ScriptEditorForm / RecipeForm /
                                            SettingsForm / LoginForm / SplashForm 等
 ```
@@ -439,6 +458,9 @@ version.bat 1.0.0.1    :: 设置版本（同步 AssemblyVersion / AssemblyFileVe
 - [增量架构设计.md](docs/架构/增量架构设计.md) —— 6 份架构设计合并：关键决策、接口要点、落地红线；§7 是跨增量公共约定的唯一出处
 - [CHANGELOG.md](CHANGELOG.md) —— 版本更新记录（新增 / 修复 / 性能 / 升级提示）
 - [算法更新记录.md](docs/算法/算法更新记录.md) —— 原生算法层的接口与实现变更记录
+- [无监督缺陷检测技术方案.md](docs/算法/无监督缺陷检测技术方案.md) —— 模型选型（PaDiM / EfficientAD / PatchCore）、部署与推理加速、参考资料
+- [异常检测-模型目录与训练.md](docs/算法/异常检测-模型目录与训练.md) —— 固定目录与 `padim.bin` 布局、界面训练步骤、阈值来历、EfficientAD 导出、现场排障
+- [3D检测算法与难点.md](docs/算法/3D检测算法与难点.md) —— 3D 检测算法清单与难点、商用软件做法、胶路/焊锡/划痕场景取舍
 - [通讯架构重构方案.md](docs/架构/通讯架构重构方案.md) —— 点位/消息/任务模型、心跳与 Ready/Busy、TCP/Modbus/OPC UA 扩展方案
 - [通讯配置完整案例](docs/案例/通讯配置完整案例.md) —— 双相机双流程、心跳/Ready-Busy/组合结果，含示例 JSON 与 TCP 模拟器
 - [性能优化.md](docs/架构/性能优化.md) —— 软件层开销实测、限帧/日志/帧拷贝优化、与 Halcon/Cognex 的差距分析

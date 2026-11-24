@@ -673,4 +673,71 @@ int VA_CALL va_camera_get_last_error(void* handle, char* buffer, int size)
     return n;
 }
 
+// ---------------------- 无监督缺陷检测（PaDiM / EfficientAD）---------------------
+
+int VA_CALL va_anom_train_begin(void* handle, const char* out_dir, const char* extractor,
+                                int feat_kind, int input_size)
+{
+    VA_CTX();
+    return va::AnomTrainBegin(ctx, out_dir, extractor, feat_kind, input_size);
+}
+
+int VA_CALL va_anom_train_add(void* handle, const VA_Image* img, const int* roi)
+{
+    VA_CTX();
+    return va::AnomTrainAdd(ctx, img, roi);
+}
+
+int VA_CALL va_anom_train_finish(void* handle, char* out_summary, int cap)
+{
+    VA_CTX();
+    return va::AnomTrainFinish(ctx, out_summary, cap);
+}
+
+int VA_CALL va_anom_train_count(void* handle, int* out_count)
+{
+    VA_CTX();
+    return va::AnomTrainCount(ctx, out_count);
+}
+
+int VA_CALL va_anom_train_cancel(void* handle)
+{
+    VA_CTX();
+    return va::AnomTrainCancel(ctx);
+}
+
+int VA_CALL va_anom_create(void* handle, const char* model_dir, const char* device)
+{
+    VA_CTX();
+    return va::AnomCreate(ctx, model_dir, device);
+}
+
+int VA_CALL va_anom_run(void* handle, const VA_Image* img, const int* roi,
+                        float threshold, int min_area_px, VA_AnomStat* out_stat,
+                        float* out_map, int map_cap, int* out_w, int* out_h,
+                        unsigned char* out_mask, int mask_cap)
+{
+    VA_CTX();
+    return va::AnomRun(ctx, img, roi, threshold, min_area_px, out_stat,
+                       out_map, map_cap, out_w, out_h, out_mask, mask_cap);
+}
+
+int VA_CALL va_anom_info(void* handle, char* buf, int cap)
+{
+    VA_CTX();
+    return va::AnomInfo(ctx, buf, cap);
+}
+
+int VA_CALL va_anom_peek(const char* model_dir, char* buf, int cap)
+{
+    // 不需要句柄：界面列模型时还没创建上下文，能少一步就少一步
+    return va::AnomPeek(model_dir, buf, cap);
+}
+
+int VA_CALL va_anom_clear(void* handle)
+{
+    VA_CTX();
+    return va::AnomClear(ctx);
+}
+
 } // extern "C"

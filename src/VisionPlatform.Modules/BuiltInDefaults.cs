@@ -394,6 +394,23 @@ namespace VisionPlatform.Modules
                     Add(list, "DistMin", "0");
                     Add(list, "DistMax", "0");
                     break;
+
+                // ================= 本期新增：无监督缺陷检测 =================
+                case FlowNodeType.AnomalyDetect:
+                    // 模型目录名（相对 Models\Anomaly）；空 = 该目录下第一个可用模型
+                    Add(list, "Model", "");
+                    Add(list, "Device", "CPU");
+                    // 检测区域：宽或高为 0 = 整图
+                    Add(list, "RoiX", "0");
+                    Add(list, "RoiY", "0");
+                    Add(list, "RoiW", "0");
+                    Add(list, "RoiH", "0");
+                    // 阈值 0 = 用模型自带的（训练时按训练集分数分布算出来的那个）
+                    Add(list, "Threshold", "0");
+                    Add(list, "MinArea", "20");       // 缺陷连通域最小面积（px）
+                    Add(list, "AreaLimit", "0");      // 面积占比上限；0 = 不用面积判
+                    Add(list, "ShowHeat", "1");       // 是否把热图上色叠加到画面上
+                    break;
             }
 
             // 运行控制：算法节点的「超时(ms)」，默认 500。

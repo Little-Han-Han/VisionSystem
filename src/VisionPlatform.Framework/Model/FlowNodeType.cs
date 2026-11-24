@@ -167,5 +167,14 @@ namespace VisionPlatform.Flow
         /// 拖动旋转 / 滚轮缩放 / 双击复位。</para>
         /// </summary>
         PointCloudSource,
+
+        // ===== 本期追加（无监督缺陷检测，加在末尾）=====
+
+        /// <summary>
+        /// 无监督缺陷检测（PaDiM / EfficientAD，OpenVINO 推理）：
+        /// 只用 OK 样本建模型，运行时输出**异常热图 + 缺陷参数**（最大分 / 面积占比 / 缺陷数 / 外接框）。
+        /// <para>输入：图像 + 位置修正（可选）；输出：热图 + 缺陷参数。</para>
+        /// </summary>
+        AnomalyDetect,
 }
 }

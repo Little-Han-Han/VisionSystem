@@ -206,10 +206,29 @@ namespace VisionPlatform.Modules
                     P("Count", "行数", FlowPortKind.Number, false)
                 });
 
+            // 无监督缺陷检测：图像 + 位置修正进，热图 + 缺陷参数出。
+            // 【为什么位置修正要单列一个端子】异常检测对"工件位置"极敏感（逐位置比对），
+            // 上游定位结果接进来后 ROI 跟着工件走，是这类算法能上产线的前提。
+            Register(FlowNodeType.AnomalyDetect,
+                new List<FlowPortDef>
+                {
+                    P("Image", "图像", FlowPortKind.Image, true),
+                    P("Pose", "位置修正", FlowPortKind.Pose, false,
+                      "可选：接上游匹配 / 位置修正的位姿，检测区域随工件移动")
+                },
+                new List<FlowPortDef>
+                {
+                    P("Image", "热图", FlowPortKind.Image, false),
+                    P("Score", "最大异常分", FlowPortKind.Number, false),
+                    P("Area", "面积占比", FlowPortKind.Number, false),
+                    P("Count", "缺陷数", FlowPortKind.Number, false),
+                    P("Box", "最大缺陷框", FlowPortKind.Rect, false),
+                    P("Point", "最大分点位", FlowPortKind.Point, false)
+                });
+
             Register(FlowNodeType.ResultOutput,
                 new List<FlowPortDef> { P("Any", "任意输入", FlowPortKind.Any, true, "", true) },
                 new List<FlowPortDef>());
-
             // ---- 本期新增：图像滤波 / 颜色提取 ----
             // 端子数据与执行器暂不按端子读写（本库的执行器是按节点类型取工作帧的），
             // 这里的端子表只用于画布绘制、连线兼容性判定与校验器。

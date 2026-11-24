@@ -193,6 +193,12 @@ namespace VisionPlatform.Modules
             Add(FlowNodeType.PointCloudSource, "PointCloudSource", "读取点云",
                 ModuleCategories.ThreeD, ++n, "PLY/PCD 文件或深度图 → 3D 点云（视图自动进 3D 模式，可旋转）",
                 NodeStripeColors.ThreeD);
+
+            // ---- 无监督缺陷检测 ----
+            Add(FlowNodeType.AnomalyDetect, "AnomalyDetect", "异常检测",
+                ModuleCategories.DeepLearning, ++n,
+                "只用 OK 样本建模型（PaDiM / EfficientAD），输出异常热图与缺陷参数",
+                NodeStripeColors.Recognition, AnomalyHints());
         }
 
         private static void Add(FlowNodeType type, string key, string name,
@@ -219,6 +225,17 @@ namespace VisionPlatform.Modules
             return h;
         }
 
+        /// <summary>
+        /// 异常检测节点：参数区顶部挂"模型状态卡"（模型名 / 样本数 / 阈值 + 打开样本窗体）。
+        /// <para>宿主只按 <c>BannerKind = "anomaly"</c> 决定挂哪种卡片，不认识具体节点类型。</para>
+        /// </summary>
+        private static NodeUiHints AnomalyHints()
+        {
+            var h = new NodeUiHints();
+            h.BannerKind = "anomaly";
+            return h;
+        }
+
         private static NodeUiHints PreviewHints(params LayoutPreviewSpec[] previews)
         {
             var h = new NodeUiHints();
@@ -239,6 +256,31 @@ namespace VisionPlatform.Modules
         public void Register()
         {
             BuiltInModules.RegisterAll();
+
+            // 参数表的动态选项来源由模块包自己提供：宿主只按 Key 取，不认识具体业务。
+            // 这里注册的「模型列表」读的是固定目录 Models\Anomaly，换台机器只要有模型就能用。
+            ParamOptionSources.Register(BuiltInParamTables.AnomalyOptionSource, BuildAnomalyOptions);
+        }
+
+        /// <summary>
+        /// 异常检测模型下拉项：扫固定目录，列出"目录名 + 类型 + 样本数 + 阈值"。
+        /// <para>没有模型时给一条明确的引导项（而不是空下拉）—— 空下拉会让人以为是软件坏了。</para>
+        /// </summary>
+        private static List<NodeParamOption> BuildAnomalyOptions()
+        {
+            var list = new List<NodeParamOption>();
+
+            List<AnomalyModelInfo> models = AnomalyModelCatalog.List();
+            foreach (AnomalyModelInfo m in models)
+                list.Add(new NodeParamOption(m.Name + "（" + m.Summary + "）", m.Name));
+
+            if (list.Count == 0)
+            {
+                list.Add(new NodeParamOption(
+                    "<还没有模型：点「训练 / 标注样本…」建一个>", ""));
+            }
+
+            return list;
         }
     }
 }

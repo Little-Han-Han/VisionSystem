@@ -622,6 +622,7 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.LineLineMeasure:   return RunLineLineMeasure(s, node, p);
                 case FlowNodeType.BarcodeRead:       return RunBarcode(s, node, p);
                 case FlowNodeType.PointCloudSource:  return RunPointCloudSource(s, node, p);
+                case FlowNodeType.AnomalyDetect:     return RunAnomaly(s, node, p);
                 default:
                     p.Status = FlowNodeStatus.Skipped;
                     p.Summary = node.Name + "：暂不支持的节点类型";
@@ -992,6 +993,137 @@ namespace VisionPlatform.Flow
                 + DescribeHint(task, loadWatch.ElapsedMilliseconds);
             return targets.Count > 0 || node.GetInt("MinCount", 0) <= 0;
         }
+
+        // ---------------------- 无监督缺陷检测（PaDiM / EfficientAD）---------------------
+
+        /// <summary>
+        /// 异常检测：整块检测区域送进模型，输出异常热图 + 缺陷连通域统计。
+        /// <para>
+        /// 【与目标识别的区别】那边是"找已知类别的东西"，这边是"说不清哪里不对，只知道和正常不一样"：
+        /// 结论不是"有几个目标"，而是"最大偏离多少 + 偏了多少面积"。
+        /// 因此判定同时看 <c>max_score &gt; 1</c>（相对阈值）与可选的面积占比上限。
+        /// </para>
+        /// </summary>
+        private bool RunAnomaly(FlowRunSession s, FlowNode node, FlowNodeProgress p)
+        {
+            if (s.Current == null)
+            {
+                p.Status = FlowNodeStatus.Skipped;
+                p.Summary = "异常检测：没有输入图像（请接在图像源之后）";
+                return true;
+            }
+
+            string modelName = node.GetString("Model", "");
+            string dir = Framework.Modules.AnomalyModelCatalog.Resolve(modelName);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                p.Summary = string.IsNullOrEmpty(modelName)
+                    ? "异常检测：Models\\Anomaly 下还没有模型（点参数区的「训练 / 标注样本…」建一个）"
+                    : "异常检测：模型目录不存在 —— " + dir;
+                return false;
+            }
+
+            string device = node.GetString("Device", "CPU");
+
+            // 彩色优先：OpenVINO 特征提取器按 3 通道训练；内置描述子自己会灰度化。
+            Bitmap input = (s.ColorInput != null) ? s.ColorInput : s.Current;
+            Rectangle roi = ResolveRoi(s, node, input.Width, input.Height);
+
+            float threshold = (float)node.GetDouble("Threshold", 0);
+            int minArea = node.GetInt("MinArea", 20);
+            bool wantHeat = node.GetBool("ShowHeat", true);
+
+            OpResult<VisionAlgo.AnomalyFrame> r =
+                _algo.AnomalyDetect(input, dir, device, roi, threshold, minArea, wantHeat);
+            if (!r.Success)
+            {
+                // 不用 Tail：会把"模型目录不存在："这类前缀截掉，只剩一个路径
+                p.Summary = "异常检测：" + r.Message;
+                return false;
+            }
+
+            VisionAlgo.AnomalyFrame f = r.Value;
+            NativeAnomaly.VA_AnomStat st = f.Stat;
+
+            double maxScore = st.max_score;          // 相对阈值倍数，1.0 = 阈值
+            double areaRatio = st.area_ratio;
+            bool hasBox = st.defect_count > 0 && st.box_w > 0 && st.box_h > 0;
+
+            // 热图：整帧尺寸的位图，只覆盖 ROI 那一块，其余透明
+            if (wantHeat && f.Heat != null && f.MapW > 0 && f.MapH > 0)
+            {
+                p.Overlay = NodeOverlayFactory.AnomalyHeat(f.Heat, f.MapW, f.MapH,
+                                                           input.Width, input.Height,
+                                                           st.roi_x, st.roi_y);
+            }
+            EnsureNodeFrame(s, p);
+
+            // ROI 轮廓进辅助层（输入条件，不占结果明细）；缺陷框进主结果层
+            if (st.roi_w > 0 && st.roi_h > 0)
+                p.AuxShapes.AddRange(FlowShapes.RoiOutline(
+                    new Rectangle(st.roi_x, st.roi_y, st.roi_w, st.roi_h)));
+
+            if (hasBox)
+            {
+                double cx = st.box_x + st.box_w / 2.0;
+                double cy = st.box_y + st.box_h / 2.0;
+                p.Shapes.Add(FlowShapes.BlobRect(cx, cy, st.box_w, st.box_h,
+                    string.Format(CultureInfo.InvariantCulture, "异常 {0:F2}×", maxScore)));
+
+                p.Regions.Add(new RegionInfo
+                {
+                    Index = 1,
+                    Cx = cx, Cy = cy,
+                    Width = st.box_w, Height = st.box_h,
+                    Area = st.area_px
+                });
+            }
+
+            p.Metrics.TargetCount = st.defect_count;
+            p.Metrics.TopScore = maxScore;
+            p.Metrics.MaxArea = st.area_px;
+            p.Metrics.TopCx = st.max_x;
+            p.Metrics.TopCy = st.max_y;
+
+            p.Outputs.Add(new PortValue("Score", "最大异常分", FlowPortKind.Number, maxScore));
+            p.Outputs.Add(new PortValue("Area", "面积占比", FlowPortKind.Number, areaRatio));
+            p.Outputs.Add(new PortValue("Count", "缺陷数", FlowPortKind.Number, (double)st.defect_count));
+            p.Outputs.Add(new PortValue("Point", "最大分点位", FlowPortKind.Point,
+                new PointF(st.max_x, st.max_y)));
+
+            if (hasBox)
+                p.Outputs.Add(new PortValue("Box", "最大缺陷框", FlowPortKind.Rect,
+                    new RectangleF(st.box_x, st.box_y, st.box_w, st.box_h)));
+
+            // ---- 判定 ----
+            // 主判据：最大分是否越过阈值（1.0）。面积上限是可选加严项：
+            // 有些缺陷"每一处都不算突出但整片都有"（例如镀层发花），只看峰值会漏。
+            bool pass = maxScore <= 1.0;
+
+            double areaLimit = node.GetDouble("AreaLimit", 0);
+            bool areaNg = areaLimit > 0 && areaRatio > areaLimit;
+            if (areaNg) pass = false;
+
+            p.Summary = string.Format(CultureInfo.InvariantCulture,
+                "异常检测：最大 {0:F2}×阈值 · 面积 {1:P2} · 缺陷 {2} 个",
+                maxScore, areaRatio, st.defect_count);
+
+            if (areaNg)
+                p.Summary += string.Format(CultureInfo.InvariantCulture, "（面积超上限 {0:P2}）", areaLimit);
+
+            // 模型信息只在"首帧"或异常时附上：每帧刷屏会盖掉真正的读数
+            if (!_anomalyInfoLogged)
+            {
+                string info = _algo.AnomalyInfo();
+                if (!string.IsNullOrEmpty(info)) p.Summary += "　[" + info + "]";
+                _anomalyInfoLogged = true;
+            }
+
+            return pass;
+        }
+
+        /// <summary>异常检测的模型信息是否已经在本执行器里打印过一次。</summary>
+        private bool _anomalyInfoLogged;
 
         /// <summary>
         /// 深度学习 OCR（PaddleOCR）：DB 检测 + CRNN 识别。

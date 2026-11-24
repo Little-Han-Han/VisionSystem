@@ -170,6 +170,11 @@ namespace VisionPlatform.UI
             if (src.StartsWith("calib:", StringComparison.OrdinalIgnoreCase))
                 return BuildCalibOptions(src.Substring("calib:".Length));
 
+            // 模块包自带的动态选项（如异常检测的模型列表）：宿主只按 Key 取，不认识具体业务。
+            // 这条分支必须留在最后 —— comm / calib 是历史 Key，行为不能变。
+            List<NodeParamOption> registered = Framework.Modules.ParamOptionSources.Build(src);
+            if (registered != null) return registered;
+
             return null;
         }
 

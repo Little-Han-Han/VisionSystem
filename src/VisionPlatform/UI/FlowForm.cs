@@ -70,6 +70,10 @@ namespace VisionPlatform.UI
         private OcrTemplateCard _ocrCard;
         private string _ocrCardNodeId;
 
+        // 异常检测的模型状态卡片（数据源是 Models\Anomaly 固定目录）
+        private AnomalyStatusCard _anomalyCard;
+        private string _anomalyCardNodeId;
+
         // ---------------------------------------------------------------------
         //  右栏结构（UI-R01）：全部代码构建，**不动 FlowForm.Designer.cs**
         //  该工程有"VS 重序列化吃掉事件订阅"的事故史（DEF-01 就是这么坏的两个按钮），
@@ -1862,13 +1866,15 @@ namespace VisionPlatform.UI
         /// <summary>卸掉当前 banner 卡片（面板负责 Dispose 旧控件）。</summary>
         private void ClearBannerCard()
         {
-            if (_templateCard == null && _ocrCard == null) return;
+            if (_templateCard == null && _ocrCard == null && _anomalyCard == null) return;
 
             nodeParamPanel.SetBanner(null);
             _templateCard = null;
             _templateCardNodeId = null;
             _ocrCard = null;
             _ocrCardNodeId = null;
+            _anomalyCard = null;
+            _anomalyCardNodeId = null;
         }
 
         /// <summary>
@@ -1913,6 +1919,111 @@ namespace VisionPlatform.UI
             catch (Exception ex)
             {
                 SetStatus("无法打开模板目录：" + ex.Message);
+            }
+        }
+
+        // =====================================================================
+        //  异常检测：模型状态卡与样本/训练窗体
+        // =====================================================================
+
+        private void OnAnomalyCardManage(object sender, EventArgs e)
+        {
+            OpenAnomalyTrainForm();
+        }
+
+        /// <summary>重扫 Models\Anomaly：卡片与参数面板的下拉都要跟着更新（可能刚训完一个新模型）。</summary>
+        private void OnAnomalyCardRefresh(object sender, EventArgs e)
+        {
+            FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+            if (node == null) return;
+
+            // SetNode 会按最新目录重建参数表（下拉选项在渲染时生成），
+            // 但也会把 banner 清掉，所以随后必须再刷一次卡片。
+            nodeParamPanel.SetNode(node);
+            RefreshTemplateCard();
+            SetStatus("已重新扫描模型目录");
+        }
+
+        private void OnAnomalyCardOpenFolder(object sender, EventArgs e)
+        {
+            try
+            {
+                string dir = Framework.Modules.AnomalyModelCatalog.EnsureRoot();
+                System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+            }
+            catch (Exception ex)
+            {
+                SetStatus("无法打开模型目录：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 打开「样本 / 训练」窗体，并在关闭时把模型名 / ROI / 判定参数写回节点。
+        /// <para>
+        /// 【ROI 要正反变换】窗体里显示的是<strong>原始帧</strong>，参数里存的是<strong>示教坐标</strong>；
+        /// 进去先正变换成"画面上该在哪"，出来再逆变换回去。少写这一步，
+        /// 训练框和运行时框会差一个位移（与画 ROI 同一个坑）。
+        /// </para>
+        /// </summary>
+        private void OpenAnomalyTrainForm()
+        {
+            FlowNode node = _selectedNode ?? nodeParamPanel.Node;
+            if (node == null)
+            {
+                MessageBox.Show(this, "请先在画布上选中一个「异常检测」节点。", "异常检测",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!string.Equals(BannerKindOf(node), "anomaly", StringComparison.Ordinal))
+            {
+                MessageBox.Show(this, "节点「" + node.Name + "」不是异常检测节点，没有样本 / 训练界面。",
+                    "异常检测", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var nodeRoi = new Rectangle(node.GetInt("RoiX", 0), node.GetInt("RoiY", 0),
+                                        node.GetInt("RoiW", 0), node.GetInt("RoiH", 0));
+
+            FlowRunTransform live = LiveTransform();
+            Rectangle displayRoi = (live != null && nodeRoi.Width > 0 && nodeRoi.Height > 0)
+                ? live.ApplyToRect(nodeRoi)
+                : nodeRoi;
+
+            using (var dlg = new AnomalyTrainForm(node.GetString("Model", ""), displayRoi,
+                                                  node.GetDouble("Threshold", 0),
+                                                  node.GetInt("MinArea", 20),
+                                                  node.GetDouble("AreaLimit", 0)))
+            {
+                dlg.ModelChanged += delegate
+                {
+                    if (_anomalyCard != null) _anomalyCard.Bind(dlg.ModelName);
+                };
+
+                dlg.ShowDialog(this);
+
+                if (dlg.ParamsChanged)
+                {
+                    node.Set("Model", dlg.ModelName ?? "");
+
+                    Rectangle trainedRoi = dlg.Roi;
+                    if (live != null && trainedRoi.Width > 0 && trainedRoi.Height > 0)
+                        trainedRoi = live.ApplyInverseToRect(trainedRoi);
+
+                    node.Set("RoiX", trainedRoi.Width > 0 ? trainedRoi.X : 0);
+                    node.Set("RoiY", trainedRoi.Width > 0 ? trainedRoi.Y : 0);
+                    node.Set("RoiW", trainedRoi.Width > 0 ? trainedRoi.Width : 0);
+                    node.Set("RoiH", trainedRoi.Width > 0 ? trainedRoi.Height : 0);
+
+                    node.Set("Threshold", dlg.Threshold);
+                    node.Set("MinArea", dlg.MinArea);
+                    node.Set("AreaLimit", dlg.AreaLimit);
+
+                    nodeParamPanel.SetNode(node);
+                    SaveFlows();
+                }
+
+                RefreshTemplateCard();
             }
         }
 
@@ -2078,10 +2189,33 @@ namespace VisionPlatform.UI
             string algorithm = TemplateAlgorithmOf(node);
 
             bool isOcr = string.Equals(BannerKindOf(node), "ocr", StringComparison.Ordinal);
+            bool isAnomaly = string.Equals(BannerKindOf(node), "anomaly", StringComparison.Ordinal);
 
-            if (algorithm == null && !isOcr)
+            if (algorithm == null && !isOcr && !isAnomaly)
             {
                 ClearBannerCard();
+                return;
+            }
+
+            // ---- 异常检测：模型状态卡（数据来自 Models\Anomaly 目录）----
+            if (isAnomaly)
+            {
+                string modelName = node.GetString("Model", "");
+
+                if (_anomalyCard == null || !string.Equals(_anomalyCardNodeId, node.Id, StringComparison.Ordinal))
+                {
+                    ClearBannerCard();
+
+                    _anomalyCard = new AnomalyStatusCard();
+                    _anomalyCard.ManageRequested += OnAnomalyCardManage;
+                    _anomalyCard.RefreshRequested += OnAnomalyCardRefresh;
+                    _anomalyCard.OpenFolderRequested += OnAnomalyCardOpenFolder;
+                    _anomalyCardNodeId = node.Id;
+
+                    nodeParamPanel.SetBanner(_anomalyCard);
+                }
+
+                _anomalyCard.Bind(modelName);
                 return;
             }
 
@@ -2148,6 +2282,12 @@ namespace VisionPlatform.UI
             if (string.Equals(key, "ManageOcrTemplates", StringComparison.Ordinal))
             {
                 OpenOcrTemplateEditor();
+                return;
+            }
+
+            if (string.Equals(key, "TrainAnomaly", StringComparison.Ordinal))
+            {
+                OpenAnomalyTrainForm();
                 return;
             }
 

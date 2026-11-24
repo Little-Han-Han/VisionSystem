@@ -1819,6 +1819,171 @@ namespace VisionPlatform.Native
             }
         }
 
+        // ---------------------- 无监督缺陷检测（PaDiM / EfficientAD）---------------------
+
+        /// <summary>已加载的异常检测模型目录（"目录|设备"），用于跨帧复用编译结果。</summary>
+        private string _anomKey = "";
+
+        /// <summary>一帧异常检测的结果（热图 + 缺陷统计）。</summary>
+        public sealed class AnomalyFrame
+        {
+            public NativeAnomaly.VA_AnomStat Stat;
+
+            /// <summary>热图（相对阈值倍数，1.0 = 阈值线）；未请求时为 null。</summary>
+            public float[] Heat;
+            public int MapW;
+            public int MapH;
+
+            /// <summary>缺陷掩膜（0/1，与热图同尺寸）。</summary>
+            public byte[] Mask;
+
+            public double MaxScore { get { return Stat.max_score; } }
+            public double AreaRatio { get { return Stat.area_ratio; } }
+            public int DefectCount { get { return Stat.defect_count; } }
+        }
+
+        /// <summary>
+        /// 加载模型目录。目录必须是绝对路径（相对名称由调用方按固定根目录解析）。
+        /// </summary>
+        private string AnomalyEnsure(string modelDir, string device, out string error)
+        {
+            error = "";
+            if (string.IsNullOrWhiteSpace(modelDir)) { error = "未指定模型目录"; return null; }
+            if (!System.IO.Directory.Exists(modelDir)) { error = "模型目录不存在：" + modelDir; return null; }
+
+            string dev = string.IsNullOrEmpty(device) ? "CPU" : device;
+
+            // 缓存键带 model.json 的写入时间：重新训练后文件名不变、内容变了，
+            // 只用 目录|设备 做键会让"训练完还是老模型"成为必现问题。
+            string stamp = "0";
+            try
+            {
+                string meta = System.IO.Path.Combine(modelDir, "model.json");
+                if (System.IO.File.Exists(meta))
+                    stamp = System.IO.File.GetLastWriteTimeUtc(meta).Ticks.ToString(CultureInfo.InvariantCulture);
+            }
+            catch (Exception) { }
+
+            string key = modelDir + "|" + dev + "|" + stamp;
+            if (string.Equals(key, _anomKey, StringComparison.Ordinal)) return modelDir;
+
+            int rc = NativeAnomaly.Create(_handle, modelDir, dev);
+            if (rc != 0)
+            {
+                error = string.Equals(dev, "CUDA", StringComparison.OrdinalIgnoreCase)
+                    ? "CUDA 推理尚未实现（接口已预留），请先用 CPU/GPU"
+                    : VaResult.ToString(rc) + "：" + LastError;
+                return null;
+            }
+
+            _anomKey = key;
+            return modelDir;
+        }
+
+        /// <summary>
+        /// 异常检测一帧。roi 为原图坐标（宽高 0 = 整图），threshold &lt;= 0 表示用模型自带阈值。
+        /// </summary>
+        public OpResult<AnomalyFrame> AnomalyDetect(Bitmap src, string modelDir, string device,
+                                                    Rectangle roi, float threshold, int minAreaPx,
+                                                    bool wantHeat)
+        {
+            if (src == null) return OpResult<AnomalyFrame>.Fail("输入图像为空");
+
+            string err;
+            string dir = AnomalyEnsure(modelDir, device, out err);
+            if (dir == null) return OpResult<AnomalyFrame>.Fail(err);
+
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    NativeAnomaly.AnomRunResult r =
+                        NativeAnomaly.Run(_handle, ref img, roi, threshold, minAreaPx, wantHeat, out err);
+                    if (!string.IsNullOrEmpty(err)) return OpResult<AnomalyFrame>.Fail(err);
+
+                    var frame = new AnomalyFrame
+                    {
+                        Stat = r.Stat,
+                        Heat = r.Heat,
+                        MapW = r.MapW,
+                        MapH = r.MapH,
+                        Mask = r.Mask
+                    };
+                    return OpResult<AnomalyFrame>.Ok(frame);
+                }
+                catch (Exception ex)
+                {
+                    return OpResult<AnomalyFrame>.Fail("推理异常：" + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>当前已加载模型的信息摘要（未加载返回空串）。</summary>
+        public string AnomalyInfo()
+        {
+            try { return NativeAnomaly.Info(_handle); }
+            catch (Exception) { return ""; }
+        }
+
+        /// <summary>开始一次 PaDiM 训练（outDir 为绝对路径，目录须已存在）。</summary>
+        public OpResult<bool> AnomalyTrainBegin(string outDir, string extractor,
+                                                int featKind, int inputSize)
+        {
+            try
+            {
+                int rc = NativeAnomaly.TrainBegin(_handle, outDir, extractor, featKind, inputSize);
+                if (rc != 0) return OpResult<bool>.Fail(VaResult.ToString(rc) + "：" + LastError);
+                return OpResult<bool>.Ok(true);
+            }
+            catch (Exception ex) { return OpResult<bool>.Fail("训练初始化异常：" + ex.Message); }
+        }
+
+        /// <summary>追加一张 OK 样本（roi 为原图坐标，宽高 0 = 整图）。</summary>
+        public OpResult<int> AnomalyTrainAdd(Bitmap src, Rectangle roi)
+        {
+            if (src == null) return OpResult<int>.Fail("样本图像为空");
+
+            using (var ci = new ColorInput(src))
+            {
+                try
+                {
+                    VA_Image img = ci.Image;
+                    int rc = NativeAnomaly.TrainAdd(_handle, ref img, roi);
+                    if (rc != 0) return OpResult<int>.Fail(VaResult.ToString(rc) + "：" + LastError);
+                    return OpResult<int>.Ok(NativeAnomaly.TrainCount(_handle));
+                }
+                catch (Exception ex) { return OpResult<int>.Fail("追加样本异常：" + ex.Message); }
+            }
+        }
+
+        /// <summary>结束训练并落盘，返回摘要文本。</summary>
+        public OpResult<string> AnomalyTrainFinish()
+        {
+            try
+            {
+                string summary;
+                int rc = NativeAnomaly.TrainFinish(_handle, out summary);
+                if (rc != 0) return OpResult<string>.Fail(VaResult.ToString(rc) + "：" + LastError);
+                return OpResult<string>.Ok(summary);
+            }
+            catch (Exception ex) { return OpResult<string>.Fail("训练失败：" + ex.Message); }
+        }
+
+        /// <summary>放弃本次训练。</summary>
+        public void AnomalyTrainCancel()
+        {
+            try { NativeAnomaly.TrainCancel(_handle); _anomKey = ""; }
+            catch (Exception) { }
+        }
+
+        /// <summary>模型目录换了 / 重新训练后，强制下次调用重新加载。</summary>
+        public void AnomalyInvalidate()
+        {
+            try { NativeAnomaly.Clear(_handle); } catch (Exception) { }
+            _anomKey = "";
+        }
+
         // ---------------------- 相机标定（棋盘格） ----------------------
 
         /// <summary>在单张图上找棋盘格内角点，返回 [x0,y0,x1,y1,...]（图像坐标）。</summary>

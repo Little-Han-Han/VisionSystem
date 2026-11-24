@@ -19,6 +19,7 @@
  *    algo/va_color.h         颜色提取（BGR / HSV 阈值分割 + 连通域）
  *    algo/va_classify.h      分类器（轮廓特征 + SVM / KNN，OpenCV ml）
  *    algo/va_ocr.h           传统算法 OCR（连通域分割 + 模板匹配）
+ *    algo/va_anomaly.h       无监督缺陷检测（PaDiM 训练+推理 / EfficientAD 推理）
  *
  *  设计约定（C# 侧 P/Invoke 依赖这些约定，改动需同步）：
  *   1. 全部 extern "C" 导出，无名称修饰
@@ -48,5 +49,6 @@
 #include "algo/va_color.h"
 #include "algo/va_classify.h"
 #include "algo/va_ocr.h"
+#include "algo/va_anomaly.h"
 
 #endif /* VISION_ALGO_H */
