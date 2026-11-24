@@ -48,7 +48,7 @@
 ├─ P/Invoke 边界  VisionPlatform/Native/VisionAlgo.cs、NativeCamera.cs
 │           （界面与算法之间唯一的接触面：结构体一一映射、零拷贝传入、输出由 C# 分配）
 ├─ 契约层    VisionPlatform.Framework ── 模块契约 / 注册表 / 动态加载 / 公共数据类型（无 WinForms）
-├─ 模块层    VisionPlatform.Modules   ── 30 个流程模块的端子 / 默认参数 / 参数表 / 界面声明（运行时加载）
+├─ 模块层    VisionPlatform.Modules   ── 31 个流程模块的端子 / 默认参数 / 参数表 / 界面声明（运行时加载）
 ├─ 业务层    VisionPlatform           ── 配置 / 相机 / 流程执行 / 通讯 / 配方 / 检测引擎
 └─ 表现层    VisionPlatform/UI + VisionPlatform.UI.Controls + VisionSystem.Controls
             窗体、可复用主题与参数列表控件、图像/点云显示控件库
@@ -76,7 +76,7 @@
 | 算法层 | `VisionAlgo.Native` | C++ / OpenCV：预处理、Blob、清晰度、圆/直线拟合、模板/形状匹配、目标检测、OCR、条码、本机相机采集 |
 | P/Invoke 边界 | `VisionPlatform/Native/VisionAlgo.cs`、`Native/NativeCamera.cs` | 唯一接触 C++ 处；结构体映射、零拷贝传入、相机帧经 `VA_Image`（BGR，`stride` 如实传递） |
 | 契约层 | `VisionPlatform.Framework` | `IFlowNodeModule` / `IFlowModulePackage`、`FlowModuleRegistry`、`ModuleLoader`、公共数据类型（`FlowNodeType` / `ParamItem` / 参数表 / 端子） |
-| 模块层 | `VisionPlatform.Modules` | 30 个流程模块的清单、默认参数、参数表、端子、界面提示；**与宿主同目录输出**，由宿主反射加载（`Modules\` 子目录为兼容老部署的备选路径） |
+| 模块层 | `VisionPlatform.Modules` | 31 个流程模块的清单、默认参数、参数表、端子、界面提示；**与宿主同目录输出**，由宿主反射加载（`Modules\` 子目录为兼容老部署的备选路径） |
 | 业务层 | `VisionPlatform/Core` | Logger（SQLite 日志库）/ AppPaths / Json / OpResult / AppSettings（AppConfig 三段式 + ConfigStore）/ ImageStore / PerfProbe |
 |  | `VisionPlatform/Camera` | 相机接口与**本机摄像头 `LocalCamera`** / 模拟 `SimCamera` / 海康 `HikCamera`（占位）/ CameraManager |
 |  | `VisionPlatform/Flow` | 流程模型、单链执行器 `FlowRunner`、并行管理器 `FlowRunManager`（触发式 `Trigger` / 连续双模式）、结果通道 `FlowOutputChannel`、节点复制粘贴 `FlowPasteService`、图片/点云文件夹游标 |
@@ -172,7 +172,7 @@
 - **目标姿态估计 DlPose**：YOLO 姿态，输出框 + 关键点。
 - **目标深度估计 DlDepth**：单目深度图（0~1 归一化）。
 - **OCR(深度学习) OcrDl**：PaddleOCR 两阶段（DB 文本检测 + CRNN 识别）。
-- **异常检测 AnomalyDetect**：无监督缺陷检测（PaDiM 原生训练 / EfficientAD 推理，OpenVINO 算）。
+- **异常检测 AnomalyDetect**：无监督缺陷检测（PaDiM 原生训练；EfficientAD 与可选特征提取器走 OpenVINO）。
   只用 OK 样本建模型，输出**热图 + 最大分 / 面积占比 / 缺陷数 / 最大缺陷框 / 最大分点位**；
   模型固定放 `Models\Anomaly\<模型名>\`，参数面板下拉选模型（**没有文件对话框**），
   支持检测区域 ROI（随位置修正移动）。训练入口在参数面板的「训练 / 标注样本…」：
@@ -361,7 +361,7 @@ build.bat Release    :: 编译 Release | x64
 > （`Core/NativeDllPath.cs`，改进程 PATH 而非 `AddDllDirectory`，兼容 Win7 工控机）。
 > 老部署（第三方 DLL 与 exe 平铺、模块在 `Modules\` 子目录）仍然可运行，无需回滚。
 
-回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1162 项 UI / 软件层用例）：
+回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1153 项 UI / 软件层用例）：
 
 ```bat
 _build_smoke.bat Debug     :: 或 Release；先构建 SmokeUi
