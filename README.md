@@ -449,6 +449,43 @@ version.bat 1.0.0.1    :: 设置版本（同步 AssemblyVersion / AssemblyFileVe
 以及 `bin\x64\<配置>\VisionPlatform.exe` 的属性都会显示新版本。
 `src/VisionPlatform/Properties/AssemblyInfo.cs` 等文件**不再**各自写版本号，避免漏改。
 
+#### 发版三步（分支 → Tag → Release）
+
+版本号变了就是一次「发版」，三步缺一不可（只改文档时跳过 Tag/Release）：
+
+```bash
+# ① 升版本 + 写 CHANGELOG，提交并推分支
+version.bat 1.0.14.4
+#   手动补 CHANGELOG.md 顶部条目（改了什么、为什么、现场影响）
+git add -A && git commit -m "release: 1.0.14.4（一句话说明）"
+git push
+
+# ② 打 annotated tag 并推送（tag 名 = v + 四段版本号，与 SharedVersion.cs 一致）
+git tag -a v1.0.14.4 -m "1.0.14.4：主要变更摘要"
+git push origin v1.0.14.4
+
+# ③ 建 GitHub Release
+#    ⚠️ 仓库首页 About 右侧显示的是 **Release**，不是 Tag —— 只推 tag 首页不会变
+gh release create v1.0.14.4 --title "v1.0.14.4" --notes-file CHANGELOG.md --latest
+#    没装 gh：网页 Releases → Draft a new release → 选该 tag → 粘贴 CHANGELOG 对应条目
+```
+
+**约定**
+
+| 情况 | 是否升版本 | 是否打 Tag / Release |
+|---|---|---|
+| 功能 / 修复 / 结构调整 | 升（见下方规则） | 是 |
+| 只改文档、注释、README 截图 | 否 | 否（只 `git push`） |
+| Tag 打错位置 | — | 删旧重打：`git push origin :refs/tags/vX` + `git tag -d vX`，再重打 |
+| 旧版本 Tag | 保留 | 现场反馈"某版本的问题"时要能 `git switch v1.0.13.2` 复现，删了只剩 CHANGELOG 文字 |
+
+**版本号怎么升**（四段 `a.b.c.d`）
+
+- `a`（大版本）：不兼容改动 / 大重构（老配方或工程包不能直接沿用）
+- `b`（小版本）：一批新功能
+- `c`：单个功能或一组修复
+- `d`（最后一位）：小改动、单点修复、UI 微调 —— **现场最常用**
+
 ---
 
 ## 文档索引
