@@ -365,11 +365,13 @@ namespace VisionPlatform.UI
             lblInfo.ForeColor = UiTheme.ColorTextPrimary;
             lblInfo.Font = UiTheme.FontBody;
 
+            // lblEmpty / lblSummary 都浮在 panelView（恒深色图像区）之上，字色必须取 OnView 系列：
+            // 浅色主题下 ColorTextPrimary 是深灰，写在 #181820 上就是"覆盖层文字看不见"。
             lblEmpty.BackColor = UiTheme.ColorViewBg;
-            lblEmpty.ForeColor = UiTheme.ColorTextSecondary;
+            lblEmpty.ForeColor = UiTheme.ColorTextOnViewDim;
             lblEmpty.Font = UiTheme.FontBody;
 
-            lblSummary.ForeColor = UiTheme.ColorTextPrimary;
+            lblSummary.ForeColor = UiTheme.ColorTextOnView;
             lblSummary.Font = UiTheme.FontMono;
 
             // 自绘叠加层（ROI 轮廓 / 编辑中的旋转矩形）用的是固定 StrokeColor，换色板后要重取；

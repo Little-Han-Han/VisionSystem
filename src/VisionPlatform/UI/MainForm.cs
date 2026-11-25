@@ -2851,7 +2851,10 @@ namespace VisionPlatform.UI
 
             try
             {
-                using (var back = new SolidBrush(UiTheme.ColorViewBg))
+                // 底色必须与 listLog.BackColor 同源（ColorCanvasBg 随主题）。
+                // 原先填的是 ColorViewBg（恒深 #181820），浅色主题下就变成"浅底控件里的深色行 + 深灰字"，
+                // 而字色取的是 ColorTextSecondary(#5A6270) —— 正好是"看不清日志"的主因。
+                using (var back = new SolidBrush(UiTheme.ColorCanvasBg))
                 {
                     e.Graphics.FillRectangle(back, e.Bounds);
                 }

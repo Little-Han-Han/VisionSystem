@@ -158,6 +158,12 @@ namespace VisionPlatform.UI
             ColorDisabled      = FromHex(0x3A, 0x3A, 0x44);   // #3A3A44
             ColorNeutral       = FromHex(0x48, 0x48, 0x54);   // #484854
             ColorTextOnFill    = Color.White;
+
+            // 「图像区上的文字」：图像区恒深色，这两项**不随主题变**
+            ColorTextOnView    = FromHex(0xDC, 0xE0, 0xE8);   // #DCE0E8
+            ColorTextOnViewDim = FromHex(0xA0, 0xA6, 0xB2);   // #A0A6B2
+            ColorOkOnView      = FromHex(0x2E, 0xCC, 0x71);   // #2ECC71
+            ColorNgOnView      = FromHex(0xE7, 0x4C, 0x3C);   // #E74C3C
         }
 
         /// <summary>
@@ -190,6 +196,13 @@ namespace VisionPlatform.UI
             ColorDisabled      = FromHex(0xD3, 0xD7, 0xDE);   // #D3D7DE
             ColorNeutral       = FromHex(0xB9, 0xBE, 0xC8);   // #B9BEC8
             ColorTextOnFill    = Color.White;
+
+            // 【不随主题】图像区在浅色模式下仍是 #181820（见上），所以画在它上面的字/符号
+            // 必须固定用亮色 —— 跟着主题走就是"深底 + 深字"，实物表现是"日志框里的字看不见"。
+            ColorTextOnView    = FromHex(0xDC, 0xE0, 0xE8);   // #DCE0E8
+            ColorTextOnViewDim = FromHex(0xA0, 0xA6, 0xB2);   // #A0A6B2
+            ColorOkOnView      = FromHex(0x2E, 0xCC, 0x71);   // #2ECC71（浅色板的 Ok 偏暗，深底上读不出）
+            ColorNgOnView      = FromHex(0xE7, 0x4C, 0x3C);   // #E74C3C
         }
 
         // ---------------------- 语义色（13 项核心 + 2 项补充）----------------------
@@ -227,6 +240,26 @@ namespace VisionPlatform.UI
 
         /// <summary>次文本（标签、单位）。深色 #A0A6B2 / 浅色 #5A6270。</summary>
         public static Color ColorTextSecondary { get; private set; }
+
+        /// <summary>
+        /// 图像区上的文字（深底恒亮，<strong>不随主题</strong>）：#DCE0E8。
+        /// <para>
+        /// 【为什么不能直接用 ColorTextPrimary】图像区 <see cref="ColorViewBg"/> 在浅色模式下
+        /// 仍是 #181820（浅色外壳 + 深色图像区），而浅色的 ColorTextPrimary 是 #1B1F26 ——
+        /// 深字写深底，现场看到的就是"日志框 / 缩略图标签里的字看不清"。
+        /// 凡是画在 <see cref="ColorViewBg"/> 之上的文字，一律取这一组。
+        /// </para>
+        /// </summary>
+        public static Color ColorTextOnView { get; private set; }
+
+        /// <summary>图像区上的次要文字（未标注 / 提示）：#A0A6B2，不随主题。</summary>
+        public static Color ColorTextOnViewDim { get; private set; }
+
+        /// <summary>图像区上的 OK 色（深底要亮一档）：#2ECC71，不随主题。</summary>
+        public static Color ColorOkOnView { get; private set; }
+
+        /// <summary>图像区上的 NG 色（深底要亮一档）：#E74C3C，不随主题。</summary>
+        public static Color ColorNgOnView { get; private set; }
 
         /// <summary>强调色（分区标题、选中态）。深色 #00A0E6 / 浅色 #0078C8。</summary>
         public static Color ColorAccent { get; private set; }

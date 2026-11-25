@@ -199,15 +199,26 @@ namespace VisionPlatform.Flow
         /// <param name="offX">ROI 左上角在整帧中的 X。</param>
         /// <param name="offY">ROI 左上角在整帧中的 Y。</param>
         /// <remarks>
-        /// 【配色与透明度都是"给人看的"】低于阈值 0.35 倍的部分几乎透明 —— 正常纹理本来就会有
-        /// 小幅波动，全画出来会把整块产品糊成一片彩色，真正的缺陷反而看不出来。
-        /// 到 1.0 倍（阈值）时已经是明显暖色，之后继续加深，便于判断"差多少"。
+        /// 【两条硬约束 —— 现场反馈"整块产品被标红、图都看不见了"】
+        /// <list type="number">
+        /// <item><b>透明度上限 ~47%</b>：叠加层只是"提示哪里不对"，不是"把图换成热图"。
+        /// 旧实现 alpha 到 2 倍阈值就冲到 235/255（92%），缺陷区域是一块实心红，纹理全被盖掉。</item>
+        /// <item><b>0.9 倍阈值以下完全不上色</b>：0.9 是"擦线"预警，1.0 才是判定线。
+        /// 正常纹理本来就在 0.3~0.8 之间晃，给它上色只会把整块产品糊成一层蓝紫，
+        /// 真正的缺陷反而看不出来。<b>色相同样按倍数铺开</b>：1.0 倍是冷色、
+        /// 2.0 倍黄绿、3.0 倍及以上才是红 —— 红只属于"明确超阈值"的地方。</item>
+        /// </list>
         /// </remarks>
         public static Bitmap AnomalyHeat(float[] rel, int mapW, int mapH,
                                          int frameW, int frameH, int offX, int offY)
         {
             if (rel == null || mapW <= 0 || mapH <= 0 || frameW <= 0 || frameH <= 0) return null;
             if (rel.Length < mapW * mapH) return null;
+
+            // 着色窗口：0.9 倍（刚擦线，几乎不着色）→ 3.0 倍（满色）
+            const float vStart = 0.90f;
+            const float vSpan = 2.10f;
+            const int alphaMax = 120;        // ≈47%：再高就盖住底图了
 
             var bmp = new Bitmap(frameW, frameH, PixelFormat.Format32bppArgb);
             BitmapData data = bmp.LockBits(new Rectangle(0, 0, frameW, frameH),
@@ -230,22 +241,23 @@ namespace VisionPlatform.Flow
                         if (fx < 0 || fx >= frameW) continue;
 
                         float v = rel[row + x];
-                        if (v < 0.35f) continue;          // 正常波动不上色
+                        if (v < vStart) continue;          // 正常波动不上色
                         if (v > 3f) v = 3f;
 
-                        // 0.35→透明，1.0（阈值）→较明显，3.0→几乎不透明
-                        int alpha = (int)(Math.Min(1f, (v - 0.35f) / 1.6f) * 210f) + 25;
-
-                        // 0.35~2.0 之间铺满 蓝→青→绿→黄→红
-                        float t = (v - 0.35f) / 1.65f;
+                        float t = (v - vStart) / vSpan;
                         if (t < 0f) t = 0f;
                         if (t > 1f) t = 1f;
 
+                        // 透明度：24(9%) → 120(47%)，1.8 次幂让"刚擦线"的区域几乎看不出来
+                        int alpha = 24 + (int)(Math.Pow(t, 1.8) * (alphaMax - 24));
+                        if (alpha > alphaMax) alpha = alphaMax;
+
+                        // 蓝 → 青 → 绿 → 黄 → 红（按 t 铺开，只有 t 接近 1 才是红）
                         int r, g, b;
-                        if (t < 0.25f)      { float k = t / 0.25f;        r = 0;                 g = (int)(210 * k);      b = 255; }
-                        else if (t < 0.5f)  { float k = (t - 0.25f) / 0.25f; r = 0;              g = 210;                 b = (int)(255 * (1 - k)); }
-                        else if (t < 0.75f) { float k = (t - 0.5f) / 0.25f;  r = (int)(255 * k); g = 210;                 b = 0; }
-                        else                { float k = (t - 0.75f) / 0.25f; r = 255;             g = (int)(210 * (1 - k)); b = 0; }
+                        if (t < 0.25f)      { float k = t / 0.25f;           r = 0;               g = (int)(200 * k);       b = 255; }
+                        else if (t < 0.5f)  { float k = (t - 0.25f) / 0.25f; r = 0;               g = 200;                  b = (int)(255 * (1 - k)); }
+                        else if (t < 0.75f) { float k = (t - 0.5f) / 0.25f;  r = (int)(255 * k);  g = 200;                  b = 0; }
+                        else                { float k = (t - 0.75f) / 0.25f; r = 255;              g = (int)(200 * (1 - k)); b = 0; }
 
                         int off = dstRow + fx * 4;
                         buf[off + 0] = (byte)b;

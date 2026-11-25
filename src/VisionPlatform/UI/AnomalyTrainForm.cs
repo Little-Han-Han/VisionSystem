@@ -230,7 +230,9 @@ namespace VisionPlatform.UI
             _log.Height = 96;
             _log.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom;
             _log.BackColor = UiTheme.ColorViewBg;
-            _log.ForeColor = UiTheme.ColorTextPrimary;
+            // 日志框底是图像区的恒深色，字必须是"图像区色"，不能跟主题变 ——
+            // 浅色主题下 ColorTextPrimary 是 #1B1F26，写在 #181820 上就是"看不见字"。
+            _log.ForeColor = UiTheme.ColorTextOnView;
             _log.Font = new Font("Consolas", 8.5f);
             _log.Text = "";
             bottom.Controls.Add(_log);
@@ -273,7 +275,7 @@ namespace VisionPlatform.UI
             _list.MultiSelect = true;
             _list.HideSelection = false;
             _list.BackColor = UiTheme.ColorViewBg;
-            _list.ForeColor = UiTheme.ColorTextPrimary;
+            _list.ForeColor = UiTheme.ColorTextOnView;
             _list.BorderStyle = BorderStyle.None;
             // 【必须自绘】LargeIcon 视图的标签文字**不读 ForeColor**，用 SystemColors.WindowText 画：
             // 深色底(#181820)上就是黑字黑底，选中时又被系统高亮刷成白底浅字 —— 两头都看不清。
@@ -579,24 +581,28 @@ namespace VisionPlatform.UI
             s.Item.ForeColor = ItemTextColor(s);
         }
 
-        /// <summary>样本墙的标签色：判对绿 / 判错红 / 已标未验主文本色 / 未标次要色。</summary>
+        /// <summary>
+        /// 样本墙的标签色：判对绿 / 判错红 / 已标未验主文本色 / 未标次要色。
+        /// <para>【一律取 OnView 系列】缩略图墙底是 <see cref="UiTheme.ColorViewBg"/>（恒深色），
+        /// 主题色里的 Ok/Ng 在浅色板下偏暗、TextPrimary 更是深灰，写在深底上读不出来。</para>
+        /// </summary>
         private static Color ItemTextColor(Sample s)
         {
-            if (s == null) return UiTheme.ColorTextSecondary;
+            if (s == null) return UiTheme.ColorTextOnViewDim;
 
             if (s.Label != LabelNone && s.Predicted.HasValue)
             {
                 bool right = (s.Label == LabelOk) == s.Predicted.Value;
-                return right ? UiTheme.ColorOk : UiTheme.ColorNg;
+                return right ? UiTheme.ColorOkOnView : UiTheme.ColorNgOnView;
             }
-            return s.Label != LabelNone ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary;
+            return s.Label != LabelNone ? UiTheme.ColorTextOnView : UiTheme.ColorTextOnViewDim;
         }
 
-        /// <summary>缩略图边框色 = 人工标注（绿 OK / 红 NG / 灰 未标）。</summary>
+        /// <summary>缩略图边框色 = 人工标注（绿 OK / 红 NG / 暗灰 未标），同样不随主题。</summary>
         private static Color ItemEdgeColor(Sample s)
         {
-            if (s == null || s.Label == LabelNone) return UiTheme.ColorDivider;
-            return s.Label == LabelOk ? UiTheme.ColorOk : UiTheme.ColorNg;
+            if (s == null || s.Label == LabelNone) return Color.FromArgb(0x50, 0x50, 0x5C);
+            return s.Label == LabelOk ? UiTheme.ColorOkOnView : UiTheme.ColorNgOnView;
         }
 
         /// <summary>
@@ -620,8 +626,10 @@ namespace VisionPlatform.UI
             Rectangle rc = e.Bounds;
             if (rc.Width <= 2 || rc.Height <= 2) return;
 
-            // ① 底色（选中 = 卡片色 + 强调色描边，未选中 = 画布色）
-            using (var b = new SolidBrush(selected ? UiTheme.ColorCardBg : UiTheme.ColorViewBg))
+            // ① 底色（选中 = 略亮的固定深色 + 强调色描边，未选中 = 画布色）。
+            //    选中底色不能用 ColorCardBg：浅色板下它是 #EAECF0，会把深色缩略图墙刷出一块白板。
+            Color selBg = Color.FromArgb(0x2E, 0x2E, 0x38);
+            using (var b = new SolidBrush(selected ? selBg : UiTheme.ColorViewBg))
                 g.FillRectangle(b, rc);
             if (selected)
             {
