@@ -1948,6 +1948,85 @@ namespace VisionPlatform.UI
         /// 访客态点击 → 弹登录框，<b>只有管理员</b>校验通过才把当前用户换成管理员并解锁；
         /// 已是全权限 → 点击即注销，恢复访客低权限（只读日志）。
         /// </summary>
+        /// <summary>
+        /// 工具栏「帮助」：一屏看清 版本 / 许可证（有效期·功能位）/ 当前权限 / 机器码。
+        /// <para>
+        /// 【为什么集中在一屏】现场验收与售后排障的第一句都是"你是哪个版本、证还有效吗、
+        /// 有没有深度学习权限"。这些信息分散在系统设置里要点好几层，集中展示最省事。
+        /// </para>
+        /// </summary>
+        private void OnHelpClick(object sender, EventArgs e)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("VisionPlatform 工业机器视觉软件");
+            sb.AppendLine("版本：" + Application.ProductVersion);
+            sb.AppendLine();
+
+            VisionLicense.LicenseInfo lic = AppContext.License;
+            sb.AppendLine("【许可证】");
+            if (lic == null)
+            {
+                sb.AppendLine("  未读取到许可证（当前为 Off 模式，或启动时未通过校验）");
+            }
+            else
+            {
+                sb.AppendLine("  编号：" + (string.IsNullOrEmpty(lic.LicenseNo) ? "—" : lic.LicenseNo));
+                sb.AppendLine("  客户：" + (string.IsNullOrEmpty(lic.Customer) ? "—" : lic.Customer));
+                sb.AppendLine("  版本：" + (string.IsNullOrEmpty(lic.Edition) ? "—" : lic.Edition));
+
+                if (lic.IsPerpetual)
+                {
+                    sb.AppendLine("  有效期：永久");
+                }
+                else
+                {
+                    // ExpireUtc 是 DateTime?（永久证为 null），这里 IsPerpetual 已排除永久情况
+                    DateTime expire = (lic.ExpireUtc ?? DateTime.MinValue).ToLocalTime();
+                    int days = (int)Math.Floor((expire - DateTime.Now).TotalDays);
+                    sb.AppendLine("  有效期：至 " + expire.ToString("yyyy-MM-dd HH:mm")
+                                  + (days >= 0 ? "（剩余 " + days + " 天）" : "（已过期）"));
+                }
+
+                string features = "";
+                foreach (System.Collections.Generic.KeyValuePair<string, string> kv
+                         in VisionLicense.ProductCatalog.FeatureKeys)
+                {
+                    if (!lic.HasFeature(kv.Key)) continue;
+                    if (features.Length > 0) features += "、";
+                    features += kv.Value;
+                }
+                sb.AppendLine("  包含模块：" + (features.Length > 0 ? features : "—"));
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("【当前权限】");
+            sb.AppendLine("  " + (_fullAccess
+                ? ("管理员（" + (AppContext.CurrentUser != null ? AppContext.CurrentUser.Name : "已登录")
+                   + "）—— 全部功能可用")
+                : "访客（未登录）—— 仅可查看日志，运行 / 停止需登录"));
+
+            sb.AppendLine();
+            sb.AppendLine("【本机机器码】");
+            sb.Append("  " + SafeMachineCodeForHelp());
+
+            MessageBox.Show(sb.ToString(), "帮助 · 版本与授权", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// <summary>取机器码（帮助窗用；采集失败不抛）。</summary>
+        private static string SafeMachineCodeForHelp()
+        {
+            try
+            {
+                VisionLicense.MachineFingerprint fp = VisionLicense.MachineFingerprint.Collect();
+                return fp != null && !string.IsNullOrEmpty(fp.Code) ? fp.Code : "(采集失败)";
+            }
+            catch (Exception)
+            {
+                return "(采集失败)";
+            }
+        }
+
+
         private void OnLoginButton(object sender, EventArgs e)
         {
             if (!AppContext.HasFullAccess)
@@ -2430,7 +2509,10 @@ namespace VisionPlatform.UI
                 item.Padding = new Padding(6, 3, 6, 3);
 
                 // 宽高一起统一：Label 与 Button 都必须走这一步，否则 AutoSize 各算各的
-                FitToolbarItemSize(item, ToolbarItemHeight);
+                // 【状态标签例外】tsLabelStatus 的文本随配方/算法库状态变化，定死宽度后
+                // 窗口一窄就被裁成"a… 日…"（现场截图）；保持 AutoSize 让它自然撑开或进溢出菜单。
+                if (!ReferenceEquals(item, tsLabelStatus))
+                    FitToolbarItemSize(item, ToolbarItemHeight);
 
                 ToolStripLabel label = item as ToolStripLabel;
                 if (label != null)

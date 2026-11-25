@@ -1,4 +1,4 @@
-namespace VisionPlatform.UI
+﻿namespace VisionPlatform.UI
 {
     partial class MainForm
     {
@@ -48,6 +48,7 @@ namespace VisionPlatform.UI
             this.tsBtnSettings = new System.Windows.Forms.ToolStripButton();
             this.tsBtnLog = new System.Windows.Forms.ToolStripButton();
             this.tsBtnLogin = new System.Windows.Forms.ToolStripButton();
+            this.tsBtnHelp = new System.Windows.Forms.ToolStripButton();
             this.tsSep3 = new System.Windows.Forms.ToolStripSeparator();
             this.tsLabelStatus = new System.Windows.Forms.ToolStripLabel();
 
@@ -130,13 +131,11 @@ namespace VisionPlatform.UI
                 this.tsLabelCamera,
                 this.tsComboCameras,
                 this.tsBtnRefresh,
-                this.tsBtnGrabOnce,
                 this.tsBtnLive,
                 this.tsBtnSyncGrab,
                 this.tsSep1,
                 this.tsLabelLayout,
                 this.tsComboLayout,
-                this.tsBtnRightPanel,
                 this.tsSep2,
                 this.tsLabelFlow,
                 this.tsComboFlow,
@@ -149,6 +148,7 @@ namespace VisionPlatform.UI
                 this.tsBtnSettings,
                 this.tsBtnLog,
                 this.tsSep3,
+                this.tsBtnHelp,
                 this.tsBtnLogin,
                 this.tsLabelStatus});
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
@@ -267,6 +267,12 @@ namespace VisionPlatform.UI
             // 「登录 / 注销」：软件启动为访客低权限，管理员点此登录解锁全部功能。
             // 事件不在此处绑定（本机型 Designer 重序列化会丢手写事件），改在 MainForm 构造函数里
             // 写 tsBtnLogin.Click += OnLoginButton;（见 MainForm.ctor）。
+            // 帮助：版本 / 许可证有效期与功能位 / 当前权限（现场排障与交付验收都要看这几项）
+            this.tsBtnHelp.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tsBtnHelp.Name = "tsBtnHelp";
+            this.tsBtnHelp.Text = "帮助";
+            this.tsBtnHelp.ToolTipText = "查看软件版本、许可证有效期与功能权限";
+            this.tsBtnHelp.Click += new System.EventHandler(this.OnHelpClick);
             this.tsBtnLogin.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsBtnLogin.Name = "tsBtnLogin";
             this.tsBtnLogin.Text = "登录";
@@ -727,6 +733,7 @@ namespace VisionPlatform.UI
         private System.Windows.Forms.ToolStripButton tsBtnRecipe;
         private System.Windows.Forms.ToolStripButton tsBtnSettings;
         private System.Windows.Forms.ToolStripButton tsBtnLog;
+        private System.Windows.Forms.ToolStripButton tsBtnHelp;
         private System.Windows.Forms.ToolStripButton tsBtnLogin;
         private System.Windows.Forms.ToolStripSeparator tsSep3;
         private System.Windows.Forms.ToolStripLabel tsLabelStatus;
