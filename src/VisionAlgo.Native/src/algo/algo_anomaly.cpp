@@ -52,8 +52,9 @@ const double kShrink = 1e-3;
 const double kSamplesPerDim = 3.0;
 const int kMinDim = 2;
 
-// 阈值余量：留出法测到的"每张图最大分"本身还是个样本极值（尾部很重），
-// 再留 50% 才够。这个系数是标定量，不是精度标定——节点参数里的「判定阈值」可以逐方案覆盖。
+// 阈值余量：留出法"用 n-1 张拟合、去打分第 n 张"，得到的分数分布比自评宽，再留 50% 才够。
+// 这个系数是标定量，不是精度标定 —— 节点参数里的「判定阈值」可以逐方案覆盖。
+// 注意它现在乘的是**留出 P90**（不是 max），对样本少的数据集稳健得多，见阈值标定处的注释。
 const float kThrHeldMargin = 1.50f;
 
 // 训练时保留样本特征的预算（float 个数，16M ≈ 64 MB）。
@@ -837,6 +838,7 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
             const int K = (int)std::min<long long>(4, st.n);
             std::vector<double> subSum((size_t)P * dFull, 0.0);
             std::vector<double> subOuter((size_t)P * dFull * dFull, 0.0);
+            std::vector<float> heldScores;   // 每张样本在"没见过它"的模型下的最大分
 
             for (int f = 0; f < K; ++f)
             {
@@ -870,11 +872,40 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
                 std::vector<float> mF, cF;
                 fit(&subSum[0], &subOuter[0], (double)cnt, mF, cF);
                 for (long long k = f; k < st.n; k += K)
-                    heldMax = std::max(heldMax, imageMax(&st.samples[(size_t)k * P * dFull], mF, cF));
+                {
+                    float hv = imageMax(&st.samples[(size_t)k * P * dFull], mF, cF);
+                    heldScores.push_back(hv);
+                    heldMax = std::max(heldMax, hv);
+                }
             }
 
-            if (heldMax > 0.0f) threshold = heldMax * kThrHeldMargin;
-            else threshold = selfMax * 2.0f;   // 留出失败（样本全退化）时退一步给个大余量
+            // 【为什么用 P90 而不是 max】留出分里的最大值是个极值统计量：训练集里只要
+            // 混进一两张"其实不是 OK"的样本（标错、或者姿态/光照偏离群体），它在留出时
+            // 会被正确地判成异常，于是 heldMax 被拉高一个数量级，阈值随之上天，
+            // 现场表现就是"所有图都超不过阈值 → 全部 OK、命中率 0"。
+            // 实测一份 6 样本的现场数据集：heldMax=41.4，旧逻辑阈值=41.4x1.5=62.05，
+            // 而真实检测分数只有 53~68 —— 正好卡在阈值两侧，于是"不是全 OK 就是全 NG"。
+            // 取 P90 并夹逼到 [selfMax*1.3, selfMax*6]，一两张离群样本就不至于毁掉阈值。
+            if (!heldScores.empty())
+            {
+                std::vector<float> sortedScores(heldScores);
+                std::sort(sortedScores.begin(), sortedScores.end());
+                size_t idx = (size_t)((double)(sortedScores.size() - 1) * 0.90 + 0.5);
+                if (idx >= sortedScores.size()) idx = sortedScores.size() - 1;
+                const float heldP90 = sortedScores[idx];
+
+                threshold = heldP90 * kThrHeldMargin;
+
+                if (selfMax > 0.0f)
+                {
+                    if (threshold < selfMax * 1.30f) threshold = selfMax * 1.30f;
+                    if (threshold > selfMax * 6.00f) threshold = selfMax * 6.00f;
+                }
+            }
+            else if (selfMax > 0.0f)
+            {
+                threshold = selfMax * 2.0f;   // 留出失败（样本全退化）时退一步给个大余量
+            }
         }
         else
         {
@@ -951,12 +982,29 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
         {
             char tail[192];
             std::snprintf(tail, sizeof(tail),
-                          "（留出法最大分 %.3f x%.2f，自评 %.3f）",
-                          heldMax, kThrHeldMargin, selfMax);
+                          "（留出最高 %.2f · 自评 %.2f）", heldMax, selfMax);
             summary += tail;
         }
         if (cholFail > 0)
-            summary += " · " + std::to_string(cholFail) + " 个退化位置已用单位阵兜底";
+            summary += " · " + std::to_string(cholFail) + " 个位置退化已兜底";
+
+        // 两条现场最常踩的坑，直接写在训练结果里 —— 别让人对着"命中率 0"去猜。
+        if (selfMax > 1e-6f && heldMax > selfMax * 4.0f)
+        {
+            char w[224];
+            std::snprintf(w, sizeof(w),
+                          " · [警告] 留出分是自评的 %.1f 倍：训练用的 OK 样本里可能混了缺陷品"
+                          "（或姿态/光照差异过大），请改标注后重训", heldMax / selfMax);
+            summary += w;
+        }
+        if (d < 8)
+        {
+            char w[192];
+            std::snprintf(w, sizeof(w),
+                          " · [提示] 只有 %d 张样本，特征被压到 %d 维，判别力有限"
+                          "（建议 ≥ 15 张 OK）", (int)st.n, d);
+            summary += w;
+        }
 
         if (out_summary != 0 && cap > 0)
         {

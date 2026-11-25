@@ -791,8 +791,15 @@ namespace VisionPlatform.UI
                     "异常检测", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (okSamples.Count < 10)
-                Log("提示：OK 样本只有 " + okSamples.Count + " 张，阈值估计会偏乐观；建议 20 张以上。");
+            if (okSamples.Count < 15)
+            {
+                // 维数收缩规则是「每 3 张样本养 1 维」（算法侧 kSamplesPerDim），
+                // 样本不足时维度会被压得很低 —— 提前讲清楚，别让人训完才发现模型没判别力。
+                int dimCap = Math.Max(2, okSamples.Count / 3);
+                Log("提示：OK 样本 " + okSamples.Count + " 张 → 特征维度最多 " + dimCap
+                    + " 维（每 3 张养 1 维）。维度这么低，正常与缺陷往往分不开；"
+                    + "建议补到 15 张以上（20~30 张最稳）。");
+            }
 
             string root = AnomalyModelCatalog.EnsureRoot();
             string dir = System.IO.Path.Combine(root, name);
@@ -841,8 +848,20 @@ namespace VisionPlatform.UI
 
                 ModelName = name;
                 ParamsChanged = true;
-                if (_lastTrainSummary.Length > 0) Log(_lastTrainSummary);
+                if (_lastTrainSummary.Length > 0)
+                {
+                    // 摘要是一整行（" · " 分隔若干段）。拆开输出，否则告警会被挤在
+                    // 一行末尾、折行后还夹在中间，现场根本不看。
+                    foreach (string seg in _lastTrainSummary.Split(
+                                 new string[] { " · " }, StringSplitOptions.None))
+                    {
+                        string t = seg.Trim();
+                        if (t.Length > 0) Log(t);
+                    }
+                }
                 Log("训练成功：" + dir);
+                Log("注意：训练集里的缺陷学不进去 —— 标成 OK 的图若本身有缺陷，检测时也会被一并放行。"
+                    + "请点「验证全部样本」复核；若两组分数区间重叠，日志里会直接告警。");
                 SetVerdict("训练完成 —— 建议点「验证全部样本」看漏检 / 过杀", true);
 
                 SaveSampleList(dir);
@@ -938,6 +957,11 @@ namespace VisionPlatform.UI
             int minArea = (int)_numMinArea.Value;
             double areaLimit = (double)_numAreaLimit.Value;
 
+            // 模型自带阈值：用户把阈值填 0 时生效的就是它，诊断里要把分数换算回绝对值
+            double modelThr = 0;
+            AnomalyModelInfo mi = AnomalyModelCatalog.Describe(name);
+            if (mi != null && mi.Threshold > 0) modelThr = mi.Threshold;
+
             try
             {
                 string err = await Task.Run(() => ValidateCore(dir, roi, thr, minArea, areaLimit, labeled));
@@ -948,7 +972,7 @@ namespace VisionPlatform.UI
                     return;
                 }
 
-                ReportConfusion(labeled, areaLimit);
+                ReportConfusion(labeled, areaLimit, modelThr, thr);
                 foreach (Sample s in labeled) UpdateItemText(s);
             }
             catch (Exception ex)
@@ -980,9 +1004,24 @@ namespace VisionPlatform.UI
             return "";
         }
 
-        private void ReportConfusion(List<Sample> samples, double areaLimit)
+        /// <summary>
+        /// 输出混淆矩阵 + <b>分数区间可分性诊断</b>。
+        /// <para>
+        /// 【为什么必须诊断可分性】只报"检出率 20% / 过杀率 50%"会把现场引向错误结论：
+        /// 用户会以为"阈值没调好"。实测过一组现场数据 —— NG 组最低分（0.859）比 OK 组
+        /// 最高分（1.103）还低，两组区间完全重叠，这时阈值填任何值都只能得到"全过"或
+        /// "全杀"。唯一正确的提示是"模型没学到能区分的特征，换参数无用"，
+        /// 而不是继续让人去调阈值。
+        /// </para>
+        /// </summary>
+        /// <param name="modelThr">模型自带的绝对阈值（用户阈值填 0 时生效的那个）。</param>
+        /// <param name="thrIn">用户当前填的阈值；0 = 用模型自带阈值。</param>
+        private void ReportConfusion(List<Sample> samples, double areaLimit,
+                                     double modelThr, double thrIn)
         {
             int tp = 0, tn = 0, fp = 0, fn = 0;
+            var okScores = new List<double>();
+            var ngScores = new List<double>();
 
             foreach (Sample s in samples)
             {
@@ -991,11 +1030,13 @@ namespace VisionPlatform.UI
                 {
                     if (predOk) fn++;      // 漏检：NG 判成 OK
                     else tp++;             // 抓到了
+                    if (!double.IsNaN(s.Score)) ngScores.Add(s.Score);
                 }
                 else if (s.Label == LabelOk)
                 {
                     if (predOk) tn++;      // 正常放行
                     else fp++;             // 过杀：OK 判成 NG
+                    if (!double.IsNaN(s.Score)) okScores.Add(s.Score);
                 }
             }
 
@@ -1013,13 +1054,99 @@ namespace VisionPlatform.UI
             if (ok == 0)
                 Log("注意：这批样本里没有 OK，只能验证检出，看不出过杀。");
 
+            bool overlap = false;
+            if (okScores.Count > 0 && ngScores.Count > 0)
+                overlap = DiagnoseSeparability(okScores, ngScores, modelThr, thrIn);
+
+            // 面积上限造成的过杀：分数本身没过阈值，改阈值没用，得改面积上限
+            if (fp > 0 && areaLimit > 0 && okScores.Count > 0
+                && okScores[okScores.Count - 1] <= 1.0)
+            {
+                Log("提示：过杀里有 " + fp + " 张的分数并未超阈值，是「面积上限」判的；"
+                    + "把面积上限调大（或填 0 关掉）再看。");
+            }
+
             bool good = ng == 0 || recall >= 0.9;
             if (ok > 0 && overkill > 0.2) good = false;
+            if (overlap) good = false;
+
+            string hint = "";
+            if (overlap) hint = "（区间重叠：模型无区分力，换阈值无用，详见日志）";
+            else if (ng > 0 && recall < 0.9) hint = "（漏检偏多：把阈值调小或缩小 ROI）";
 
             SetVerdict(string.Format(CultureInfo.InvariantCulture,
-                "验证完成：检出 {0}/{1} · 过杀 {2}/{3}{4}",
-                tp, ng, fp, ok,
-                (ng > 0 && recall < 0.9) ? "（漏检偏多：把阈值调小或缩小 ROI）" : ""), good);
+                "验证完成：检出 {0}/{1} · 过杀 {2}/{3}{4}", tp, ng, fp, ok, hint), good);
+        }
+
+        /// <summary>
+        /// 打印 OK / NG 两组的分数分布，判断"挪阈值能不能分开"。
+        /// </summary>
+        /// <returns>true = 两组区间重叠（模型无区分力）。</returns>
+        private bool DiagnoseSeparability(List<double> okScores, List<double> ngScores,
+                                          double modelThr, double thrIn)
+        {
+            okScores.Sort();
+            ngScores.Sort();
+
+            double maxOk = okScores[okScores.Count - 1];
+            double minOk = okScores[0];
+            double maxNg = ngScores[ngScores.Count - 1];
+            double minNg = ngScores[0];
+            double midOk = okScores[okScores.Count / 2];
+            double midNg = ngScores[ngScores.Count / 2];
+            double usedThr = thrIn > 0 ? thrIn : modelThr;
+
+            Log(string.Format(CultureInfo.InvariantCulture,
+                "分数分布（相对阈值倍数，1.00 = 当前阈值{0}）：",
+                usedThr > 0 ? " " + usedThr.ToString("0.##", CultureInfo.InvariantCulture) : ""));
+            Log(string.Format(CultureInfo.InvariantCulture,
+                "  OK {0,2} 张：{1:F3} ~ {2:F3}   中位 {3:F3}", okScores.Count, minOk, maxOk, midOk));
+            Log(string.Format(CultureInfo.InvariantCulture,
+                "  NG {0,2} 张：{1:F3} ~ {2:F3}   中位 {3:F3}", ngScores.Count, minNg, maxNg, midNg));
+
+            if (minNg <= maxOk)
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "[警告] 两组区间重叠 {0:F3} —— 模型没有区分力。", maxOk - minNg));
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "       NG 里最「正常」的一张（{0:F3}）与 OK 里最「异常」的一张（{1:F3}）分不开，",
+                    minNg, maxOk));
+                Log("       两簇叠在一起，阈值填任何值都只能得到「全部 OK」或「全部 NG」。");
+                Log("       这不是阈值问题，按出现概率排查：");
+                Log("         1) 训练用的 OK 样本里混进了缺陷品 —— 缺陷被当成「正常」学进去了；");
+                Log("         2) OK 样本之间的姿态 / 光照 / 位置不一致 —— 逐位置统计要求同一部位对齐，");
+                Log("            转个角度过去，「同一网格位置」对应的已是瓶盖上的另一个图案；");
+                Log("         3) OK 样本太少（< 15 张）—— 特征维度被压缩，判别力接近 0；");
+                Log("         4) ROI 没收紧 —— 背景占了大半画面，背景波动盖过缺陷信号。");
+                Log("       顺序：改标注 → 补样本 → 收紧 ROI → 固定姿态，再重训。参数先别动。");
+                return true;
+            }
+
+            double ratio = maxOk > 1e-9 ? minNg / maxOk : 99.0;
+            Log(string.Format(CultureInfo.InvariantCulture,
+                "[提示] 两组间隔 {0:F3}（NG 最低 / OK 最高 = {1:F2} 倍）—— 有区分力，阈值可调。",
+                minNg - maxOk, ratio));
+
+            // 建议阈值：两簇之间取**几何中点**。马氏距离是平方量纲，OK 与 NG 常常差一个
+            // 数量级（实测 0.17 对 2.6），算术中点会贴到 NG 侧、几何中点才落在中间。
+            // 再用 5% 余量夹一下，防止两簇几乎贴在一起时建议值撞到某一侧。
+            double sugNorm = Math.Sqrt(maxOk * minNg);
+            if (sugNorm < maxOk * 1.05) sugNorm = maxOk * 1.05;
+            if (sugNorm > minNg * 0.95) sugNorm = minNg * 0.95;
+            if (sugNorm < maxOk * 1.05) sugNorm = (maxOk + minNg) * 0.5;   // 贴太近时退回算术中点
+
+            if (usedThr > 0)
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "       建议阈值填 {0:0.##}（= 当前 {1:0.##} × {2:F2}）",
+                    sugNorm * usedThr, usedThr, sugNorm));
+            }
+            else
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "       建议把阈值改成当前值的 {0:F2} 倍", sugNorm));
+            }
+            return false;
         }
 
         // =====================================================================

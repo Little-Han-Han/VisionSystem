@@ -123,7 +123,9 @@ namespace VisionPlatform.Native
         /// <summary>结束训练并落盘，返回原生摘要文本（失败时为空）。</summary>
         public static int TrainFinish(IntPtr handle, out string summary)
         {
-            var buf = new byte[512];
+            // 1024 字节：摘要里除了常规统计，还可能带"训练集疑似污染"这类长告警，
+            // 512 在中文（UTF-8 每字 3 字节）下约 170 字，容易把告警截断。
+            var buf = new byte[1024];
             int rc = va_anom_train_finish(handle, buf, buf.Length);
             if (rc != 0) { summary = ""; return rc; }
 
