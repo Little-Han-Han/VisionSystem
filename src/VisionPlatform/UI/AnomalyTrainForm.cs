@@ -143,7 +143,10 @@ namespace VisionPlatform.UI
             Controls.Add(top);
 
             // ---- 底部：设置 + 动作 + 日志 ----
-            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 210, BackColor = UiTheme.ColorPanelBg };
+            // 高度按内容算，不再拍 210：标签 12 / 输入 32 / 按钮 68 / 结论 100 / 日志 126，
+            // 日志框高度 = 面板高 - 126 - 14。写死 210 时日志(108起)会把结论行(102~124)压掉半行，
+            // 现场看到的就是"日志框上沿有一行被切掉一半的字"。
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 236, BackColor = UiTheme.ColorPanelBg };
             bottom.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (var pen = new Pen(UiTheme.ColorDivider, 1))
@@ -160,8 +163,9 @@ namespace VisionPlatform.UI
             _txtModel.Location = new Point(12, 32);
             _txtModel.Width = 210;
             // 深色主题下 TextBox / ComboBox 不会自动跟着窗体变，必须显式上色
-            _txtModel.BackColor = Color.FromArgb(45, 45, 52);
-            _txtModel.ForeColor = Color.Gainsboro;
+            // （用主题色而不是写死 ARGB：浅色主题下硬编码的深底会变成"黑框白字孤岛"）
+            _txtModel.BackColor = UiTheme.ColorCardBg;
+            _txtModel.ForeColor = UiTheme.ColorTextPrimary;
             _txtModel.BorderStyle = BorderStyle.FixedSingle;
             _txtModel.Text = ModelName;
             _txtModel.TextChanged += delegate { ParamsChanged = true; };
@@ -177,8 +181,8 @@ namespace VisionPlatform.UI
 
             _cmbInput.DropDownStyle = ComboBoxStyle.DropDownList;
             _cmbInput.FlatStyle = FlatStyle.Flat;
-            _cmbInput.BackColor = Color.FromArgb(30, 30, 38);
-            _cmbInput.ForeColor = Color.Gainsboro;
+            _cmbInput.BackColor = UiTheme.ColorCardBg;
+            _cmbInput.ForeColor = UiTheme.ColorTextPrimary;
             _cmbInput.Location = new Point(238, 32);
             _cmbInput.Width = 92;
             _cmbInput.Items.AddRange(new object[] { "128", "192", "256", "320" });
@@ -219,11 +223,11 @@ namespace VisionPlatform.UI
             bx = AddBottomButton(bottom, "应用到节点", UiButtonKind.Neutral, 108, bx, by, OnApplyToNode);
             bx = AddBottomButton(bottom, "关闭", UiButtonKind.Neutral, 76, bx, by, delegate { Close(); });
 
-            _log.Location = new Point(12, 108);
+            _log.Location = new Point(12, 126);
             _log.Multiline = true;
             _log.ScrollBars = ScrollBars.Vertical;
             _log.ReadOnly = true;
-            _log.Height = 92;
+            _log.Height = 96;
             _log.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom;
             _log.BackColor = UiTheme.ColorViewBg;
             _log.ForeColor = UiTheme.ColorTextPrimary;
@@ -239,8 +243,10 @@ namespace VisionPlatform.UI
 
             _lblVerdict.AutoSize = false;
             _lblVerdict.Height = 22;
-            _lblVerdict.Location = new Point(8, 68 + 34);
+            _lblVerdict.Location = new Point(8, 100);
             _lblVerdict.Width = 300;
+            _lblVerdict.Font = UiTheme.FontSmall;
+            _lblVerdict.AutoEllipsis = true;
             _lblVerdict.ForeColor = UiTheme.ColorTextSecondary;
             _lblVerdict.Text = "先加图片 → 标 OK/NG → 框 ROI → 训练";
             bottom.Controls.Add(_lblVerdict);
@@ -269,6 +275,11 @@ namespace VisionPlatform.UI
             _list.BackColor = UiTheme.ColorViewBg;
             _list.ForeColor = UiTheme.ColorTextPrimary;
             _list.BorderStyle = BorderStyle.None;
+            // 【必须自绘】LargeIcon 视图的标签文字**不读 ForeColor**，用 SystemColors.WindowText 画：
+            // 深色底(#181820)上就是黑字黑底，选中时又被系统高亮刷成白底浅字 —— 两头都看不清。
+            // 自绘后底色/字色/标注色全由 UiTheme 决定，与缩略图边框一一对应。
+            _list.OwnerDraw = true;
+            _list.DrawItem += OnListDrawItem;
             _list.SelectedIndexChanged += OnListSelectionChanged;
             _list.MouseDoubleClick += delegate { OnMark(NextLabelOfSelection()); };
             split.Panel1.Controls.Add(_list);
@@ -288,10 +299,12 @@ namespace VisionPlatform.UI
 
         private int AddButton(Panel host, string text, UiButtonKind kind, int w, int x, EventHandler onClick)
         {
-            var b = new Button
+            // 必须是 UiButton（自绘）：FlatStyle.System 的按钮配色由系统主题决定，
+            // 深色主题下车间的表现就是"浅灰底 + 灰字"，与右侧面板格格不入。
+            var b = new UiButton
             {
                 Text = text, Left = x, Top = 10, Width = w, Height = 26,
-                FlatStyle = FlatStyle.System, Font = UiTheme.FontSmall
+                Kind = kind, Font = UiTheme.FontSmall
             };
             b.Click += onClick;
             host.Controls.Add(b);
@@ -301,10 +314,10 @@ namespace VisionPlatform.UI
         private int AddBottomButton(Panel host, string text, UiButtonKind kind, int w, int x, int y,
                                     EventHandler onClick)
         {
-            var b = new Button
+            var b = new UiButton
             {
                 Text = text, Left = x, Top = y, Width = w, Height = 30,
-                FlatStyle = FlatStyle.System, Font = UiTheme.FontSmall
+                Kind = kind, Font = UiTheme.FontSmall
             };
             b.Click += onClick;
             host.Controls.Add(b);
@@ -553,21 +566,92 @@ namespace VisionPlatform.UI
                 pred = string.Format(CultureInfo.InvariantCulture, " · {0} {1:F2}×",
                                      s.Predicted.Value ? "判OK" : "判NG", s.Score);
 
+            // 名称压到 14 字：缩略图列的可用宽度只有 ~100px，长名字会被 ListView 折成 4 行，
+            // 一屏能看的样本数直接砍半，而且每行都短得读不出关键差别。
             string name = System.IO.Path.GetFileName(s.Path);
-            if (name.Length > 22) name = name.Substring(0, 20) + "…";
+            if (name.Length > 14) name = name.Substring(0, 13) + "…";
 
             s.Item.Text = "[" + flag + "] " + name + pred;
 
-            // 颜色区分：标注正确绿、判错红、未标灰 —— 一屏就能看出哪里有问题
+            // 颜色区分：标注正确绿、判错红、未标灰 —— 一屏就能看出哪里有问题。
+            // 注意 LargeIcon 视图不看 ForeColor，真正生效的是 OnListDrawItem 里的自绘；
+            // 这里仍写一遍是为了 OwnerDraw 被关掉时不至于没有语义色。
+            s.Item.ForeColor = ItemTextColor(s);
+        }
+
+        /// <summary>样本墙的标签色：判对绿 / 判错红 / 已标未验主文本色 / 未标次要色。</summary>
+        private static Color ItemTextColor(Sample s)
+        {
+            if (s == null) return UiTheme.ColorTextSecondary;
+
             if (s.Label != LabelNone && s.Predicted.HasValue)
             {
                 bool right = (s.Label == LabelOk) == s.Predicted.Value;
-                s.Item.ForeColor = right ? UiTheme.ColorOk : UiTheme.ColorNg;
+                return right ? UiTheme.ColorOk : UiTheme.ColorNg;
             }
-            else if (s.Label != LabelNone)
-                s.Item.ForeColor = UiTheme.ColorTextPrimary;
-            else
-                s.Item.ForeColor = UiTheme.ColorTextSecondary;
+            return s.Label != LabelNone ? UiTheme.ColorTextPrimary : UiTheme.ColorTextSecondary;
+        }
+
+        /// <summary>缩略图边框色 = 人工标注（绿 OK / 红 NG / 灰 未标）。</summary>
+        private static Color ItemEdgeColor(Sample s)
+        {
+            if (s == null || s.Label == LabelNone) return UiTheme.ColorDivider;
+            return s.Label == LabelOk ? UiTheme.ColorOk : UiTheme.ColorNg;
+        }
+
+        /// <summary>
+        /// 缩略图墙自绘。
+        /// <para>
+        /// 【为什么非自绘不可】<see cref="View.LargeIcon"/> 的标签文字不走 <c>ForeColor</c>，
+        /// 用 <c>SystemColors.WindowText</c>（黑）画在 <c>ColorViewBg</c>(#181820) 上 —— 未选中时
+        /// 黑字黑底，选中时又被系统高亮刷成白底浅字，两头都"看不清"。自绘后：底色随主题、
+        /// 字色带语义、缩略图外框标出 OK/NG，选中态用强调色描边（不再是系统高亮那种糊成一片的白块）。
+        /// </para>
+        /// </summary>
+        private void OnListDrawItem(object sender, DrawListViewItemEventArgs e)
+        {
+            if (e.Item == null) return;
+
+            ListViewItem item = e.Item;
+            var s = item.Tag as Sample;
+            bool selected = (e.State & ListViewItemStates.Selected) != 0;
+
+            Graphics g = e.Graphics;
+            Rectangle rc = e.Bounds;
+            if (rc.Width <= 2 || rc.Height <= 2) return;
+
+            // ① 底色（选中 = 卡片色 + 强调色描边，未选中 = 画布色）
+            using (var b = new SolidBrush(selected ? UiTheme.ColorCardBg : UiTheme.ColorViewBg))
+                g.FillRectangle(b, rc);
+            if (selected)
+            {
+                using (var p = new Pen(UiTheme.ColorAccent))
+                    g.DrawRectangle(p, rc.X, rc.Y, rc.Width - 1, rc.Height - 1);
+            }
+
+            // ② 缩略图：水平居中贴顶
+            const int pad = 5;
+            int iw = _thumbs.ImageSize.Width, ih = _thumbs.ImageSize.Height;
+            var imgRect = new Rectangle(rc.X + Math.Max(0, (rc.Width - iw) / 2), rc.Y + pad, iw, ih);
+
+            Image img = null;
+            int idx = item.ImageIndex;
+            if (idx >= 0 && idx < _thumbs.Images.Count) img = _thumbs.Images[idx];
+            if (img != null) g.DrawImage(img, imgRect);
+
+            // ③ 缩略图外框 = 标注：绿 OK / 红 NG / 灰 未标
+            using (var pen = new Pen(ItemEdgeColor(s), 2f))
+                g.DrawRectangle(pen, imgRect.X - 1, imgRect.Y - 1, imgRect.Width + 1, imgRect.Height + 1);
+
+            // ④ 标签文字（缩略图下方，自动换行、末行省略号）
+            int textTop = imgRect.Bottom + 4;
+            int textH = rc.Bottom - textTop - 2;
+            if (textH < 12 || rc.Width < 20) return;
+
+            var textRect = new Rectangle(rc.X + 3, textTop, rc.Width - 6, textH);
+            TextRenderer.DrawText(g, item.Text, UiTheme.FontSmall, textRect, ItemTextColor(s),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak
+                | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
         private void UpdateCount()

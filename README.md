@@ -1,7 +1,7 @@
 ﻿# VisionSystem — 工业机器视觉软件
 
 <!-- VERSION_BLOCK_START -->
-> **当前版本：1.0.14.0**
+> **当前版本：1.0.14.1**
 <!-- VERSION_BLOCK_END -->
 
 > 更新记录见 [CHANGELOG.md](CHANGELOG.md)。
@@ -289,7 +289,7 @@ VisionSystem/                              唯一解决方案根目录
     ├── VisionPlatform.Modules/            【C#】模块层：31 个模块的 BuiltIn 清单 / 默认值 / 端子 / 参数表
     ├── VisionPlatform.UI.Controls/        【C#】通用界面层：UiTheme / UiStyle / UiTree / UiGrid /
     │                                      ParamListControl / NumericInputPolicy / 数值框与树主题
-    ├── SmokeUi/                           回归测试台（1153 项用例 + --create-sample / 探针；不入 sln，
+    ├── SmokeUi/                           回归测试台（1161 项用例 + --create-sample / 探针；不入 sln，
     │                                      用 _build_smoke.bat 构建）
     └── VisionPlatform/                     【C#】工业视觉主程序
         ├── Program.cs
@@ -361,7 +361,7 @@ build.bat Release    :: 编译 Release | x64
 > （`Core/NativeDllPath.cs`，改进程 PATH 而非 `AddDllDirectory`，兼容 Win7 工控机）。
 > 老部署（第三方 DLL 与 exe 平铺、模块在 `Modules\` 子目录）仍然可运行，无需回滚。
 
-回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1153 项 UI / 软件层用例）：
+回归测试台 `SmokeUi` 不在解决方案内，改完代码用它验证（1161 项 UI / 软件层用例）：
 
 ```bat
 _build_smoke.bat Debug     :: 或 Release；先构建 SmokeUi

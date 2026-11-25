@@ -221,13 +221,15 @@ namespace VisionPlatform.UI
             // ---------------- 底条：整链结论 ----------------
             panelFoot = new Panel();
             panelFoot.Dock = DockStyle.Bottom;
-            panelFoot.Height = 26;
+            // 28px：14pt 徽标（StyleViewBadge）的字面高约 25px，再矮就切上下沿；
+            // 也不能更高 —— 底条是"单行结论"，多占的高度就是从明细表里抢的（SmokeUi 有 ≤28 的基线）。
+            panelFoot.Height = 28;
             panelFoot.Padding = new Padding(6, 0, 6, 0);
             panelFoot.Visible = false;
 
             lblVerdict = new Label();
             lblVerdict.Dock = DockStyle.Left;
-            lblVerdict.Width = 44;
+            lblVerdict.Width = 56;        // 真实宽度在 ApplyFootBadge() 里按文字实测重设
             lblVerdict.AutoSize = false;
 
             lblChain = MakeLabel(UiTheme.FontBody, ContentAlignment.MiddleLeft);
@@ -330,7 +332,7 @@ namespace VisionPlatform.UI
             lblChain.Font = UiTheme.FontBody;
 
             // 结论徽标的语义色必须最后覆盖（UiStyle 会把普通 Label 统一成主文本色）
-            UiTheme.StyleBadge(lblVerdict, _verdict);
+            ApplyFootBadge();
             lblChain.Text = _chainText;
 
             LayoutHead();
@@ -442,12 +444,33 @@ namespace VisionPlatform.UI
             _verdict = snap.Passed ? UiVerdict.Ok : UiVerdict.Ng;
             _chainText = OneLine(snap.ChainSummary);
 
-            UiTheme.StyleBadge(lblVerdict, _verdict);
+            ApplyFootBadge();
             lblChain.Text = _chainText;
 
-            // 有整链结论才占位（26px），没跑完整链时这块高度全部让给表格
+            // 有整链结论才占位（30px），没跑完整链时这块高度全部让给表格
             if (panelFoot != null)
                 panelFoot.Visible = !string.IsNullOrEmpty(_chainText) || _verdict != UiVerdict.None;
+        }
+
+        /// <summary>
+        /// 套用底条的整链结论徽标。
+        /// <para>
+        /// 【必须是 StyleViewBadge 而不是 StyleBadge】后者是右栏那张 44pt 的大徽标字体，
+        /// 塞进 30px 高的底条里只剩字头/字尾两条横线 —— 现场看到的正是"右下角 OK/NG 显示不全"。
+        /// 这里统一用 14pt 小徽标，并按实测文字宽给槽位（"警告"比"OK"宽得多，写死宽度必然切字）。
+        /// </para>
+        /// </summary>
+        private void ApplyFootBadge()
+        {
+            if (lblVerdict == null) return;
+
+            UiTheme.StyleViewBadge(lblVerdict, _verdict);
+
+            string text = lblVerdict.Text ?? "";
+            int w = string.IsNullOrEmpty(text)
+                ? 56
+                : TextRenderer.MeasureText(text, UiTheme.FontBadgeSmall).Width + 18;
+            lblVerdict.Width = Math.Max(56, w);
         }
 
         /// <summary>切换到某个节点：直接从缓存回填（先清再填会闪一次空白）。</summary>

@@ -542,7 +542,8 @@ namespace VisionPlatform.UI
             this.panelRunState.Location = new System.Drawing.Point(8, 558);
             this.panelRunState.Name = "panelRunState";
             this.panelRunState.Padding = new System.Windows.Forms.Padding(3);
-            this.panelRunState.Size = new System.Drawing.Size(284, 66);
+            this.panelRunState.Size = new System.Drawing.Size(284, 102);
+            this.panelRunState.MinimumSize = new System.Drawing.Size(0, 102);
             this.panelRunState.TabIndex = 3;
 
             this.tableRunState.ColumnCount = 2;
@@ -560,11 +561,14 @@ namespace VisionPlatform.UI
             this.tableRunState.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableRunState.Location = new System.Drawing.Point(3, 3);
             this.tableRunState.Name = "tableRunState";
-            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 25F));
-            this.tableRunState.Size = new System.Drawing.Size(278, 60);
+            // 行高必须写死绝对值：Percent 行在容器被压缩时不会"缩字号"，
+            // 只会在 8px 高的一格里把字上下叠在一起（现场"运行状态 4 行糊成一坨"就是这么来的）。
+            // 24px = 9pt 微软雅黑 + 上下留白，容器高度由 MainForm.LayoutRunStatePanel() 按行数算。
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+            this.tableRunState.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 24F));
+            this.tableRunState.Size = new System.Drawing.Size(278, 96);
             this.tableRunState.TabIndex = 0;
 
             this.lblRunStateCap.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -602,7 +606,7 @@ namespace VisionPlatform.UI
             this.lblConsecutiveNg.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.lblConsecutiveNg.Location = new System.Drawing.Point(3, 35);
             this.lblConsecutiveNg.Name = "lblConsecutiveNg";
-            this.lblConsecutiveNg.Size = new System.Drawing.Size(278, 28);
+            this.lblConsecutiveNg.Size = new System.Drawing.Size(278, 26);
             this.lblConsecutiveNg.TabIndex = 1;
             this.lblConsecutiveNg.Text = "连续 NG：0";
             this.lblConsecutiveNg.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;

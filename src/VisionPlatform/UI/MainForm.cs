@@ -162,6 +162,15 @@ namespace VisionPlatform.UI
         /// <summary>连续 NG 达到该数量时显示警示条。</summary>
         private const int ConsecutiveNgAlarm = 3;
 
+        /// <summary>「连续 NG」警示条是否点亮（与 <c>lblConsecutiveNg.Visible</c> 同步的显式状态）。</summary>
+        private bool _alarmOn;
+
+        /// <summary>「运行状态」每行高度（px）。与 Designer 里 tableRunState 的 Absolute 行高保持同值。</summary>
+        private const int RunStateRowHeight = 24;
+
+        /// <summary>「连续 NG」警示条高度（px）。</summary>
+        private const int RunStateAlarmHeight = 26;
+
         /// <summary>日志区折叠后保留的高度（仅折叠按钮条）。</summary>
         private const int LogFoldedHeight = 36;
 
@@ -2106,8 +2115,37 @@ namespace VisionPlatform.UI
 
             // 连续 NG 警示条：纯文本、橙底、无弹窗不阻塞
             bool alarm = _consecutiveNg >= ConsecutiveNgAlarm;
-            lblConsecutiveNg.Visible = alarm;
+            if (_alarmOn != alarm)
+            {
+                _alarmOn = alarm;
+                lblConsecutiveNg.Visible = alarm;
+                LayoutRunStatePanel();
+            }
             if (alarm) lblConsecutiveNg.Text = "连续 NG：" + _consecutiveNg;
+        }
+
+        /// <summary>
+        /// 按"警示条显不显示"重算「运行状态」区高度。
+        /// <para>
+        /// 【为什么必须算】tableRunState 是 Dock=Fill、里面 4 行绝对 24px；lblConsecutiveNg 是
+        /// Dock=Bottom 26px。容器还按老高度 66px 时，警示条一出现就把状态表挤成 32px ——
+        /// 4 行各 8px，字直接上下叠在一起（现场截图"运行状态 糊成一坨"）。
+        /// </para>
+        /// <para>
+        /// 【用 _alarmOn 而不是 lblConsecutiveNg.Visible】后者是"有效可见性"：父窗体没 Show、
+        /// 右栏折叠时都返回 false，布局会跟着算错。状态自己记一份，判断与布局用同一来源。
+        /// </para>
+        /// <para>行高写死、容器跟着行数走，是这套右栏里唯一不会被"多一行少一行"搞坏的做法。</para>
+        /// </summary>
+        private void LayoutRunStatePanel()
+        {
+            if (panelRunState == null || tableRunState == null || lblConsecutiveNg == null) return;
+
+            int rows = RunStateRowHeight * Math.Max(1, tableRunState.RowCount);
+            int want = panelRunState.Padding.Vertical + rows
+                       + (_alarmOn ? RunStateAlarmHeight : 0);
+
+            if (panelRunState.Height != want) panelRunState.Height = want;
         }
 
         private void OnEntryLogged(object sender, LogEntry entry)
@@ -2713,8 +2751,12 @@ namespace VisionPlatform.UI
                 if (v == null) continue;
                 v.Font = UiTheme.FontBody;
                 v.ForeColor = UiTheme.ColorTextPrimary;
+                // 「最近结论」可能带一句摘要（"NG · 取图 1280x1024"），窄列里必须出省略号，
+                // 否则 Label 会把右半边硬切掉 —— 看起来像"文字被截断"。
+                v.AutoEllipsis = true;
             }
             tableRunState.BackColor = UiTheme.ColorPanelBg;
+            LayoutRunStatePanel();
 
             lblConsecutiveNg.Font = UiTheme.FontButton;
             lblConsecutiveNg.BackColor = UiTheme.ColorWarn;
