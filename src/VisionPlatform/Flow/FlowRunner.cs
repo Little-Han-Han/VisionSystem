@@ -1029,13 +1029,15 @@ namespace VisionPlatform.Flow
             Bitmap input = (s.ColorInput != null) ? s.ColorInput : s.Current;
             Rectangle roi = ResolveRoi(s, node, input.Width, input.Height);
 
-            float threshold = (float)node.GetDouble("Threshold", 0);
+            // 判定阈值一律传 0：让原生库用**模型自带阈值**归一化，于是 max_score 恒等于
+            // "raw / 模型阈值"，界面上的 0~1 得分才能与具体模型无关地稳定（见 AnomalyScore）。
+            // 用户填的「判定得分」只移动判定线，不改变热图与面积统计的口径 —— 面积占比
+            // 必须钉在一个固定阈值上才有跨批次可比性，跟着判定线漂就没法定 AreaLimit。
             int minArea = node.GetInt("MinArea", 20);
             bool wantHeat = node.GetBool("ShowHeat", true);
 
             OpResult<VisionAlgo.AnomalyFrame> r =
-                _algo.AnomalyDetect(input, dir, device, roi, threshold, minArea, wantHeat);
-            if (!r.Success)
+                _algo.AnomalyDetect(input, dir, device, roi, 0f, minArea, wantHeat);            if (!r.Success)
             {
                 // 不用 Tail：会把"模型目录不存在："这类前缀截掉，只剩一个路径
                 p.Summary = "异常检测：" + r.Message;
@@ -1045,9 +1047,18 @@ namespace VisionPlatform.Flow
             VisionAlgo.AnomalyFrame f = r.Value;
             NativeAnomaly.VA_AnomStat st = f.Stat;
 
-            double maxScore = st.max_score;          // 相对阈值倍数，1.0 = 阈值
+            // ratio：相对**模型自带阈值**的倍数（1.0 = 阈值线）。
+            // score：压到 0~1 的**良品得分**（越高越好，0.5 = 阈值线），界面与端口一律用它 ——
+            // 原始倍数的量纲随模型走（实测有 7.35、62.05 这种数），现场没法判断"填多少合适"。
+            double ratio = st.max_score;
+            double score = AnomalyScore.FromRatio(ratio);
             double areaRatio = st.area_ratio;
             bool hasBox = st.defect_count > 0 && st.box_w > 0 && st.box_h > 0;
+
+            // 判定得分（及格线）：参数里存的是 0~1；老方案存的是绝对马氏距离（>1），
+            // 用当帧的 st.threshold（此时就是模型自带阈值）折回等价得分。
+            double scoreThr = AnomalyScore.NormalizeThreshold(
+                node.GetDouble("Threshold", AnomalyScore.DefaultThreshold), st.threshold);
 
             // 热图：整帧尺寸的位图，只覆盖 ROI 那一块，其余透明
             if (wantHeat && f.Heat != null && f.MapW > 0 && f.MapH > 0)
@@ -1067,8 +1078,7 @@ namespace VisionPlatform.Flow
             {
                 double cx = st.box_x + st.box_w / 2.0;
                 double cy = st.box_y + st.box_h / 2.0;
-                p.Shapes.Add(FlowShapes.BlobRect(cx, cy, st.box_w, st.box_h,
-                    string.Format(CultureInfo.InvariantCulture, "异常 {0:F2}×", maxScore)));
+                p.Shapes.Add(FlowShapes.BlobRect(cx, cy, st.box_w, st.box_h, "缺陷"));
 
                 p.Regions.Add(new RegionInfo
                 {
@@ -1080,12 +1090,13 @@ namespace VisionPlatform.Flow
             }
 
             p.Metrics.TargetCount = st.defect_count;
-            p.Metrics.TopScore = maxScore;
+            p.Metrics.TopScore = score;
+            p.Metrics.AreaRatio = areaRatio;
             p.Metrics.MaxArea = st.area_px;
             p.Metrics.TopCx = st.max_x;
             p.Metrics.TopCy = st.max_y;
 
-            p.Outputs.Add(new PortValue("Score", "最大异常分", FlowPortKind.Number, maxScore));
+            p.Outputs.Add(new PortValue("Score", "良品得分", FlowPortKind.Number, score));
             p.Outputs.Add(new PortValue("Area", "面积占比", FlowPortKind.Number, areaRatio));
             p.Outputs.Add(new PortValue("Count", "缺陷数", FlowPortKind.Number, (double)st.defect_count));
             p.Outputs.Add(new PortValue("Point", "最大分点位", FlowPortKind.Point,
@@ -1096,17 +1107,18 @@ namespace VisionPlatform.Flow
                     new RectangleF(st.box_x, st.box_y, st.box_w, st.box_h)));
 
             // ---- 判定 ----
-            // 主判据：最大分是否越过阈值（1.0）。面积上限是可选加严项：
-            // 有些缺陷"每一处都不算突出但整片都有"（例如镀层发花），只看峰值会漏。
-            bool pass = maxScore <= 1.0;
+            // 主判据：良品得分是否跌破「判定得分」（及格线，默认 0.5 = 模型自带阈值线）。
+            // 面积上限是可选加严项：有些缺陷"每一处都不算突出但整片都有"（例如镀层发花），
+            // 只看峰值会漏。面积占比恒按模型阈值统计，与判定得分解耦。
+            bool pass = !AnomalyScore.IsNg(score, scoreThr);
 
             double areaLimit = node.GetDouble("AreaLimit", 0);
             bool areaNg = areaLimit > 0 && areaRatio > areaLimit;
             if (areaNg) pass = false;
 
             p.Summary = string.Format(CultureInfo.InvariantCulture,
-                "异常检测：最大 {0:F2}×阈值 · 面积 {1:P2} · 缺陷 {2} 个",
-                maxScore, areaRatio, st.defect_count);
+                "异常检测：良品得分 {0:0.000}（及格线 {1:0.000}）· 面积 {2:P2} · 缺陷 {3} 个",
+                score, scoreThr, areaRatio, st.defect_count);
 
             if (areaNg)
                 p.Summary += string.Format(CultureInfo.InvariantCulture, "（面积超上限 {0:P2}）", areaLimit);

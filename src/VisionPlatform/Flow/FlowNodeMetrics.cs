@@ -71,6 +71,13 @@ namespace VisionPlatform.Flow
         /// <summary>Blob 最大面积（像素²）；<c>NaN</c> = 不适用。</summary>
         public double MaxArea = double.NaN;
 
+        /// <summary>
+        /// 异常检测：超阈值像素占检测区域的比例（0~1）；<c>NaN</c> = 不适用。
+        /// <para>与 <see cref="MaxArea"/> 分开：那个是像素²（绝对尺寸），这个是占比（与 ROI 大小无关），
+        /// 现场判"整片发花"看的是占比，判"单个脏点"看的是像素数，混用会读错量级。</para>
+        /// </summary>
+        public double AreaRatio = double.NaN;
+
         /// <summary>Blob 最大面积目标的圆度；<c>NaN</c> = 不适用。</summary>
         public double MaxCircularity = double.NaN;
 

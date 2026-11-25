@@ -219,7 +219,8 @@ namespace VisionPlatform.Modules
                 new List<FlowPortDef>
                 {
                     P("Image", "热图", FlowPortKind.Image, false),
-                    P("Score", "最大异常分", FlowPortKind.Number, false),
+                    P("Score", "良品得分", FlowPortKind.Number, false,
+                      "0~1，越高越好；0.5 = 模型自带阈值线（及格线）"),
                     P("Area", "面积占比", FlowPortKind.Number, false),
                     P("Count", "缺陷数", FlowPortKind.Number, false),
                     P("Box", "最大缺陷框", FlowPortKind.Rect, false),

@@ -108,6 +108,20 @@ namespace VisionPlatform.Flow
                         Point(m.TopCx, m.TopCy),
                         Cost(cost));
 
+                // 异常检测：结论是"这个产品有多好"，所以主位放 0~1 的**良品得分**（越高越好，
+                // 0.5 = 模型自带阈值线），缺陷数与面积占比作为辅助——现场就是靠这三个数判断的。
+                case FlowNodeType.AnomalyDetect:
+                {
+                    string score = Num("良品得分 {0:0.000}", m.TopScore);
+                    if (score.Length == 0) score = "良品得分 --";
+                    return Trim(score
+                        + (m.TargetCount >= 0
+                            ? " · 缺陷 " + m.TargetCount.ToString(CultureInfo.InvariantCulture) + " 个"
+                            : "")
+                        + Num(" · 面积 {0:P2}", m.AreaRatio)
+                        + Cost(cost));
+                }
+
                 case FlowNodeType.PointCloudSource:
                     return string.Format(CultureInfo.InvariantCulture,
                         "{0} 点{1}",
@@ -151,6 +165,12 @@ namespace VisionPlatform.Flow
                 case FlowNodeType.ObjectDetect:
                     return string.Format(CultureInfo.InvariantCulture, "{0} 个{1}",
                         m.TargetCount, Num(" · {0:0.00}", m.TopScore));
+
+                case FlowNodeType.AnomalyDetect:
+                    return Trim(Num("良品 {0:0.000}", m.TopScore)
+                        + (m.TargetCount > 0
+                            ? " · " + m.TargetCount.ToString(CultureInfo.InvariantCulture) + " 个"
+                            : ""));
 
                 case FlowNodeType.PointCloudSource:
                     return Trim(m.TargetCount.ToString("N0", CultureInfo.InvariantCulture) + " 点");
