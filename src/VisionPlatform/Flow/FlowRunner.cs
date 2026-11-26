@@ -1026,8 +1026,34 @@ namespace VisionPlatform.Flow
             string device = node.GetString("Device", "CPU");
 
             // 彩色优先：OpenVINO 特征提取器按 3 通道训练；内置描述子自己会灰度化。
-            Bitmap input = (s.ColorInput != null) ? s.ColorInput : s.Current;
-            Rectangle roi = ResolveRoi(s, node, input.Width, input.Height);
+            Bitmap frame = (s.ColorInput != null) ? s.ColorInput : s.Current;
+
+            // ---- ROI 必须"跟着工件一起转"，不能只取外接框 ----
+            // 异常检测是逐位置比对，前提是"同一网格位置 = 工件上的同一部位"。
+            // 若走 ResolveRoi（= FlowRunTransform.ApplyToRect，返回旋转后的轴对齐外接框），
+            // 框里的图仍然是斜的：实测残余 5° 就让 256 网格上的边缘错位 1.4 个 patch（patch=8），
+            // 30° 时外接框面积还放大 1.87 倍、背景占比跟着上去 —— 逐位置统计直接失效。
+            // 所以改走 CropRoi：有旋转时真仿射把工件旋正；只有平移时仍用整数裁剪（快且逐像素一致）。
+            Rectangle roi = Rectangle.Empty;
+            bool roiAffine = false;
+            Bitmap crop = null;
+            double roiAngle = RoiAngleOf(node);
+            bool hasRoi = node.GetInt("RoiW", 0) > 0 && node.GetInt("RoiH", 0) > 0;
+            if (hasRoi)
+            {
+                crop = CropRoi(frame, s, node, out roi, out roiAffine);
+                if (crop == null)
+                {
+                    p.Summary = "异常检测：ROI 裁剪失败（检查 ROI 参数与位置修正输入）";
+                    return false;
+                }
+            }
+
+            Bitmap input = (crop != null) ? crop : frame;
+            // 送检 ROI：裁过就送整张裁剪图（坐标原点已随仿射移动）；没裁就送整图
+            Rectangle detectRoi = (crop != null)
+                ? new Rectangle(0, 0, crop.Width, crop.Height)
+                : Rectangle.Empty;
 
             // 判定阈值一律传 0：让原生库用**模型自带阈值**归一化，于是 max_score 恒等于
             // "raw / 模型阈值"，界面上的 0~1 得分才能与具体模型无关地稳定（见 AnomalyScore）。
@@ -1037,8 +1063,10 @@ namespace VisionPlatform.Flow
             bool wantHeat = node.GetBool("ShowHeat", true);
 
             OpResult<VisionAlgo.AnomalyFrame> r =
-                _algo.AnomalyDetect(input, dir, device, roi, 0f, minArea, wantHeat);            if (!r.Success)
+                _algo.AnomalyDetect(input, dir, device, detectRoi, 0f, minArea, wantHeat);
+            if (!r.Success)
             {
+                if (crop != null) crop.Dispose();
                 // 不用 Tail：会把"模型目录不存在："这类前缀截掉，只剩一个路径
                 p.Summary = "异常检测：" + r.Message;
                 return false;
@@ -1060,51 +1088,80 @@ namespace VisionPlatform.Flow
             double scoreThr = AnomalyScore.NormalizeThreshold(
                 node.GetDouble("Threshold", AnomalyScore.DefaultThreshold), st.threshold);
 
-            // 热图：整帧尺寸的位图，只覆盖 ROI 那一块，其余透明
+            // 局部坐标 → 整帧坐标。整图检测（crop==null）时原生给的已经是整帧坐标，不能再映射，
+            // 否则位置修正的平移会被算两遍。
+            Func<double, double, PointF> toFrame = delegate(double u, double v)
+            {
+                return (crop == null)
+                    ? new PointF((float)u, (float)v)
+                    : RoiAffineMap.MapPoint(s.Transform, roi, roiAngle, roiAffine, u, v);
+            };
+
+            // 热图：先生成在"送检图"的坐标系里；裁过的话还要贴回整帧（含旋转）
             if (wantHeat && f.Heat != null && f.MapW > 0 && f.MapH > 0)
             {
-                p.Overlay = NodeOverlayFactory.AnomalyHeat(f.Heat, f.MapW, f.MapH,
-                                                           input.Width, input.Height,
-                                                           st.roi_x, st.roi_y);
+                Bitmap layer = NodeOverlayFactory.AnomalyHeat(f.Heat, f.MapW, f.MapH,
+                                                              input.Width, input.Height,
+                                                              st.roi_x, st.roi_y);
+                if (layer != null)
+                {
+                    if (crop == null)
+                    {
+                        p.Overlay = layer;      // 整图检测：图层本来就是整帧尺寸
+                    }
+                    else
+                    {
+                        p.Overlay = WarpRoiLayerBack(layer, frame.Size, roi, roiAngle,
+                                                     s.Transform, roiAffine);
+                        layer.Dispose();
+                    }
+                }
             }
             EnsureNodeFrame(s, p);
 
             // ROI 轮廓进辅助层（输入条件，不占结果明细）；缺陷框进主结果层
-            if (st.roi_w > 0 && st.roi_h > 0)
-                p.AuxShapes.AddRange(FlowShapes.RoiOutline(
-                    new Rectangle(st.roi_x, st.roi_y, st.roi_w, st.roi_h)));
+            if (hasRoi)
+                p.AuxShapes.AddRange(RoiOutlineShapes(s, roi, roiAngle, roiAffine));
+
+            double boxCx = st.box_x + st.box_w / 2.0;
+            double boxCy = st.box_y + st.box_h / 2.0;
+            PointF boxCenter = toFrame(boxCx, boxCy);
 
             if (hasBox)
             {
-                double cx = st.box_x + st.box_w / 2.0;
-                double cy = st.box_y + st.box_h / 2.0;
-                p.Shapes.Add(FlowShapes.BlobRect(cx, cy, st.box_w, st.box_h, "缺陷"));
+                p.Shapes.Add(BlobShapeAt(s, roi, roiAngle, roiAffine, boxCx, boxCy,
+                                         st.box_w, st.box_h, "缺陷"));
 
                 p.Regions.Add(new RegionInfo
                 {
                     Index = 1,
-                    Cx = cx, Cy = cy,
+                    Cx = boxCenter.X, Cy = boxCenter.Y,
                     Width = st.box_w, Height = st.box_h,
                     Area = st.area_px
                 });
             }
 
+            PointF maxPt = toFrame(st.max_x, st.max_y);
+
             p.Metrics.TargetCount = st.defect_count;
             p.Metrics.TopScore = score;
             p.Metrics.AreaRatio = areaRatio;
             p.Metrics.MaxArea = st.area_px;
-            p.Metrics.TopCx = st.max_x;
-            p.Metrics.TopCy = st.max_y;
+            p.Metrics.TopCx = maxPt.X;
+            p.Metrics.TopCy = maxPt.Y;
 
             p.Outputs.Add(new PortValue("Score", "良品得分", FlowPortKind.Number, score));
             p.Outputs.Add(new PortValue("Area", "面积占比", FlowPortKind.Number, areaRatio));
             p.Outputs.Add(new PortValue("Count", "缺陷数", FlowPortKind.Number, (double)st.defect_count));
-            p.Outputs.Add(new PortValue("Point", "最大分点位", FlowPortKind.Point,
-                new PointF(st.max_x, st.max_y)));
+            p.Outputs.Add(new PortValue("Point", "最大分点位", FlowPortKind.Point, maxPt));
 
             if (hasBox)
+            {
                 p.Outputs.Add(new PortValue("Box", "最大缺陷框", FlowPortKind.Rect,
-                    new RectangleF(st.box_x, st.box_y, st.box_w, st.box_h)));
+                    new RectangleF((float)boxCenter.X - (float)st.box_w / 2f,
+                                   (float)boxCenter.Y - (float)st.box_h / 2f,
+                                   st.box_w, st.box_h)));
+            }
 
             // ---- 判定 ----
             // 主判据：良品得分是否跌破「判定得分」（及格线，默认 0.5 = 模型自带阈值线）。
@@ -1131,6 +1188,7 @@ namespace VisionPlatform.Flow
                 _anomalyInfoLogged = true;
             }
 
+            if (crop != null) crop.Dispose();
             return pass;
         }
 
@@ -6264,6 +6322,92 @@ namespace VisionPlatform.Flow
                                           bool affine, double u, double v)
         {
             return RoiAffineMap.MapPoint(s.Transform, roiUsed, roiAngleDeg, affine, u, v);
+        }
+
+        /// <summary>
+        /// 缺陷框：仿射时给**旋转矩形**（框跟着工件一起转），否则用轴对齐框。
+        /// <para>【为什么不能一律用轴对齐框】旋正裁剪后，框在局部坐标里是正放的，
+        /// 但工件在整帧上是斜的 —— 画成轴对齐框会"中心对、四角全错"，</para>
+        /// </summary>
+        /// <param name="lx">框中心在**送检图局部坐标**里的 X。</param>
+        private static IGeometryShape BlobShapeAt(FlowRunSession s, Rectangle roiUsed, double roiAngleDeg,
+                                                  bool affine, double lx, double ly,
+                                                  double w, double h, string label)
+        {
+            if (!affine || s.Transform == null)
+                return FlowShapes.BlobRect(lx, ly, w, h, label);
+
+            PointF c = RoiAffineMap.MapPoint(s.Transform, roiUsed, roiAngleDeg, true, lx, ly);
+            var rr = new RotatedRectShape(c, (float)Math.Max(1.0, w), (float)Math.Max(1.0, h),
+                                          (float)RoiAffineMap.EffectiveAngle(s.Transform, roiAngleDeg));
+            rr.StrokeColor = FlowShapes.ColorBlob;
+            rr.LineWidth = FlowShapes.NormalLine;
+            rr.IsEditable = false;
+            if (!string.IsNullOrEmpty(label)) rr.Label = label;
+            return rr;
+        }
+
+        /// <summary>ROI 轮廓：仿射时画一个旋转矩形，否则沿用四条边线。</summary>
+        private static List<IGeometryShape> RoiOutlineShapes(FlowRunSession s, Rectangle roiUsed,
+                                                             double roiAngleDeg, bool affine)
+        {
+            if (!affine || s.Transform == null)
+                return FlowShapes.RoiOutline(roiUsed);
+
+            var list = new List<IGeometryShape>(1);
+            PointF c = RoiAffineMap.FrameCenter(s.Transform, roiUsed);
+            var rr = new RotatedRectShape(c, roiUsed.Width, roiUsed.Height,
+                                          (float)RoiAffineMap.EffectiveAngle(s.Transform, roiAngleDeg));
+            rr.StrokeColor = FlowShapes.ColorRoi;
+            rr.LineWidth = FlowShapes.ThinLine;
+            rr.IsEditable = true;
+            rr.Name = FlowShapes.AuxContourName;
+            list.Add(rr);
+            return list;
+        }
+
+        /// <summary>
+        /// 把"ROI 局部坐标系"的叠加层贴回整帧尺寸的透明图层。
+        /// <para>与 <see cref="RoiAffineMap.Crop"/> 严格互逆：那边用 <c>Rotate(-A)</c> 采样进来，
+        /// 这边用 <c>Rotate(+A)</c> 画回去，否则热图会和底图错位。</para>
+        /// </summary>
+        private static Bitmap WarpRoiLayerBack(Bitmap layer, Size frameSize, Rectangle roiUsed,
+                                               double roiAngleDeg, FlowRunTransform t, bool affine)
+        {
+            if (layer == null || frameSize.Width <= 0 || frameSize.Height <= 0) return null;
+
+            Bitmap dst = null;
+            try
+            {
+                dst = new Bitmap(frameSize.Width, frameSize.Height, PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(dst))
+                {
+                    g.Clear(Color.Transparent);
+                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                    if (!affine || t == null)
+                    {
+                        // 纯平移：裁剪图左上角对应 ROI 在整帧上的位置
+                        g.DrawImage(layer, roiUsed.X, roiUsed.Y, roiUsed.Width, roiUsed.Height);
+                    }
+                    else
+                    {
+                        PointF c = RoiAffineMap.FrameCenter(t, roiUsed);
+                        float a = (float)RoiAffineMap.EffectiveAngle(t, roiAngleDeg);
+                        g.TranslateTransform(c.X, c.Y);
+                        g.RotateTransform(a);
+                        g.TranslateTransform(-roiUsed.Width / 2f, -roiUsed.Height / 2f);
+                        g.DrawImage(layer, 0, 0, roiUsed.Width, roiUsed.Height);
+                    }
+                }
+                return dst;
+            }
+            catch (Exception)
+            {
+                if (dst != null) dst.Dispose();
+                return null;
+            }
         }
 
         private static Rectangle ResolveRoi(FlowRunSession s, FlowNode node, int width, int height)

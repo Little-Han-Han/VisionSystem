@@ -1205,7 +1205,8 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Int("RoiX", "X", -100000, 100000, "0"));
             t.Fields.Add(Int("RoiY", "Y", -100000, 100000, "0"));
             t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0",
-                "异常检测最怕「视野里有多余东西」（反光、夹具、背景），ROI 收到产品表面上，误报会少一个量级"));
+                "异常检测最怕「视野里有多余东西」（反光、夹具、背景），ROI 收到产品表面上，误报会少一个量级。"
+                + "接了位置修正时，ROI 会随工件平移；工件有旋转时会把图**旋正**后再检测（不是只取外接框）"));
             t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
 
             t.Fields.Add(Group("判定"));
