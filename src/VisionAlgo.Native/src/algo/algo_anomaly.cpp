@@ -44,13 +44,19 @@ const int kMaxDim = 48;
 // Cholesky 会失败；加一点对角正则比"再攒点样本"更可靠。
 const double kShrink = 1e-3;
 
-// 每张 OK 样本"养得起"几个特征维。这条约束是本模块精度的关键：
+// 每张 OK 样本"养得起"几个特征维（**完整协方差**模式）。这条约束是本模块精度的关键：
 // 每个位置要拟合 d×d 协方差，样本数 n 只比 d 略多时，样本协方差在新样本的偏离方向上
 // 被系统性低估 → 同一个偏离量算出的马氏距离被放大好几倍。
 // 实测 n=16 / d=15 时，训练集自评最大分只有 0.996，未见过的 OK 图却到 4.55（整幅超阈值）。
 // PaDiM 原文也是 d≈100 配几百张样本，比例同为 3~5 倍，这里取 3。
 const double kSamplesPerDim = 3.0;
 const int kMinDim = 2;
+
+// 样本数少于这个值时，改用**对角协方差**（每维只估自己的方差），维度上限从 n/3 放宽到 n。
+// 理由：现场绝大多数数据集都只有十几张 OK，按 n/3 只能拿到 3~5 维，
+// 而内置描述子本身有 15 维 —— 等于把 2/3 的信息直接丢掉。
+// 对角模式的代价是忽略维间相关；样本够了（≥24 张）就切回完整协方差拿精度。
+const int kDiagSwitchSamples = 24;
 
 // 阈值余量：留出法"用 n-1 张拟合、去打分第 n 张"，得到的分数分布比自评宽，再留 50% 才够。
 // 这个系数是标定量，不是精度标定 —— 节点参数里的「判定阈值」可以逐方案覆盖。
@@ -724,12 +730,20 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
     const int P = st.gw * st.gh, dFull = st.dim;
     const double n = (double)st.n;
 
-    // ---- 有效维数：按"每维至少 kSamplesPerDim 张样本"收缩 ----
+    // ---- 协方差模式：样本少时改估对角，把维度从 n/3 放大到 n ----
+    // 【为什么必须分两档】完整协方差每个位置要估 d×d 个参数，n 只比 d 多一点时
+    // 样本协方差在新样本的偏离方向上被系统性低估，所以 d 被迫压到 n/3 ——
+    // 现场 4 张 OK 只有 2 维、20 张只有 6 维，判别力就是这么没的。
+    // 而"每维只估自己的方差"（对角）只需要 n≥2，n=20 时能直接用满 15 维内置描述子。
+    // 代价是忽略维间相关：样本充足（n≥kDiagSwitchSamples）时仍走完整协方差拿精度。
+    const bool diagMode = (st.n < kDiagSwitchSamples);
+
+    // ---- 有效维数 ----
     // 维数是在 begin 时按 kMaxDim 定的（那时还不知道最终会有几张样本），
     // 因此在这里按实际样本数再压一次；压掉的维用等距抽样的方式保留，保证同样输入给同样结果。
     int d = dFull;
     {
-        int cap = (int)(n / kSamplesPerDim);
+        int cap = diagMode ? (int)n : (int)(n / kSamplesPerDim);
         if (cap < kMinDim) cap = kMinDim;
         if (cap < d) d = cap;
     }
@@ -774,6 +788,22 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
                 double tr = 0.0;
                 for (int i = 0; i < d; ++i) tr += (double)cov[(size_t)i * d + i];
                 double lambda = kShrink * (tr / std::max(1, d)) + 1e-6;
+
+                if (diagMode)
+                {
+                    // 对角模式：只把 sqrt(方差) 写到对角线，其余保持 0。
+                    // 这样 CholScore 的前代公式退化成 Σ(diff_i² / var_i)，即对角马氏距离 ——
+                    // 打分、留出校准、推理三条路径一行都不用改，
+                    // 本质上只是"协方差矩阵恰好是个对角阵"。
+                    float* Lp = &outChol[(size_t)p * d * d];
+                    for (int i = 0; i < d; ++i)
+                    {
+                        double var = (double)cov[(size_t)i * d + i] + lambda;
+                        if (var < 1e-6) var = 1e-6;
+                        Lp[(size_t)i * d + i] = (float)std::sqrt(var);
+                    }
+                    continue;
+                }
 
                 bool ok = false;
                 for (int attempt = 0; attempt < 4 && !ok; ++attempt)
@@ -931,6 +961,10 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
         js << "  \"src_dim\": " << st.src_dim << ",\n";
         js << "  \"samples\": " << st.n << ",\n";
         js << "  \"threshold\": " << threshold << ",\n";
+        // 0 = 完整协方差（d = n/3），1 = 对角协方差（d = n，样本少时用）。
+        // 落盘只为诊断与界面展示：padim.bin 里对角模式就是"只有对角线非零的 chol"，
+        // 加载与打分的代码路径完全一致，不需要分支。
+        js << "  \"cov\": " << (diagMode ? 1 : 0) << ",\n";
         js << "  \"extractor\": \""
            << (st.feat == VA_ANOM_FEAT_OPENVINO ? "extractor.xml" : "") << "\",\n";
         js << "  \"algo\": \"PaDiM\"\n";
@@ -974,8 +1008,9 @@ int AnomTrainFinish(Context* ctx, char* out_summary, int cap)
         {
             char head[256];
             std::snprintf(head, sizeof(head),
-                          "PaDiM 训练完成：%d 张 · %dx%d 网格 · d=%d/%d · 阈值 %.3f",
-                          (int)st.n, st.gw, st.gh, d, dFull, threshold);
+                          "PaDiM 训练完成：%d 张 · %dx%d 网格 · d=%d/%d%s · 阈值 %.3f",
+                          (int)st.n, st.gw, st.gh, d, dFull,
+                          diagMode ? "（对角协方差）" : "", threshold);
             summary = head;
         }
         if (heldMax > 0.0f)

@@ -804,12 +804,14 @@ namespace VisionPlatform.UI
             }
             if (okSamples.Count < 15)
             {
-                // 维数收缩规则是「每 3 张样本养 1 维」（算法侧 kSamplesPerDim），
-                // 样本不足时维度会被压得很低 —— 提前讲清楚，别让人训完才发现模型没判别力。
-                int dimCap = Math.Max(2, okSamples.Count / 3);
-                Log("提示：OK 样本 " + okSamples.Count + " 张 → 特征维度最多 " + dimCap
-                    + " 维（每 3 张养 1 维）。维度这么低，正常与缺陷往往分不开；"
-                    + "建议补到 15 张以上（20~30 张最稳）。");
+                // 维度规则（算法侧 algo_anomaly.cpp）：
+                //   样本 < 24 张 → 估**对角**协方差，d = min(内置描述子维数, n)
+                //   样本 ≥ 24 张 → 估**完整**协方差，d = n/3
+                // 内置描述子本身只有 15 维，所以 < 15 张时维度就等于样本数。
+                int dimCap = Math.Min(15, Math.Max(2, okSamples.Count));
+                Log("提示：OK 样本 " + okSamples.Count + " 张 → 特征维度最多 " + dimCap + " 维"
+                    + "（<24 张时用对角协方差，维度=样本数；内置描述子上限 15 维）。"
+                    + "补到 15 张就能用满 15 维，建议 20 张以上覆盖正常波动。");
             }
 
             string root = AnomalyModelCatalog.EnsureRoot();
