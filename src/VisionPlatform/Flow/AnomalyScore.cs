@@ -60,10 +60,15 @@ namespace VisionPlatform.Flow
         /// <summary>
         /// 归一化界面上的「判定得分」参数。
         /// <para>
-        /// 【必须做这一步】1.0.14.4 之前该参数存的是**绝对马氏距离**（老方案里有 62.05 这种值），
-        /// 直接拿老值当得分会变成"满分才放行"，一上线全判 NG。
-        /// 这里按 <paramref name="modelThreshold"/> 把老值折回等价的良品得分：
-        /// 老值 raw 等价于 ratio = raw/modelThreshold，得分即 1/(ratio+1)。
+        /// 【旧值必须重置，不能忠实迁移】1.0.14.4 之前该参数存的是**绝对马氏距离**。
+        /// 直觉做法是按 <c>raw/模型阈值</c> 折回等价得分，但那是错的：1.0.14.3 之前的阈值
+        /// 标定本身就被离群样本撑大过（62.05 这种值），忠实迁移等于把坏值原样带到新刻度 ——
+        /// 实测 62.05 折成及格线 0.106，良品得分 0.86 也远高于它，于是**永远判 OK、
+        /// 热图永远不着色**，现场表现就是"从来没检出过真实缺陷"。
+        /// </para>
+        /// <para>
+        /// 因此旧语义（&gt;1）一律重置为模型推荐线 0.5，由用户按新刻度重新确认一次。
+        /// 重置是安全的：0.5 与旧版"阈值填 0（用模型自带）"完全等价，不会比原来更严。
         /// </para>
         /// </summary>
         /// <param name="rawParam">参数里存的原值。</param>
@@ -73,13 +78,8 @@ namespace VisionPlatform.Flow
             if (double.IsNaN(rawParam) || rawParam <= 0) return DefaultThreshold;   // 0 / 未设置 = 模型推荐
             if (rawParam <= 1.0) return ClampThreshold(rawParam);                  // 已是新语义
 
-            // 旧语义：绝对马氏距离
-            if (modelThreshold > 0)
-                return ClampThreshold(FromRatio(rawParam / modelThreshold));
-
-            // 模型阈值拿不到（理论上不会发生）：旧值一律按"很松"处理，
-            // 因为这批老值本来就远大于任何合理阈值，宽松至少不会误杀。
-            return 0.10;
+            // 旧语义（绝对马氏距离）：不迁移，重置。见上方注释。
+            return DefaultThreshold;
         }
 
         /// <summary>按「及格线」口径判一次：良品得分低于判定线即异常。</summary>
