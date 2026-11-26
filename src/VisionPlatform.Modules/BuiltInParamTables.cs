@@ -309,6 +309,7 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Enum("MorphOp", "运算", "0",
                 new[] { "无", "开运算", "闭运算" }, new[] { "0", "1", "2" }));
             t.Fields.Add(Int("MorphKsize", "核边长", 0, 31, "3", "奇数"));
+            AddSearchRegion(t);   // 统一的搜索区域参数组
             return t;
         }
 
@@ -357,6 +358,8 @@ namespace VisionPlatform.Modules
                 : type == FlowNodeType.DlPose
                     ? "输出每个目标的框 + 关键点（关键点以 4px 小方块叠加显示）"
                     : "深度图按 0~1 归一化输出，同时给出原始值域（Min/Max）";
+            // 深度学习类暂不接搜索区域：DlDepth 输出与原图同尺寸的深度图，裁剪会破坏尺寸语义；
+            // 要支持得让原生侧按 ROI 推理并把结果贴回整图，属于下一阶段。
             return t;
         }
 
@@ -386,6 +389,7 @@ namespace VisionPlatform.Modules
 
             t.FooterNote = "与「识别」分类里的传统 OCR（模板匹配）是两套东西："
                          + "这里给的是自然场景/多字体文本，不需要建字符模板。";
+            AddSearchRegion(t);   // 统一的搜索区域参数组
             return t;
         }
 
@@ -601,6 +605,7 @@ namespace VisionPlatform.Modules
 
             t.FooterNote = "不用做模板。一次可识别多个码，叠加层按四角点画旋转框。"
                          + "没识别到时会给出可行动的诊断（试过哪些方向 / 是否开了降采样 / 码制是否限死）。";
+            AddSearchRegion(t);   // 统一的搜索区域参数组
             return t;
         }
 
@@ -728,6 +733,7 @@ namespace VisionPlatform.Modules
             t.Fields.Add(Group("判定"));
             t.Fields.Add(Dbl("MinSharpness", "最小清晰度", 0, 1000000, 1, 10m, "100",
                 "拉普拉斯方差，越大越清晰"));
+            AddSearchRegion(t);   // 统一的搜索区域参数组
             return t;
         }
 
@@ -982,6 +988,7 @@ namespace VisionPlatform.Modules
 
             t.FooterNote = "输入需为彩色图像（直接接图像源之后效果最佳）；检测框以叠加层显示在画布上，"
                          + "输出图像原样向下传递，可串联 Blob / 卡尺等下游节点。";
+            AddSearchRegion(t);   // 统一的搜索区域参数组
             return t;
         }
 
@@ -1225,6 +1232,33 @@ namespace VisionPlatform.Modules
                          + "输出 0~1 的良品得分，0.5 就是及格线；热图颜色越暖表示越异常。"
                          + "输入可接「位置修正」，ROI 会随工件移动 —— 这是产线上稳定工作的前提。";
             return t;
+        }
+
+        /// <summary>
+        /// 给节点追加「搜索区域」参数组 —— <b>所有需要限定处理范围的算法共用这一份定义</b>。
+        /// <para>
+        /// 【为什么必须共用】改造前同一件事有 4 套实现 + 2 套命名：Blob 自己写了一套仿射、
+        /// 异常检测/字符识别走 <c>CropRoi</c>、图像滤波/颜色提取走 <c>ResolveRoi</c>（只取外接框）、
+        /// 形状/模板匹配走 <c>ApplyRoi</c> 且参数叫 <c>Search*</c>。结果就是"位置修正带旋转时，
+        /// 有的节点框跟着转、有的不转"，同一块 ROI 在两个节点里覆盖的范围也不一样。
+        /// 统一后：参数键名只有 <c>Roi*</c> 一套，读取与坐标换算只有 <see cref="Flow.SearchRegion"/> 一处。
+        /// </para>
+        /// <para>
+        /// 宽或高 = 0 表示"整幅"，语义与改造前一致，老方案不用迁移。
+        /// </para>
+        /// </summary>
+        /// <param name="t">参数表。</param>
+        /// <param name="widthTip">「宽」这一项的提示语（按节点语义定制）；null 用通用文案。</param>
+        private static void AddSearchRegion(NodeParamTable t, string widthTip = null)
+        {
+            t.Fields.Add(Group("搜索区域（宽或高 = 0 时整幅）"));
+            t.Fields.Add(Int("RoiX", "X", -100000, 100000, "0"));
+            t.Fields.Add(Int("RoiY", "Y", -100000, 100000, "0"));
+            t.Fields.Add(Int("RoiW", "宽", 0, 100000, "0",
+                widthTip ?? "限定只在该框内处理；接了位置修正时框会跟随工件平移（带旋转时逐位置类算法会先旋正）"));
+            t.Fields.Add(Int("RoiH", "高", 0, 100000, "0"));
+            t.Fields.Add(Dbl("RoiAngle", "自身角度", -180, 180, 2, 1m, "0",
+                "区域自身的倾斜（度，顺时针为正）。非 0 时逐位置类算法会旋正后再处理"));
         }
 
         /// <summary>异常检测模型下拉的选项来源 Key（模块包在 Register 时注册实现）。</summary>

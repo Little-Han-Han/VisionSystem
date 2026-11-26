@@ -1236,12 +1236,21 @@ namespace VisionPlatform.Flow
 
             Bitmap input = s.ColorInput != null ? s.ColorInput : s.Current;
 
+            // 搜索区域：只在框内识别；框为空 = 整幅，与旧行为一致。
+            // 识别框都在裁剪图坐标系里，必须加回 usedRoi 偏移才是整帧坐标。
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle usedRoi = Rectangle.Empty;
+            bool roiAffine = false;
+            Bitmap cropOcr = region.Crop(input, s.Transform, out usedRoi, out roiAffine);
+            double offX = (cropOcr != null) ? usedRoi.X : 0.0;
+            double offY = (cropOcr != null) ? usedRoi.Y : 0.0;
+
             float boxThresh = (float)node.GetDouble("BoxThresh", 0.3);
             float unclip = (float)node.GetDouble("UnclipRatio", 1.5);
             int maxLines = node.GetInt("MaxLines", 100);
 
             string fullText;
-            var r = _algo.OcrDl(input, det, rec, dict, device, boxThresh, unclip, maxLines, out fullText);
+            var r = _algo.OcrDl(cropOcr ?? input, det, rec, dict, device, boxThresh, unclip, maxLines, out fullText);
             if (!r.Success)
             {
                 p.Summary = "OCR(深度学习)：" + r.Message;   // 不用 Tail：会把"检测模型不存在："截掉
@@ -1252,7 +1261,7 @@ namespace VisionPlatform.Flow
             for (int i = 0; i < lines.Count; i++)
             {
                 NativeDl.OcrDlLine l = lines[i];
-                p.Shapes.Add(FlowShapes.BlobRect(l.X + l.Width / 2, l.Y + l.Height / 2,
+                p.Shapes.Add(FlowShapes.BlobRect(l.X + offX + l.Width / 2, l.Y + offY + l.Height / 2,
                                                  l.Width, l.Height, l.Text));
             }
 
@@ -1272,7 +1281,7 @@ namespace VisionPlatform.Flow
                 p.Regions.Add(new RegionInfo
                 {
                     Index = i + 1,
-                    Cx = lines[i].X + lines[i].Width / 2,
+                    Cx = lines[i].X + offX + lines[i].Width / 2,
                     Cy = lines[i].Y + lines[i].Height / 2,
                     Width = lines[i].Width,
                     Height = lines[i].Height,
@@ -1286,6 +1295,7 @@ namespace VisionPlatform.Flow
                 p.Metrics.CharCount,
                 OneLineText(Shorten(fullText, 40)),
                 wholeImage ? "（整图识别）" : "");
+            if (cropOcr != null) cropOcr.Dispose();
             return lines.Count > 0 || node.GetInt("MinLines", 0) <= 0;
         }
 
@@ -2187,14 +2197,38 @@ namespace VisionPlatform.Flow
                 return true;
             }
 
-            var pr = _algo.Preprocess(s.Current, BuildPreprocess(node));
-            if (!pr.Success)
+            // 搜索区域：只对框内做预处理，再把结果贴回整帧（框为空 = 整幅，与旧行为一致）。
+            // 统一走 SearchRegion，参数读取与旋正口径全库只有一处实现。
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle usedRoi = Rectangle.Empty;
+            bool roiAffine = false;
+            Bitmap crop = region.Crop(s.Current, s.Transform, out usedRoi, out roiAffine);
+            try
             {
-                p.Summary = Fail("预处理失败：", pr);
-                return false;
-            }
+                var pr = _algo.Preprocess(crop ?? s.Current, BuildPreprocess(node));
+                if (!pr.Success)
+                {
+                    p.Summary = Fail("预处理失败：", pr);
+                    return false;
+                }
 
-            s.ReplaceFrame(pr.Value);
+                if (crop == null)
+                {
+                    s.ReplaceFrame(pr.Value);
+                }
+                else
+                {
+                    // 只替换框内那一块，框外像素保持原样（否则等于把整帧丢了）
+                    Bitmap merged = (Bitmap)s.Current.Clone();
+                    BlitPatch(merged, pr.Value, usedRoi.X, usedRoi.Y);
+                    pr.Value.Dispose();
+                    s.ReplaceFrame(merged);
+                }
+            }
+            finally
+            {
+                if (crop != null) crop.Dispose();
+            }
 
             // 预览帧：连续运行（CaptureFrames=false）时 StepNext 不会留帧，
             // 这里显式克隆当前帧，保证流程预览区能显示该节点的结果图（与位置修正同款）。
@@ -2239,7 +2273,8 @@ namespace VisionPlatform.Flow
             fp.KeepColor = keepColor;
 
             Bitmap input = keepColor ? s.ColorInput : s.Current;
-            Rectangle roi = ResolveRoi(s, node, input.Width, input.Height);
+            Rectangle roi = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
+                            .BoundsToFrame(s.Transform, input.Width, input.Height);
 
             Bitmap output = null;
             Bitmap processed = null;
@@ -2359,18 +2394,18 @@ namespace VisionPlatform.Flow
             ColorExtractResult r = cr.Value;
 
             // 可选 ROI：只保留中心落在 ROI 内的命中区域（与 Blob 的 ROI 口径一致）
-            Rectangle roi = ResolveRoi(s, node, s.ColorInput.Width, s.ColorInput.Height);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
             var kept = new List<BlobResult>();
             foreach (BlobResult b in r.Blobs)
             {
-                if (!roi.IsEmpty && !roi.Contains((int)Math.Round(b.Cx), (int)Math.Round(b.Cy))) continue;
+                if (!region.ContainsPoint(s.Transform, b.Cx, b.Cy)) continue;
                 kept.Add(b);
             }
 
             foreach (BlobResult b in kept)
                 p.Shapes.Add(FlowShapes.BlobRect(b.Cx, b.Cy, b.Width, b.Height));
 
-            if (!roi.IsEmpty) p.AuxShapes.AddRange(FlowShapes.RoiOutline(roi));
+            if (!region.IsEmpty) p.AuxShapes.AddRange(region.Outline(s.Transform, false));
 
             // 输出：默认把 0/255 掩膜作为工作帧传给下游；关闭时保持原彩色帧继续往下传
             bool handed = false;
@@ -2418,6 +2453,15 @@ namespace VisionPlatform.Flow
             // 否则退回当前帧（原生侧会自动把灰度 / 4 通道转成 BGR 再推理，但精度不如直接喂彩图）。
             Bitmap input = (s.ColorInput != null) ? s.ColorInput : s.Current;
 
+            // 搜索区域：只在框内检测；框为空 = 整幅，与旧行为一致。
+            // 检测结果（框 / 中心点）都在裁剪图坐标系里，必须加回 usedRoi 偏移才是整帧坐标。
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle usedRoi = Rectangle.Empty;
+            bool roiAffine = false;
+            Bitmap crop = region.Crop(input, s.Transform, out usedRoi, out roiAffine);
+            double offX = (crop != null) ? usedRoi.X : 0.0;
+            double offY = (crop != null) ? usedRoi.Y : 0.0;
+
             var dp = new DetectParam
             {
                 ModelPath = node.GetString("ModelPath", "models/yolo11n.onnx"),
@@ -2427,10 +2471,11 @@ namespace VisionPlatform.Flow
                 MaxCount = node.GetInt("MaxCount", 100)
             };
 
-            OpResult<DetectOutput> dr = _algo.Detect(input, dp);
+            OpResult<DetectOutput> dr = _algo.Detect(crop ?? input, dp);
             if (!dr.Success)
             {
                 p.Summary = "目标识别：" + Tail(dr.Message);
+                if (crop != null) crop.Dispose();
                 return false;
             }
 
@@ -2445,7 +2490,7 @@ namespace VisionPlatform.Flow
                 bool primary = (outp.Best != null) && object.ReferenceEquals(d, outp.Best);
                 string label = string.Format(CultureInfo.InvariantCulture,
                     "#{0} {1} {2:0.00}", idx, d.ClassName, d.Score);
-                var box = FlowShapes.DetectBox(d.X, d.Y, d.Width, d.Height, primary, label);
+                var box = FlowShapes.DetectBox(d.X + offX, d.Y + offY, d.Width, d.Height, primary, label);
                 if (box != null) box.Name = label;   // Name 供悬浮提示，Label 供画布绘制
                 p.Shapes.Add(box);
             }
@@ -2454,8 +2499,8 @@ namespace VisionPlatform.Flow
             if (outp.Best != null)
             {
                 p.Metrics.TopScore = outp.Best.Score;
-                p.Metrics.TopCx = outp.Best.X + outp.Best.Width * 0.5;
-                p.Metrics.TopCy = outp.Best.Y + outp.Best.Height * 0.5;
+                p.Metrics.TopCx = outp.Best.X + offX + outp.Best.Width * 0.5;
+                p.Metrics.TopCy = outp.Best.Y + offY + outp.Best.Height * 0.5;
             }
 
             // 预览帧：克隆当前工作帧供流程预览区显示（检测不修改原图，叠加层由画布绘制）
@@ -2478,6 +2523,7 @@ namespace VisionPlatform.Flow
             p.Summary = string.Format(CultureInfo.InvariantCulture,
                 "目标识别：检测到 {0} 个目标{1}", outp.Detections.Count,
                 show > 0 ? "（" + top + (outp.Detections.Count > show ? "…" : "") + "）" : "");
+            if (crop != null) crop.Dispose();
             return true;
         }
 
@@ -4227,7 +4273,9 @@ namespace VisionPlatform.Flow
                 Symmetric = node.GetBool("Symmetric", false)
             };
 
-            Rectangle search = ApplyRoi(s, node, "SearchX", "SearchY", "SearchW", "SearchH");
+            // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
+            Rectangle search = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
+                                          .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
 
             // 诊断：姿态数 = 角度档 × 缩放档。用户抱怨"慢"时，第一个要看的数就是它 ——
             // ±180°/步长 1° 就是 361 个姿态，比 ±10°/步长 1° 慢近 20 倍。
@@ -4435,7 +4483,9 @@ namespace VisionPlatform.Flow
             }
 
             // 搜索：有搜索 ROI 时先裁剪，结果坐标【必须加回左上角偏移】再画图形
-            Rectangle search = ApplyRoi(s, node, "SearchX", "SearchY", "SearchW", "SearchH");
+            // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
+            Rectangle search = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
+                                          .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
             bool useRoi = search.Width > 0 && search.Height > 0
                           && (search.X != 0 || search.Y != 0
                               || search.Width != s.Current.Width || search.Height != s.Current.Height);
@@ -4580,7 +4630,9 @@ namespace VisionPlatform.Flow
             };
             int minCount = Math.Max(1, node.GetInt("MinCount", 1));
 
-            Rectangle roi = ApplyRoi(s, node, "RoiX", "RoiY", "RoiW", "RoiH");
+            // 搜索区域统一走 SearchRegion（解码器自己会处理旋转，这里保持外接框即可）
+            Rectangle roi = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
+                                      .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
             bool useRoi = roi.Width > 0 && roi.Height > 0
                           && (roi.X != 0 || roi.Y != 0
                               || roi.Width != s.Current.Width || roi.Height != s.Current.Height);
@@ -4788,51 +4840,20 @@ namespace VisionPlatform.Flow
                     input = work;
                 }
 
-                // 可选 ROI：限制分析区域。用户输入为图像坐标，与匹配节点同款顺序换算 ——
-                // 先减去 ROI 裁剪偏移得到工作帧坐标，再应用位置修正变换（FR-ALG-09：让 Blob
-                // 搜索区跟随工件修正后的位姿），最后夹到图像范围内；
-                // ROI 无效（宽高<=0 或完全在图外）则退化为整帧分析。
+                // 可选搜索区域：限制分析区域。统一走 SearchRegion ——
+                // 参数读取（Roi*/Search* 兼容）、位置修正变换、旋正裁剪、边界夹取只有一处实现。
+                // 区域无效（宽高 ≤ 0 或完全在图外）退化为整帧分析，与改造前一致。
                 Bitmap analyzeOn = input;
                 Rectangle usedRoi = Rectangle.Empty;
+                bool blobAffine = false;
 
-                int roiX = node.GetInt("RoiX", 0);
-                int roiY = node.GetInt("RoiY", 0);
-                int roiW = node.GetInt("RoiW", 0);
-                int roiH = node.GetInt("RoiH", 0);
-
-                // 位置修正带旋转时走仿射裁剪（拿到的图跟着工件一起转），否则维持整数裁剪
-                bool blobAffine = applyCorrection && HasRoiRotation(s);
-
-                if (roiW > 0 && roiH > 0 && blobAffine)
                 {
-                    Rectangle raw = RawRoi(s, node);
-                    cropped = CropAffine(input, raw, 0.0, s.Transform);
-                    if (cropped != null)
+                    SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+                    if (!region.IsEmpty)
                     {
-                        analyzeOn = cropped;
-                        usedRoi = raw;
-                    }
-                }
-                else if (roiW > 0 && roiH > 0)
-                {
-                    // 用户坐标 → 工作帧坐标（减裁剪偏移）→ 位置修正变换（与 ApplyRoi 一致）；
-                    // 无上游定位时 Transform 未写入，ApplyToRect 原样返回，行为与改造前完全一致。
-                    int wx = (int)Math.Round(roiX - s.OffsetX);
-                    int wy = (int)Math.Round(roiY - s.OffsetY);
-                    var userRect = applyCorrection
-                        ? s.Transform.ApplyToRect(new Rectangle(wx, wy, roiW, roiH))
-                        : new Rectangle(wx, wy, roiW, roiH);
-
-                    int rx = Math.Max(0, Math.Min(userRect.X, input.Width - 1));
-                    int ry = Math.Max(0, Math.Min(userRect.Y, input.Height - 1));
-                    int rw = Math.Max(0, Math.Min(userRect.Width, input.Width - rx));
-                    int rh = Math.Max(0, Math.Min(userRect.Height, input.Height - ry));
-                    if (rw > 0 && rh > 0)
-                    {
-                        var rect = new Rectangle(rx, ry, rw, rh);
-                        cropped = CropTemplate(input, rect);
-                        analyzeOn = cropped;
-                        usedRoi = rect;
+                        cropped = region.Crop(input, applyCorrection ? s.Transform : null,
+                                              out usedRoi, out blobAffine);
+                        if (cropped != null) analyzeOn = cropped;
                     }
                 }
 
@@ -6010,16 +6031,29 @@ namespace VisionPlatform.Flow
                 catch (Exception) { p.Frame = null; }
             }
 
-            var sr = _algo.Sharpness(s.Current);
-            if (!sr.Success)
+            // 搜索区域：只评价框内的清晰度（框为空 = 整幅，与旧行为一致）。
+            // 走 SearchRegion 而不是自己 GetInt("RoiW")：参数读取与旋正口径全库只有一处实现。
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle usedRoi = Rectangle.Empty;
+            bool roiAffine = false;
+            Bitmap crop = region.Crop(s.Current, s.Transform, out usedRoi, out roiAffine);
+            try
             {
-                p.Summary = "清晰度评价失败";
-                return false;
-            }
+                var sr = _algo.Sharpness(crop ?? s.Current);
+                if (!sr.Success)
+                {
+                    p.Summary = "清晰度评价失败";
+                    return false;
+                }
 
-            double min = node.GetDouble("MinSharpness", 100);
-            p.Summary = string.Format(CultureInfo.InvariantCulture, "清晰度 {0:F1}", sr.Value);
-            return sr.Value >= min;
+                double min = node.GetDouble("MinSharpness", 100);
+                p.Summary = string.Format(CultureInfo.InvariantCulture, "清晰度 {0:F1}", sr.Value);
+                return sr.Value >= min;
+            }
+            finally
+            {
+                if (crop != null) crop.Dispose();
+            }
         }
 
         private bool RunFitCircle(FlowRunSession s, FlowNode node, FlowNodeProgress p)
@@ -6309,18 +6343,9 @@ namespace VisionPlatform.Flow
         private static Bitmap CropRoi(Bitmap frame, FlowRunSession s, FlowNode node,
                                       out Rectangle roiUsed, out bool affine)
         {
-            Rectangle raw = RawRoi(s, node);
-            double roiAngle = RoiAngleOf(node);
-            affine = HasRoiRotation(s, roiAngle);
-
-            if (!affine)
-            {
-                roiUsed = ResolveRoi(s, node, frame.Width, frame.Height);
-                return roiUsed.IsEmpty ? null : CropTemplate(frame, roiUsed);
-            }
-
-            roiUsed = raw;
-            return CropAffine(frame, raw, roiAngle, s.Transform);
+            // 统一到 SearchRegion：参数读取（Roi*/Search* 兼容）与旋正口径只有一处实现
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            return region.Crop(frame, s.Transform, out roiUsed, out affine);
         }
 
         /// <summary>

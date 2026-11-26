@@ -17,6 +17,6 @@
 //  - AssemblyInformationalVersion  产品版本（Application.ProductVersion）
 // =============================================================================
 
-[assembly: AssemblyVersion("1.0.14.8")]
-[assembly: AssemblyFileVersion("1.0.14.8")]
-[assembly: AssemblyInformationalVersion("1.0.14.8")]
+[assembly: AssemblyVersion("1.0.14.9")]
+[assembly: AssemblyFileVersion("1.0.14.9")]
+[assembly: AssemblyInformationalVersion("1.0.14.9")]

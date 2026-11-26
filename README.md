@@ -1,7 +1,7 @@
 ﻿# VisionSystem — 工业机器视觉软件
 
 <!-- VERSION_BLOCK_START -->
-> **当前版本：1.0.14.8**
+> **当前版本：1.0.14.9**
 <!-- VERSION_BLOCK_END -->
 
 > 更新记录见 [CHANGELOG.md](CHANGELOG.md)。

@@ -134,6 +134,7 @@
     <Compile Include="Flow\OcrTemplateLoadResult.cs" />
     <Compile Include="Flow\FlowNodeMetrics.cs" />
     <Compile Include="Flow\AnomalyScore.cs" />
+    <Compile Include="Flow\SearchRegion.cs" />
     <Compile Include="Flow\NodeResultText.cs" />
     <Compile Include="Flow\FlowGeometryValue.cs" />
     <Compile Include="Flow\FlowGeometryMath.cs" />
