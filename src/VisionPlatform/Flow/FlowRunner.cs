@@ -1185,6 +1185,14 @@ namespace VisionPlatform.Flow
             {
                 string info = _algo.AnomalyInfo();
                 if (!string.IsNullOrEmpty(info)) p.Summary += "　[" + info + "]";
+
+                // 首帧把"实际检测区域"打出来：现场说"缺陷框跑到 ROI 外面"时，
+                // 这个数一对比就知道是 ROI 被位置修正挪走了、还是框没映射回来。
+                p.Summary += string.Format(CultureInfo.InvariantCulture,
+                    "　[检测区 {0},{1} {2}×{3}{4}]",
+                    hasRoi ? roi.X : 0, hasRoi ? roi.Y : 0,
+                    input.Width, input.Height,
+                    roiAffine ? " 已旋正" : "");
                 _anomalyInfoLogged = true;
             }
 
