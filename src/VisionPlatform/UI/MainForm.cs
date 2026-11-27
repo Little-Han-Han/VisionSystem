@@ -203,6 +203,10 @@ namespace VisionPlatform.UI
         private readonly object _pendingOutputsSync = new object();
 
         /// <summary>某视图当前待显示的最新结果（覆盖式合帧用）。</summary>
+        /// <summary>构建标记：用于确认运行中的 exe 是否包含"搜索区域渲染"这版代码。</summary>
+        public const string BuildTagAuxRender = "AUX_RENDER_V151";
+
+
         private sealed class PendingFlowOutput
         {
             public Bitmap Frame;                 // 输出图像（原图；所有权在此，替换时释放）
@@ -3185,6 +3189,12 @@ namespace VisionPlatform.UI
                             UpdateStats();
                             UpdateStatus();
                         }
+
+                        // 诊断：把区域数量明确写进状态栏摘要。
+                        // 现场反复出现"主界面没有区域"，但代码/产物/进程都验证过是对的，
+                        // 说明分歧在"数据到底有没有到这一步" —— 直接把数字摆出来，不用猜。
+                        if (auxShapes != null && auxShapes.Count > 0)
+                            summary = (summary ?? "") + "　[区域 " + auxShapes.Count + "]";
 
                         view.ClearShapes();
                         if (shapes != null)
