@@ -83,16 +83,32 @@ namespace VisionPlatform.Flow
         /// <param name="node">节点。</param>
         /// <param name="offsetX">裁图偏移（流程里是 <c>s.OffsetX</c>）。</param>
         /// <param name="offsetY">裁图偏移。</param>
-        public static SearchRegion FromNode(FlowNode node, double offsetX, double offsetY)
+        /// <param name="useSearchKeys">
+        /// 读 <c>SearchX/Y/W/H</c> 而不是 <c>RoiX/Y/W/H</c>。
+        /// <para>
+        /// 【为什么必须显式指定，不能自动回退】最初写成"Roi* 读不到就回退 Search*"，
+        /// 结果原本只读 Roi* 的节点（图像滤波）串读到了别的 key，拿到一个越界矩形，
+        /// 贴回整帧时抛"参数无效"。参数名的选择必须由调用方声明，不能靠猜。
+        /// 目前只有形状匹配与模板匹配用 Search*（历史命名），其余一律 Roi*。
+        /// </para>
+        /// </param>
+        public static SearchRegion FromNode(FlowNode node, double offsetX, double offsetY,
+                                            bool useSearchKeys = false)
         {
             if (node == null) return Whole();
 
-            // 优先 Roi*，回退 Search*：老方案里"搜索区域"叫 Search*，不迁移也能读到
-            int x = node.GetInt("RoiX", node.GetInt("SearchX", 0));
-            int y = node.GetInt("RoiY", node.GetInt("SearchY", 0));
-            int w = node.GetInt("RoiW", node.GetInt("SearchW", 0));
-            int h = node.GetInt("RoiH", node.GetInt("SearchH", 0));
-            double ang = node.GetDouble("RoiAngle", 0.0);
+            string px = useSearchKeys ? "Search" : "Roi";
+            int x = node.GetInt(px + "X", 0);
+            int y = node.GetInt(px + "Y", 0);
+            int w = node.GetInt(px + "W", 0);
+            int h = node.GetInt(px + "H", 0);
+            double ang = useSearchKeys ? 0.0 : node.GetDouble("RoiAngle", 0.0);
+
+            // 【必须先判宽高再构造 Rectangle】宽或高为负时 new Rectangle(...) 自己就抛
+            // ArgumentException("参数无效")，而且是在调用方 try 之外求值 —— 表现为
+            // "节点执行异常（参数无效）"，堆栈里还看不到是谁。旧版 ResolveRoi 有同样的早退，
+            // 统一到本类时漏掉了，被回归 T12b 抓到。
+            if (w <= 0 || h <= 0) return Whole();
 
             return new SearchRegion
             {

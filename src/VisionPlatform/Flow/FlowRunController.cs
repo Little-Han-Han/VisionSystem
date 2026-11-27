@@ -847,6 +847,8 @@ namespace VisionPlatform.Flow
                 snap.BaselineTaught = res.BaselineTaught;
                 snap.BaselineNodeId = res.BaselineNodeId ?? "";
                 if (res.Shapes != null) snap.AllShapes = new List<IGeometryShape>(res.Shapes);
+                // 搜索区域轮廓等"输入几何"：预览区按「轮廓」开关过滤，但必须先把它们送过去
+                if (res.AuxShapes != null) snap.AuxShapes = new List<IGeometryShape>(res.AuxShapes);
 
                 // 找本周期最慢的节点（瓶颈归因）
                 if (res.Progress != null)

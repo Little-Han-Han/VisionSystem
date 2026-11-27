@@ -3,6 +3,46 @@
 > 版本号规则见 [README「版本管理」](README.md#8-版本管理)。
 > 每次发布前用 `version.bat <版本>` 同步程序集版本与本文件顶部版本块。
 
+## 1.0.15.0 — 2026-11-27
+
+**把搜索区域真正画到主界面上（含节点名标签），并修掉继承的两处隐藏 bug。**
+
+现场反复反馈"缺陷出现在搜索框外面"。查下来是三件事叠在一起，**没有一件是坐标算错**：
+
+**① 汇总链路断了一节。** `FlowRunResult` 根本没有 `AuxShapes` 字段，
+`PublishChainEnd` 只汇总了 `res.Shapes`，而注释却写着"已复制 AuxShapes" ——
+于是 `snap.AuxShapes` 永远是空列表，主界面一个搜索框都显示不出来。
+单节点预览那条路径（`snap.AuxShapes = p.AuxShapes`）是通的，所以只在"链尾预览"时看不到，
+更难察觉。
+
+**② 12 个节点里有 8 个根本不画轮廓。** 形状匹配、模板匹配、条码、清晰度、预处理、
+目标识别、深度学习 OCR 一个都没往 `p.AuxShapes` 里放东西。于是画面上只剩某个节点的框
+（或画布编辑器的示教框），"缺陷在框外"就成了无法自证的错觉。
+
+**③ 画的是示教值、算法用的是生效值。** 原来按示教矩形画，而旋正裁剪用的是"跟着工件转的
+矩形"、外接框裁剪用的是"旋转后的包围盒"——框画在一处、算法在另一处干活。
+
+- **改法**：`SearchRegion.Outline(t, frameW, frameH, affine, label)` 画**实际生效范围**，
+  并带节点名标签（`形状匹配区域` / `模板匹配区域` / `条码区域` / `清晰度区域` / `预处理区域` /
+  `目标识别区域` / `OCR 区域` / `异常检测区域` / `图像滤波区域` / `颜色提取区域`）。
+  统一成带标签的矩形而不是四条边线：一个流程里多个区域会重叠，边线没地方挂标签；
+  顺带 `IsEditable=false`（这是显示用的，拖一下就会改掉示教值）。
+- **新增 `FlowRunResult.AuxShapes` + `CollectAuxShapes`**，`PublishChainEnd` 复制到快照。
+  与 `Shapes` 分开的理由不变：辅助几何是"输入条件"，不进结果明细，但界面上必须看得见。
+- **补齐 8 个节点的轮廓绘制**，统一走 `AddRegionOutline(p, s, region, w, h, affine, label)`。
+
+**顺手修掉的两个 bug（都是本次统一暴露出来的）**
+
+- **`SearchRegion.FromNode` 少了宽高保护**：宽或高为负时 `new Rectangle(...)` **自己就抛**
+  `ArgumentException("参数无效")`，而且是在调用方的 `try` 之外求值 —— 表现为
+  "节点执行异常（参数无效）"，堆栈里看不到是谁。旧版 `ResolveRoi` 有 `if (roiW <= 0) return Empty`
+  的早退，统一到新类时漏掉了。回归 T12b 抓到。
+- **`RunImageFilter` 在帧释放后读宽高**：`s.ReplaceFrame(output)` 会释放旧的 `s.Current`，
+  之后再用 `input.Width` 就抛 `ArgumentException`（堆栈停在 `Image.get_Width`，
+  完全看不出是"帧已被释放"）。改为进方法时先存 `frameW/frameH`。
+
+- 回归：SmokeAlgo **485/0**；SmokeUi **1166/6**（既有基线）。
+
 ## 1.0.14.9 — 2026-11-26
 
 **搜索区域统一成一个接口（`SearchRegion`），12 个算法节点全部接入，参数命名收口到 `Roi*`。**

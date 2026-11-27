@@ -35,6 +35,18 @@ namespace VisionPlatform.Flow
         /// <summary>叠加图形（图像坐标，全链汇总）。</summary>
         public List<IGeometryShape> Shapes { get; set; }
 
+        /// <summary>
+        /// 辅助几何（搜索区域轮廓 / 卡尺窗口 / OCR 区域…，全链汇总）。
+        /// <para>
+        /// 【为什么必须单独汇总】它是"输入条件"不是"检测结果"，所以不能进结果明细；
+        /// 但主界面必须看得到 —— 否则现场无从判断"算法到底在哪块区域里干活"。
+        /// 之前 <c>PublishChainEnd</c> 只汇总了 <see cref="Shapes"/>，注释却写着"已复制 AuxShapes"，
+        /// 实际 <c>snap.AuxShapes</c> 一直是空的，于是界面上一个搜索框都看不到，
+        /// "缺陷跑到搜索区域外"就变成了无法自证的错觉。
+        /// </para>
+        /// </summary>
+        public List<IGeometryShape> AuxShapes { get; set; }
+
         /// <summary>逐节点进度（供画布状态标注与预览区回看）。</summary>
         public List<FlowNodeProgress> Progress { get; set; }
 
@@ -467,6 +479,7 @@ namespace VisionPlatform.Flow
             result.ElapsedMs = session.Watch != null ? (int)session.Watch.ElapsedMilliseconds : 0;
             result.Progress = session.Progress;
             result.Shapes = CollectShapes(session);
+            result.AuxShapes = CollectAuxShapes(session);
 
             // 把本帧的位姿修正留在结果里：界面据此把"选中节点的 ROI 轮廓"画到工件实际所在的位置，
             // 否则位置修正生效后，预览上的 ROI 框还停在示教位、看起来像"没跟着工件走"。
@@ -577,6 +590,18 @@ namespace VisionPlatform.Flow
             {
                 if (p == null || p.Shapes == null) continue;
                 all.AddRange(p.Shapes);
+            }
+            return all;
+        }
+
+        /// <summary>汇总全链的辅助几何（搜索区域轮廓等）。与 <see cref="CollectShapes"/> 同构。</summary>
+        private static List<IGeometryShape> CollectAuxShapes(FlowRunSession session)
+        {
+            var all = new List<IGeometryShape>();
+            foreach (FlowNodeProgress p in session.Progress)
+            {
+                if (p == null || p.AuxShapes == null) continue;
+                all.AddRange(p.AuxShapes);
             }
             return all;
         }
@@ -2276,8 +2301,13 @@ namespace VisionPlatform.Flow
             fp.KeepColor = keepColor;
 
             Bitmap input = keepColor ? s.ColorInput : s.Current;
+            // 【必须提前取宽高】下面 s.ReplaceFrame(output) 会把旧的 s.Current 释放掉，
+            // 之后再用 input.Width 就会抛 ArgumentException("参数无效")，堆栈停在 Image.get_Width，
+            // 完全看不出是"帧已被释放"。
+            int frameW = input.Width;
+            int frameH = input.Height;
             Rectangle roi = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
-                            .BoundsToFrame(s.Transform, input.Width, input.Height);
+                            .BoundsToFrame(s.Transform, frameW, frameH);
 
             Bitmap output = null;
             Bitmap processed = null;
@@ -2327,7 +2357,7 @@ namespace VisionPlatform.Flow
                 }
 
                 AddRegionOutline(p, s, SearchRegion.FromNode(node, s.OffsetX, s.OffsetY),
-                                 input.Width, input.Height, false, "图像滤波区域");
+                                 frameW, frameH, false, "图像滤波区域");
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture, "滤波：{0} 核={1}{2}{3}",
                     FilterType.Name(fp.Type), fp.Ksize,
@@ -4279,7 +4309,7 @@ namespace VisionPlatform.Flow
             };
 
             // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
-            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY, true);   // 历史命名：Search*
             Rectangle search = region.BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
             AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "形状匹配区域");
 
@@ -4490,7 +4520,7 @@ namespace VisionPlatform.Flow
 
             // 搜索：有搜索 ROI 时先裁剪，结果坐标【必须加回左上角偏移】再画图形
             // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
-            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY, true);   // 历史命名：Search*
             Rectangle search = region.BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
             AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "模板匹配区域");
             bool useRoi = search.Width > 0 && search.Height > 0
