@@ -221,7 +221,23 @@ namespace VisionPlatform.Flow
                                             bool affine, string label = null)
         {
             var list = new List<IGeometryShape>();
-            if (IsEmpty) return list;
+
+            // 区域为空（宽/高 = 0）在运行时语义是"整幅"，但界面上不能因此什么都不画 ——
+            // 否则现场看到的是"这个节点根本没有搜索区域"，与"有区域但限制很松"完全分不清。
+            // 这里画一个贴住整帧的框，标签注明「（全图）」，让两种状态都能一眼区分。
+            if (IsEmpty)
+            {
+                if (frameW <= 0 || frameH <= 0) return list;
+                var full = new RotatedRectShape(
+                    new PointF(frameW / 2f, frameH / 2f), frameW, frameH, 0f);
+                full.StrokeColor = FlowShapes.ColorRoi;
+                full.LineWidth = FlowShapes.ThinLine;
+                full.IsEditable = false;
+                full.Name = FlowShapes.AuxContourName;
+                full.Label = (string.IsNullOrEmpty(label) ? "搜索区域" : label) + "（全图）";
+                list.Add(full);
+                return list;
+            }
 
             PointF center;
             float w, h, angle;

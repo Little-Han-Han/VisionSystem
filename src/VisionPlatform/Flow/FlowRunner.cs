@@ -6433,7 +6433,7 @@ namespace VisionPlatform.Flow
                                              SearchRegion region, int frameW, int frameH,
                                              bool affine, string label)
         {
-            if (p == null || region == null || region.IsEmpty) return;
+            if (p == null || region == null) return;
             p.AuxShapes.AddRange(region.Outline(s.Transform, frameW, frameH, affine, label));
         }
 
