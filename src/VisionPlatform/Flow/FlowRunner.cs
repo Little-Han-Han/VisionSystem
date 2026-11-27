@@ -1121,7 +1121,8 @@ namespace VisionPlatform.Flow
 
             // ROI 轮廓进辅助层（输入条件，不占结果明细）；缺陷框进主结果层
             if (hasRoi)
-                p.AuxShapes.AddRange(RoiOutlineShapes(s, roi, roiAngle, roiAffine));
+                AddRegionOutline(p, s, SearchRegion.FromNode(node, s.OffsetX, s.OffsetY),
+                                 frame.Width, frame.Height, roiAffine, "异常检测区域");
 
             double boxCx = st.box_x + st.box_w / 2.0;
             double boxCy = st.box_y + st.box_h / 2.0;
@@ -1242,6 +1243,7 @@ namespace VisionPlatform.Flow
             Rectangle usedRoi = Rectangle.Empty;
             bool roiAffine = false;
             Bitmap cropOcr = region.Crop(input, s.Transform, out usedRoi, out roiAffine);
+            AddRegionOutline(p, s, region, input.Width, input.Height, roiAffine, "OCR 区域");
             double offX = (cropOcr != null) ? usedRoi.X : 0.0;
             double offY = (cropOcr != null) ? usedRoi.Y : 0.0;
 
@@ -2203,6 +2205,7 @@ namespace VisionPlatform.Flow
             Rectangle usedRoi = Rectangle.Empty;
             bool roiAffine = false;
             Bitmap crop = region.Crop(s.Current, s.Transform, out usedRoi, out roiAffine);
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, roiAffine, "预处理区域");
             try
             {
                 var pr = _algo.Preprocess(crop ?? s.Current, BuildPreprocess(node));
@@ -2323,7 +2326,8 @@ namespace VisionPlatform.Flow
                     catch (Exception) { p.Frame = null; }
                 }
 
-                if (!roi.IsEmpty) p.AuxShapes.AddRange(FlowShapes.RoiOutline(roi));
+                AddRegionOutline(p, s, SearchRegion.FromNode(node, s.OffsetX, s.OffsetY),
+                                 input.Width, input.Height, false, "图像滤波区域");
 
                 p.Summary = string.Format(CultureInfo.InvariantCulture, "滤波：{0} 核={1}{2}{3}",
                     FilterType.Name(fp.Type), fp.Ksize,
@@ -2405,7 +2409,7 @@ namespace VisionPlatform.Flow
             foreach (BlobResult b in kept)
                 p.Shapes.Add(FlowShapes.BlobRect(b.Cx, b.Cy, b.Width, b.Height));
 
-            if (!region.IsEmpty) p.AuxShapes.AddRange(region.Outline(s.Transform, false));
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "颜色提取区域");
 
             // 输出：默认把 0/255 掩膜作为工作帧传给下游；关闭时保持原彩色帧继续往下传
             bool handed = false;
@@ -2459,6 +2463,7 @@ namespace VisionPlatform.Flow
             Rectangle usedRoi = Rectangle.Empty;
             bool roiAffine = false;
             Bitmap crop = region.Crop(input, s.Transform, out usedRoi, out roiAffine);
+            AddRegionOutline(p, s, region, input.Width, input.Height, roiAffine, "目标识别区域");
             double offX = (crop != null) ? usedRoi.X : 0.0;
             double offY = (crop != null) ? usedRoi.Y : 0.0;
 
@@ -4274,8 +4279,9 @@ namespace VisionPlatform.Flow
             };
 
             // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
-            Rectangle search = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
-                                          .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle search = region.BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "形状匹配区域");
 
             // 诊断：姿态数 = 角度档 × 缩放档。用户抱怨"慢"时，第一个要看的数就是它 ——
             // ±180°/步长 1° 就是 361 个姿态，比 ±10°/步长 1° 慢近 20 倍。
@@ -4484,8 +4490,9 @@ namespace VisionPlatform.Flow
 
             // 搜索：有搜索 ROI 时先裁剪，结果坐标【必须加回左上角偏移】再画图形
             // 搜索区域统一走 SearchRegion（Roi*/Search* 两种历史命名都认）
-            Rectangle search = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
-                                          .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle search = region.BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "模板匹配区域");
             bool useRoi = search.Width > 0 && search.Height > 0
                           && (search.X != 0 || search.Y != 0
                               || search.Width != s.Current.Width || search.Height != s.Current.Height);
@@ -4631,8 +4638,9 @@ namespace VisionPlatform.Flow
             int minCount = Math.Max(1, node.GetInt("MinCount", 1));
 
             // 搜索区域统一走 SearchRegion（解码器自己会处理旋转，这里保持外接框即可）
-            Rectangle roi = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY)
-                                      .BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            SearchRegion region = SearchRegion.FromNode(node, s.OffsetX, s.OffsetY);
+            Rectangle roi = region.BoundsToFrame(s.Transform, s.Current.Width, s.Current.Height);
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, false, "条码区域");
             bool useRoi = roi.Width > 0 && roi.Height > 0
                           && (roi.X != 0 || roi.Y != 0
                               || roi.Width != s.Current.Width || roi.Height != s.Current.Height);
@@ -6037,6 +6045,7 @@ namespace VisionPlatform.Flow
             Rectangle usedRoi = Rectangle.Empty;
             bool roiAffine = false;
             Bitmap crop = region.Crop(s.Current, s.Transform, out usedRoi, out roiAffine);
+            AddRegionOutline(p, s, region, s.Current.Width, s.Current.Height, roiAffine, "清晰度区域");
             try
             {
                 var sr = _algo.Sharpness(crop ?? s.Current);
@@ -6378,6 +6387,23 @@ namespace VisionPlatform.Flow
             rr.IsEditable = false;
             if (!string.IsNullOrEmpty(label)) rr.Label = label;
             return rr;
+        }
+
+        /// <summary>
+        /// 把搜索区域画到辅助层（受预览区「轮廓」开关整组显隐）。
+        /// <para>
+        /// 【为什么必须每个节点都画】改造前只有异常检测 / 颜色提取 / Blob 会画，
+        /// 形状匹配、模板匹配、条码、清晰度、预处理、目标识别、OCR-DL 一个都不画 ——
+        /// 现场看到"缺陷框落在搜索区域外"时，根本无从判断那个框是哪个节点的、
+        /// 算法实际用的是哪一块。画出来的必须是<b>实际生效范围</b>（见 SearchRegion.Outline）。
+        /// </para>
+        /// </summary>
+        private static void AddRegionOutline(FlowNodeProgress p, FlowRunSession s,
+                                             SearchRegion region, int frameW, int frameH,
+                                             bool affine, string label)
+        {
+            if (p == null || region == null || region.IsEmpty) return;
+            p.AuxShapes.AddRange(region.Outline(s.Transform, frameW, frameH, affine, label));
         }
 
         /// <summary>ROI 轮廓：仿射时画一个旋转矩形，否则沿用四条边线。</summary>

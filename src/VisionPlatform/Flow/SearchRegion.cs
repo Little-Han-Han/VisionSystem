@@ -187,25 +187,51 @@ namespace VisionPlatform.Flow
         }
 
         /// <summary>
-        /// 预览用的区域轮廓：旋转时是一个旋转矩形，否则是四条边线。
+        /// 预览用的区域轮廓——画的是<b>实际生效的范围</b>，不是示教值。
+        /// <para>
+        /// 【为什么必须画生效范围】同一个区域在三种算法里的用法不同：旋正裁剪用的是"跟着工件转的矩形"，
+        /// 外接框裁剪用的是"旋转后的轴对齐包围盒"。如果统一按示教矩形画，就会出现
+        /// 「框画在一处、算法在另一处干活」——现场第一反应就是"搜索区域没生效"。
+        /// </para>
+        /// <para>
+        /// 【为什么统一成带标签的矩形而不是四条边线】一个流程里往往有好几个节点各带搜索区域，
+        /// 全画出来会重叠。带上"哪个节点 + 多大"，现场才能对上号；四条独立边线没地方挂标签。
+        /// 顺带把 <c>IsEditable</c> 关掉——这是显示用的，拖一下就会改掉示教值。
+        /// </para>
         /// </summary>
-        public List<IGeometryShape> Outline(FlowRunTransform t, bool affine)
+        /// <param name="affine">true = 画跟着工件转的矩形；false = 画整帧上的轴对齐外接框。</param>
+        /// <param name="label">画在框上的文字（通常是节点名 + 尺寸）。</param>
+        public List<IGeometryShape> Outline(FlowRunTransform t, int frameW, int frameH,
+                                            bool affine, string label = null)
         {
             var list = new List<IGeometryShape>();
             if (IsEmpty) return list;
 
+            PointF center;
+            float w, h, angle;
             if (!affine || t == null)
             {
-                list.AddRange(FlowShapes.RoiOutline(Rect));
-                return list;
+                Rectangle bounds = BoundsToFrame(t, frameW, frameH);
+                if (bounds.IsEmpty) return list;
+                center = new PointF(bounds.X + bounds.Width / 2f, bounds.Y + bounds.Height / 2f);
+                w = bounds.Width;
+                h = bounds.Height;
+                angle = 0f;
+            }
+            else
+            {
+                center = RoiAffineMap.FrameCenter(t, Rect);
+                w = Rect.Width;
+                h = Rect.Height;
+                angle = (float)EffectiveAngle(t);
             }
 
-            PointF c = RoiAffineMap.FrameCenter(t, Rect);
-            var rr = new RotatedRectShape(c, Rect.Width, Rect.Height, (float)EffectiveAngle(t));
+            var rr = new RotatedRectShape(center, w, h, angle);
             rr.StrokeColor = FlowShapes.ColorRoi;
             rr.LineWidth = FlowShapes.ThinLine;
-            rr.IsEditable = true;
+            rr.IsEditable = false;
             rr.Name = FlowShapes.AuxContourName;
+            if (!string.IsNullOrEmpty(label)) rr.Label = label;
             list.Add(rr);
             return list;
         }
