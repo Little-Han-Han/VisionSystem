@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using VisionPlatform.Calibration;
+using VisionPlatform.Recipe;
 using VisionPlatform.Flow;
 using VisionPlatform.Vision;
 
@@ -1327,8 +1328,110 @@ namespace VisionPlatform.Core
             // 反序列化后为 null，这里补默认深色，保证老用户升级后界面观感不变。
             if (string.IsNullOrWhiteSpace(cfg.Ui.Theme)) cfg.Ui.Theme = UiSettings.DefaultTheme;
 
+            // 方案级数据（流程 / 通讯 / 标定）的真源是 Recipes\<方案>\，不在本文件里。
+            // 旧版本把它们写在 appconfig 里 —— 这里做一次性迁移，之后一律从方案目录装载。
+            CurrentRecipeBootstrap(cfg);
+
             _current = cfg;
             return cfg;
+        }
+
+        /// <summary>
+        /// 按 <see cref="AlgorithmSettings.CurrentRecipeName"/> 装载方案级数据。
+        /// <para>
+        /// 两种情形：
+        /// ① <b>迁移</b> —— appconfig 里还有流程数据（旧版本写的）：以它为准写进方案目录。
+        ///    迁移只会在文件还没被新版 Save 覆写过时发生，因此天然只执行一次。
+        /// ② <b>正常装载</b> —— 从 <c>Recipes\&lt;方案&gt;\</c> 读 flows / comm / calibrations 到内存。
+        /// </para>
+        /// <para>
+        /// 【禁止在本方法内访问 ConfigStore.Current】Load 正在执行，getter 会再触发一次 Load（递归）。
+        /// 需要配置就只用传进来的 <paramref name="cfg"/>。
+        /// </para>
+        /// </summary>
+        private static void CurrentRecipeBootstrap(AppConfig cfg)
+        {
+            string recipe = (cfg.Algorithm != null && cfg.Algorithm.CurrentRecipeName != null)
+                ? cfg.Algorithm.CurrentRecipeName.Trim() : "";
+            if (recipe.Length == 0) return;      // 还没有方案：保持现状（首次运行会走默认流程）
+
+            bool appHasFlows = cfg.Flows != null && cfg.Flows.Flows != null && cfg.Flows.Flows.Count > 0;
+
+            if (appHasFlows)
+            {
+                // ① 迁移：旧版本把方案数据写在 appconfig 里，先备份再写进方案目录
+                try
+                {
+                    string bak = AppPaths.ConfigFile + ".before-split.bak";
+                    if (!File.Exists(bak) && File.Exists(AppPaths.ConfigFile))
+                    {
+                        File.Copy(AppPaths.ConfigFile, bak, true);
+                        Logger.Info("已备份拆分前的全局配置：" + bak);
+                    }
+
+                    OpResult w = ProjectBundle.WriteProjectFiles(recipe, cfg);
+                    if (w.Success)
+                        Logger.Info("已把流程/通讯/标定迁入方案目录：" + recipe
+                                    + "（此后全局配置不再保存这些数据）");
+                    else
+                        Logger.Warn("迁移方案目录失败：" + w.Message);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("迁移方案目录异常：" + ex.Message);
+                }
+                return;      // 内存里的 cfg 就是最新，无需再读盘
+            }
+
+            // ② 正常装载
+            string dir = AppPaths.RecipePath(recipe);
+            try
+            {
+                string flowsPath = Path.Combine(dir, ProjectBundle.FlowsFile);
+                if (File.Exists(flowsPath))
+                {
+                    FlowSettings fs = Json.LoadFromFile<FlowSettings>(flowsPath);
+                    if (fs != null)
+                    {
+                        FlowSettings.UpgradeToCurrent(fs);
+                        if (fs.Flows != null && fs.Flows.Count > 0)
+                        {
+                            cfg.Flows = fs;
+                            if (string.IsNullOrEmpty(cfg.Flows.ActiveFlowId)
+                                || cfg.Flows.Flows.Find(x => x != null && x.Id == cfg.Flows.ActiveFlowId) == null)
+                            {
+                                cfg.Flows.ActiveFlowId = cfg.Flows.Flows[0].Id;
+                            }
+                        }
+                    }
+                }
+
+                string commPath = Path.Combine(dir, ProjectBundle.CommFile);
+                if (File.Exists(commPath))
+                {
+                    CommSettings cs = Json.LoadFromFile<CommSettings>(commPath);
+                    if (cs != null && cs.Endpoints != null && cs.Endpoints.Count > 0)
+                    {
+                        CommSettings.UpgradeToCurrent(cs);
+                        cfg.Comm = cs;
+                    }
+                }
+
+                string calibPath = Path.Combine(dir, ProjectBundle.CalibFile);
+                if (File.Exists(calibPath))
+                {
+                    CalibSettings cal = Json.LoadFromFile<CalibSettings>(calibPath);
+                    if (cal != null)
+                    {
+                        CalibSettings.Normalize(cal);
+                        cfg.Calibrations = cal;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("从方案目录装载失败（回落到默认）：" + ex.Message);
+            }
         }
 
         /// <summary>保存配置并广播变更。</summary>
@@ -1342,7 +1445,20 @@ namespace VisionPlatform.Core
             {
                 // 配置目录可能还没建（Ensure 未跑到 / 用户手工删过）—— 保存前兜底
                 if (!Directory.Exists(AppPaths.ConfigDir)) Directory.CreateDirectory(AppPaths.ConfigDir);
-                Json.SaveToFile(AppPaths.ConfigFile, config);
+
+                // 【方案级数据不写进全局配置】流程 / 通讯 / 标定都在 Recipes\<方案>\ 下，
+                // 这里是"本机全局参数"（System / Algorithm / Ui）。两份都存必然不同步 ——
+                // 现场"改了参数、重启又在、可方案包还是旧的"就是这么来的。
+                AppConfig disk = new AppConfig
+                {
+                    System = config.System,
+                    Algorithm = config.Algorithm,
+                    Ui = config.Ui,
+                    Flows = null,
+                    Comm = null,
+                    Calibrations = null
+                };
+                Json.SaveToFile(AppPaths.ConfigFile, disk);
             }
             catch (Exception ex)
             {

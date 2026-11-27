@@ -42,6 +42,14 @@ namespace VisionPlatform.Recipe
         /// <summary>工程包内流程配置文件名。</summary>
         public const string FlowsFile = "flows.json";
 
+        /// <summary>
+        /// 工程包内标定配置文件名。
+        /// <para>【为什么归方案不归全局】标定跟"相机 + 镜头 + 工位"绑定：同一台机器换方案
+        /// （不同产品、不同工位）时标定往往不同。放全局会导致换方案后把别的工位的标定带过来，
+        /// 像素→机械坐标换算整条链全错，而且很难发现。</para>
+        /// </summary>
+        public const string CalibFile = "calibrations.json";
+
         /// <summary>工程包内模板资产子目录（与全局 <c>Templates</c> 同构）。</summary>
         public const string TemplateFolder = "Templates";
 
@@ -140,7 +148,18 @@ namespace VisionPlatform.Recipe
         /// </summary>
         public static OpResult WriteProjectFiles(string recipeName)
         {
+            return WriteProjectFiles(recipeName, ConfigStore.Current);
+        }
+
+        /// <summary>
+        /// 把指定配置里的<strong>方案级</strong>数据写进方案目录（通讯 / 流程 / 标定）。
+        /// <para>【为什么要传 cfg】迁移时 <c>ConfigStore.Current</c> 还没指向新对象，
+        /// 用静态属性会写到旧数据上。</para>
+        /// </summary>
+        public static OpResult WriteProjectFiles(string recipeName, AppConfig cfg)
+        {
             if (string.IsNullOrWhiteSpace(recipeName)) return OpResult.Fail("方案名为空");
+            if (cfg == null) return OpResult.Fail("配置为空");
 
             try
             {
@@ -148,11 +167,12 @@ namespace VisionPlatform.Recipe
                 Directory.CreateDirectory(dir);
                 Directory.CreateDirectory(Path.Combine(dir, TemplateFolder));
 
-                AppConfig cfg = ConfigStore.Current;
                 if (cfg.Comm != null)
                     Json.SaveToFile(Path.Combine(dir, CommFile), cfg.Comm);
                 if (cfg.Flows != null)
                     Json.SaveToFile(Path.Combine(dir, FlowsFile), cfg.Flows);
+                if (cfg.Calibrations != null)
+                    Json.SaveToFile(Path.Combine(dir, CalibFile), cfg.Calibrations);
 
                 return OpResult.Ok("工程配置已写入 " + dir);
             }
@@ -238,6 +258,18 @@ namespace VisionPlatform.Recipe
                     if (fs.Flows == null || fs.Flows.Count == 0)
                         return OpResult.Fail("流程配置里没有任何流程，已放弃导入（当前工程未改动）");
                     cfg.Flows = fs;
+                }
+
+                // ③b 标定
+                string calibPath = Path.Combine(dir, CalibFile);
+                if (File.Exists(calibPath))
+                {
+                    var cal = Json.LoadFromFile<VisionPlatform.Calibration.CalibSettings>(calibPath);
+                    if (cal != null)
+                    {
+                        VisionPlatform.Calibration.CalibSettings.Normalize(cal);
+                        cfg.Calibrations = cal;
+                    }
                 }
 
                 // ④ 落盘：ConfigStore.Changed 会让 CommRegistry 按新端点重建连接

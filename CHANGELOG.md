@@ -3,6 +3,56 @@
 > 版本号规则见 [README「版本管理」](README.md#8-版本管理)。
 > 每次发布前用 `version.bat <版本>` 同步程序集版本与本文件顶部版本块。
 
+## 1.0.16.0 — 2026-11-27
+
+**全局配置与方案数据彻底分离：`appconfig.json` 只留本机参数，流程/通讯/标定归方案目录。**
+
+改造前 `AppConfig` 一个文件里装了六段，其中三段是**方案级**的：
+
+| 字段 | 内容 | 归属 |
+|---|---|---|
+| `System`（12 项） | 图像保存、运行模式、许可 | 本机全局 |
+| `Algorithm`（3 项） | 当前方案名、线程数 | 本机全局 |
+| `Ui`（12 项） | 布局、视图绑定、主题 | 本机全局 |
+| **`Flows`** | **4 条流程及全部节点参数** | **方案** |
+| **`Comm`** | **端点 / 点位 / 模板 / 任务 / 流程绑定** | **方案** |
+| **`Calibrations`** | **N 点标定 / 旋转中心 / 畸变** | **方案**（按确认） |
+
+两份都存必然不同步。现场"改了得分、重启又在、可 `Recipes` 里的方案包还是 11 天前的"
+就是它造成的 —— 而导出副本一旦拿去另一台机器部署，参数全丢且无从察觉。
+
+### 目标结构
+
+```
+Config/appconfig.json      ← 只留 System / Algorithm / Ui（本机）
+Recipes/<方案>/
+  flows.json               ← 流程（含全部节点参数）
+  comm.json                ← 通讯
+  calibrations.json        ← 标定（新增）
+  recipe.json  Templates/  Images/  Models/  OCRModel/
+```
+
+- `ConfigStore.Save` 写盘时**剥离** Flows / Comm / Calibrations（内存里仍保留，供运行时使用）。
+- `ConfigStore.Load` 末尾新增 `CurrentRecipeBootstrap`：按 `Algorithm.CurrentRecipeName`
+  从方案目录装载这三段。
+- **一次性迁移**：若 `appconfig.json` 里还有流程数据（旧版本写的），先备份成
+  `appconfig.json.before-split.bak`，再以它为准写进方案目录，然后内存直接使用 ——
+  迁移只会在文件未被新版 Save 覆写时发生，**天然只执行一次**。
+- `ProjectBundle` 增加 `calibrations.json` 的读写；`WriteProjectFiles` 增加接收 `AppConfig`
+  的重载（迁移时 `ConfigStore.Current` 还没指向新对象，用静态属性会写错数据）。
+- **`RecipeStore.Save` 写方案目录失败时改为返回失败**（原来只 `Logger.Warn` 仍报"保存成功"）。
+  方案目录现在是唯一真源，静默失败等于让用户以为存住了。
+
+### 验证
+
+新增 5 条断言（SmokeAlgo 485 → **490**）覆盖：旧配置迁移、流程条数、迁移后内存可用、
+全局配置不再持久化流程、全局配置仍保留 System / Ui。全部通过。
+
+- 回归：SmokeAlgo **490/0**；SmokeUi **1166/6**（既有基线）。
+
+> **风险与回滚**：首次启动会自动迁移并留下 `appconfig.json.before-split.bak`。
+> 若要回退到旧结构，把该备份改名回 `appconfig.json` 即可（旧版程序只认这一个文件）。
+
 ## 1.0.15.3 — 2026-11-27
 
 **搜索区域为"整幅"时也画出边框，并标注「（全图）」。**
