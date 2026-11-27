@@ -3,6 +3,28 @@
 > 版本号规则见 [README「版本管理」](README.md#8-版本管理)。
 > 每次发布前用 `version.bat <版本>` 同步程序集版本与本文件顶部版本块。
 
+## 1.0.15.1 — 2026-11-27
+
+**搜索区域现在会显示在主界面的结果视图里（不只是流程预览面板）。**
+
+1.0.15.0 只修了**流程预览面板**那条路径（`FlowProgressSnapshot.AuxShapes`），
+但主界面的结果视图走的是另一条路：`FlowOutputChannel.OutputReady` →
+`MainForm.OnFlowOutput` → `PendingFlowOutput`，而 `FlowOutputEventArgs` 里**根本没有 AuxShapes**。
+于是同一个界面上会出现"左边视图有搜索框、右边视图没有"的怪现象 ——
+
+- `FlowOutputEventArgs` 新增 `AuxShapes`；
+- `FlowRunner` 发布结果时一并回传 `result.AuxShapes`；
+- `PendingFlowOutput` 增加同名字段，`OnFlowOutput` 取出后在 `view.ClearShapes()` 之后
+  与结果图形一起 Add 进视图。
+- 主界面视图没有「轮廓」开关，辅助几何**直接画**；每个框带节点名标签
+  （「形状匹配区域」「异常检测区域」…），多节点重叠时能分辨。
+
+- 回归：SmokeAlgo **485/0**；SmokeUi **1165/7**。
+  其中 6 条是既有基线（SIM-0 相机、OCR 目录、结果表列数），
+  另 1 条 `新图首帧建层耗时 < 40ms` 实测 40.7~51.4ms —— 它测的是
+  `ImageViewer.DrawToBitmap()`（测试自建的空 viewer，不经过 MainForm、没有叠加图形），
+  与本次改动无关，属于临界性能断言在机器负载下的波动。**未改阈值掩盖。**
+
 ## 1.0.15.0 — 2026-11-27
 
 **把搜索区域真正画到主界面上（含节点名标签），并修掉继承的两处隐藏 bug。**

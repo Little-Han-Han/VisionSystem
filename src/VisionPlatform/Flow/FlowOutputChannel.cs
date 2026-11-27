@@ -34,6 +34,17 @@ namespace VisionPlatform.Flow
         /// <summary>叠加图形（图像坐标）。</summary>
         public List<IGeometryShape> Shapes { get; set; }
 
+        /// <summary>
+        /// 辅助几何（搜索区域轮廓 / 卡尺窗口 / OCR 区域…，图像坐标）。
+        /// <para>
+        /// 【为什么要跟着结果一起回传】主界面的结果视图走的是本事件，不是流程预览面板的快照。
+        /// 只传 <see cref="Shapes"/> 时，界面上看不到任何搜索区域 ——
+        /// 现场看到"缺陷框落在框外"时，连"算法在哪块区域里干活"都无从判断。
+        /// 预览面板那条路径由 <c>FlowProgressSnapshot.AuxShapes</c> 承担，两条都要给。
+        /// </para>
+        /// </summary>
+        public List<IGeometryShape> AuxShapes { get; set; }
+
         /// <summary>总体结论。</summary>
         public bool Passed { get; set; }
 

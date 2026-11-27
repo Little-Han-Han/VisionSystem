@@ -208,6 +208,7 @@ namespace VisionPlatform.UI
             public Bitmap Frame;                 // 输出图像（原图；所有权在此，替换时释放）
             public Bitmap DisplayFrame;          // 显示用合成帧（掩膜/伪彩）；为空则显示 Frame
             public List<IGeometryShape> Shapes;  // 最新叠加图形（引用，不克隆）
+            public List<IGeometryShape> AuxShapes;  // 搜索区域轮廓等辅助几何（引用，不克隆）
             public VisionSystem.Controls.PointCloud.PointCloudData Cloud;  // 3D 点云（引用，无释放手续）；非空时优先显示
             public bool Passed;
             public string Summary = "";
@@ -3059,6 +3060,7 @@ namespace VisionPlatform.UI
                 slot.Frame = e.Frame;            // 取得帧所有权（原事件持有）
                 e.DisplayFrame = null;
                 slot.Shapes = e.Shapes;
+                slot.AuxShapes = e.AuxShapes;
                 slot.Cloud = e.Cloud;            // 引用即可（托管数据）
                 slot.Passed = e.Passed;
                 slot.Summary = e.Summary ?? "";
@@ -3078,6 +3080,7 @@ namespace VisionPlatform.UI
                     Bitmap frame;
                     Bitmap displayFrame;
                     List<IGeometryShape> shapes;
+                    List<IGeometryShape> auxShapes;
                     VisionSystem.Controls.PointCloud.PointCloudData cloud;
                     bool passed;
                     string summary;
@@ -3097,6 +3100,7 @@ namespace VisionPlatform.UI
                         cloud = s.Cloud;
                         s.Cloud = null;
                         shapes = s.Shapes;
+                        auxShapes = s.AuxShapes;
                         passed = s.Passed;
                         summary = s.Summary;
                         cameraName = s.CameraName;
@@ -3104,6 +3108,7 @@ namespace VisionPlatform.UI
                         s.Frame = null;   // 取出，下方交由视图或释放处理
                         s.DisplayFrame = null;
                         s.Shapes = null;
+                        s.AuxShapes = null;
                     }
 
                     if (IsDisposed || !IsHandleCreated)
@@ -3185,6 +3190,13 @@ namespace VisionPlatform.UI
                         if (shapes != null)
                         {
                             foreach (IGeometryShape sh in shapes)
+                                if (sh != null) view.Shapes.Add(sh);
+                        }
+                        // 搜索区域等辅助几何：主界面没有「轮廓」开关，直接画出来。
+                        // 每个框都带节点名标签（「形状匹配区域」…），多个节点重叠时也能分辨。
+                        if (auxShapes != null)
+                        {
+                            foreach (IGeometryShape sh in auxShapes)
                                 if (sh != null) view.Shapes.Add(sh);
                         }
                         view.Shapes.NotifyChanged();   // 改几何后必须通知重绘

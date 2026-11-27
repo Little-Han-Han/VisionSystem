@@ -549,6 +549,7 @@ namespace VisionPlatform.Flow
                         ViewIndex = flow != null ? flow.ViewIndex : 1,
                         Frame = session.Current,
                         Shapes = result.Shapes,
+                        AuxShapes = result.AuxShapes,
                         Passed = result.Passed,
                         Summary = result.Summary,
                         CameraName = (camera != null && camera.Info != null) ? camera.Info.Name : "本地图片",
