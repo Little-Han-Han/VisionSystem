@@ -204,7 +204,74 @@ namespace VisionPlatform.UI
 
         /// <summary>某视图当前待显示的最新结果（覆盖式合帧用）。</summary>
         /// <summary>构建标记：用于确认运行中的 exe 是否包含"搜索区域渲染"这版代码。</summary>
-        public const string BuildTagAuxRender = "AUX_RENDER_V151";
+        public const string BuildTagAuxRender = "AUX_RENDER_V151_BAKED";
+
+        /// <summary>辅助几何标注用的字体（进程级缓存；每帧 new Font 会造成 GDI 句柄泄漏）。</summary>
+        private static Font _auxOverlayFont;
+        private static Font AuxOverlayFont
+        {
+            get
+            {
+                if (_auxOverlayFont == null)
+                    _auxOverlayFont = new Font("Microsoft YaHei", 40f, FontStyle.Bold, GraphicsUnit.Pixel);
+                return _auxOverlayFont;
+            }
+        }
+
+        /// <summary>
+        /// 把辅助几何（搜索区域 / 卡尺窗口 / OCR 区域）直接画进位图像素。
+        /// <para>
+        /// 【为什么不用 view.Shapes 叠加层】那层是否可见取决于视图类型、标签渲染、重绘时机，
+        /// 出问题时几乎无法从代码上证明。画进像素是"像素级"的，画上去就一定看得见。
+        /// </para>
+        /// <para>线宽与字号按图像宽度缩放，否则 5MP 图上 2px 的线缩到 400px 视图里就消失了。</para>
+        /// </summary>
+        private static void DrawAuxShapesOnBitmap(Bitmap bmp, List<IGeometryShape> shapes)
+        {
+            if (bmp == null || shapes == null || shapes.Count == 0) return;
+
+            float k = Math.Max(1f, bmp.Width / 400f);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+                foreach (IGeometryShape sh in shapes)
+                {
+                    if (sh == null) continue;
+                    RectangleF b = sh.Bounds;
+                    if (b.Width <= 0 || b.Height <= 0) continue;
+
+                    using (var pen = new Pen(sh.StrokeColor, Math.Max(3f, sh.LineWidth * k)))
+                    {
+                        // 贴边时向内缩半个线宽，避免线被图像边界裁掉一半
+                        float inset = pen.Width / 2f;
+                        g.DrawRectangle(pen, b.X + inset, b.Y + inset,
+                                        Math.Max(1f, b.Width - pen.Width),
+                                        Math.Max(1f, b.Height - pen.Width));
+                    }
+
+                    // Label 只定义在 RectangleShape / RotatedRectShape 上，接口里没有
+                    string label = null;
+                    RotatedRectShape rr = sh as RotatedRectShape;
+                    if (rr != null) label = rr.Label;
+                    else
+                    {
+                        RectangleShape rc = sh as RectangleShape;
+                        if (rc != null) label = rc.Label;
+                    }
+
+                    if (!string.IsNullOrEmpty(label))
+                    {
+                        using (var brush = new SolidBrush(sh.StrokeColor))
+                        {
+                            float ty = b.Y - 48f * k;
+                            if (ty < 0) ty = b.Y + 8f * k;
+                            g.DrawString(label, AuxOverlayFont, brush, b.X + 4f * k, ty);
+                        }
+                    }
+                }
+            }
+        }
 
 
         private sealed class PendingFlowOutput
@@ -3057,6 +3124,27 @@ namespace VisionPlatform.UI
                 }
                 if (slot.Frame != null) slot.Frame.Dispose();   // 旧帧被替换，立即释放
                 if (slot.DisplayFrame != null) slot.DisplayFrame.Dispose();
+
+                // 【把搜索区域直接画进显示帧的像素】不依赖 view.Shapes 叠加层。
+                // 现场反复出现"主界面看不到搜索区域"，而数据链路已逐段验证过
+                // （节点画了 → 结果汇总了 → 事件携带了）；叠加层还取决于视图类型、
+                // 标签样式、重绘时机等一堆细节，排查成本极高。画进像素是一步到位的办法。
+                // 只克隆显示帧，**不动原始输出帧**（那要保存/给下游/别的流程用）。
+                if (e.AuxShapes != null && e.AuxShapes.Count > 0)
+                {
+                    Bitmap basis = e.DisplayFrame ?? e.Frame;
+                    if (basis != null)
+                    {
+                        try
+                        {
+                            Bitmap composed = (Bitmap)basis.Clone();
+                            DrawAuxShapesOnBitmap(composed, e.AuxShapes);
+                            if (e.DisplayFrame != null) e.DisplayFrame.Dispose();
+                            e.DisplayFrame = composed;
+                        }
+                        catch (Exception ex) { Logger.Warn("绘制搜索区域失败：" + ex.Message); }
+                    }
+                }
 
                 // 显示用合成帧（深度学习掩膜/伪彩）；没有就用原图帧。
                 // 两者都接管所有权：Frame 是"输出图像"，DisplayFrame 只用于看。
