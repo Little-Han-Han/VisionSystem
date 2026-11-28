@@ -1446,6 +1446,20 @@ namespace VisionPlatform.Core
                 // 配置目录可能还没建（Ensure 未跑到 / 用户手工删过）—— 保存前兜底
                 if (!Directory.Exists(AppPaths.ConfigDir)) Directory.CreateDirectory(AppPaths.ConfigDir);
 
+                // 【先同步方案目录，再写全局配置 —— 顺序不能反】
+                // 方案级数据（流程 / 通讯 / 标定）的唯一真源是 Recipes\<方案>\。
+                // 若这里不同步，UI 保存流程时就只有 appconfig 被写，而它又被下面的
+                // "剥离"逻辑剔掉了方案字段 —— 结果就是"保存了、重启后全丢"。
+                // 这是 1.0.16.0 引入的严重回归，1.0.16.2 修复。
+                string recipeName = (config.Algorithm != null && config.Algorithm.CurrentRecipeName != null)
+                    ? config.Algorithm.CurrentRecipeName.Trim() : "";
+                if (recipeName.Length > 0)
+                {
+                    OpResult sync = ProjectBundle.WriteProjectFiles(recipeName, config);
+                    if (!sync.Success)
+                        Logger.Error("方案数据同步失败（流程/通讯/标定未落盘）：" + sync.Message);
+                }
+
                 // 【方案级数据不写进全局配置】流程 / 通讯 / 标定都在 Recipes\<方案>\ 下，
                 // 这里是"本机全局参数"（System / Algorithm / Ui）。两份都存必然不同步 ——
                 // 现场"改了参数、重启又在、可方案包还是旧的"就是这么来的。
