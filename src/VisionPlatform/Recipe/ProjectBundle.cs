@@ -167,10 +167,38 @@ namespace VisionPlatform.Recipe
                 Directory.CreateDirectory(dir);
                 Directory.CreateDirectory(Path.Combine(dir, TemplateFolder));
 
+                // 【防误清零护栏】新数据里流程全是空壳（无节点）时，不覆盖已有内容的 flows.json。
+                // 触发场景：装载失败 → Normalize 自动补了一条空的"流程 1" → 保存时写回 →
+                // 真实流程被永久覆盖（现场事故：4 条流程变成 1 条空流程）。
+                // 只在"文件里确实有节点"时拦 —— 用户主动删光流程仍可正常保存。
+                if (cfg.Flows != null)
+                {
+                    bool newIsHollow = true;
+                    if (cfg.Flows.Flows != null)
+                        foreach (var nf in cfg.Flows.Flows)
+                            if (nf != null && nf.Nodes != null && nf.Nodes.Count > 0) { newIsHollow = false; break; }
+
+                    if (newIsHollow)
+                    {
+                        string existingPath = Path.Combine(dir, FlowsFile);
+                        if (File.Exists(existingPath))
+                        {
+                            FlowSettings oldFs = Json.LoadFromFile<FlowSettings>(existingPath);
+                            int oldNodes = 0;
+                            if (oldFs != null && oldFs.Flows != null)
+                                foreach (var of in oldFs.Flows)
+                                    if (of != null && of.Nodes != null) oldNodes += of.Nodes.Count;
+
+                            if (oldNodes > 0)
+                                return OpResult.Fail(string.Format(
+                                    "拒绝覆盖 flows.json：当前内存里没有任何流程节点，"
+                                    + "而方案目录里已有 {0} 个节点（疑似装载失败）。已保护现有数据。", oldNodes));
+                        }
+                    }
+                    Json.SaveToFile(Path.Combine(dir, FlowsFile), cfg.Flows);
+                }
                 if (cfg.Comm != null)
                     Json.SaveToFile(Path.Combine(dir, CommFile), cfg.Comm);
-                if (cfg.Flows != null)
-                    Json.SaveToFile(Path.Combine(dir, FlowsFile), cfg.Flows);
                 if (cfg.Calibrations != null)
                     Json.SaveToFile(Path.Combine(dir, CalibFile), cfg.Calibrations);
 
