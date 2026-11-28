@@ -1034,6 +1034,11 @@ namespace VisionPlatform.Flow
                 Frame = frame,
                 DisplayFrame = displayFrame,
                 Shapes = res != null ? res.Shapes : null,
+                // 【单步 / 运行本节点 的主界面回传也要带辅助几何】
+                // 这条路径与 FlowRunner.Run（连续运行）是两套独立的事件构造。
+                // 只传 Shapes 会让搜索区域只在连续运行时出现、单步时永远看不到 ——
+                // 现场长期用单步调试，于是"怎么都不显示"。
+                AuxShapes = res != null ? res.AuxShapes : null,
                 Passed = res != null && res.Success && res.Passed,
                 Summary = res != null ? (res.Summary ?? "") : "",
                 ElapsedMs = res != null ? res.ElapsedMs : 0,

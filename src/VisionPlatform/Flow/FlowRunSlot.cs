@@ -572,6 +572,9 @@ namespace VisionPlatform.Flow
                 ViewIndex = ViewIndex,
                 Frame = frame,
                 Shapes = result != null ? result.Shapes : null,
+                // 与 FlowRunner.Run / FlowRunController.PublishOutput 保持一致：
+                // 三条结果发布路径都必须带辅助几何，否则搜索区域时隐时现。
+                AuxShapes = result != null ? result.AuxShapes : null,
                 Passed = result != null && result.Passed,
                 Summary = result != null ? (result.Summary ?? "") : "",
                 ElapsedMs = result != null ? result.ElapsedMs : 0,
