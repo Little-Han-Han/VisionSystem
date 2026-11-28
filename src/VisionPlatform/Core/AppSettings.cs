@@ -1355,7 +1355,23 @@ namespace VisionPlatform.Core
                 ? cfg.Algorithm.CurrentRecipeName.Trim() : "";
             if (recipe.Length == 0) return;      // 还没有方案：保持现状（首次运行会走默认流程）
 
-            bool appHasFlows = cfg.Flows != null && cfg.Flows.Flows != null && cfg.Flows.Flows.Count > 0;
+            // 【不能只看 Count】Load 在调用本方法之前会"为空则补一条空流程"（见上文
+            // "首次运行 / 旧配置没有流程时，补一条空流程"），所以 Count 恒 ≥ 1。
+            // 若只看数量，就会把"补出来的空壳"误判成"旧版残留的方案数据"，走迁移分支后直接 return，
+            // 从而**永久跳过装载** —— 现场表现为"启动后全是空流程，手动加载才正常"。
+            // 判据必须落到"流程里真的有节点"。
+            bool appHasFlows = false;
+            if (cfg.Flows != null && cfg.Flows.Flows != null)
+            {
+                foreach (FlowDefinition amf in cfg.Flows.Flows)
+                {
+                    if (amf != null && amf.Nodes != null && amf.Nodes.Count > 0)
+                    {
+                        appHasFlows = true;
+                        break;
+                    }
+                }
+            }
 
             if (appHasFlows)
             {
